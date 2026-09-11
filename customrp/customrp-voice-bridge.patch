@@ -1,0 +1,1290 @@
+diff --git a/CustomRPC/CustomRPC.csproj b/CustomRPC/CustomRPC.csproj
+index c892863..e72e404 100644
+--- a/CustomRPC/CustomRPC.csproj
++++ b/CustomRPC/CustomRPC.csproj
+@@ -83,6 +83,7 @@
+     <Reference Include="System.Deployment" />
+     <Reference Include="System.Drawing" />
+     <Reference Include="System.Net.Http" />
++    <Reference Include="System.Web.Extensions" />
+     <Reference Include="System.Windows.Forms" />
+     <Reference Include="System.Xml" />
+   </ItemGroup>
+@@ -124,6 +125,13 @@
+     <Compile Include="TimestampFileLogger.cs" />
+     <Compile Include="Utils.cs" />
+     <Compile Include="VersionHelper.cs" />
++    <Compile Include="VoiceBridge.cs" />
++    <Compile Include="VoiceBridgeForm.cs">
++      <SubType>Form</SubType>
++    </Compile>
++    <Compile Include="VoiceBridgeForm.Designer.cs">
++      <DependentUpon>VoiceBridgeForm.cs</DependentUpon>
++    </Compile>
+     <Compile Include="UpdatePrompt.cs">
+       <SubType>Form</SubType>
+     </Compile>
+diff --git a/CustomRPC/MainForm.Designer.cs b/CustomRPC/MainForm.Designer.cs
+index be75b18..9fcdb04 100644
+--- a/CustomRPC/MainForm.Designer.cs
++++ b/CustomRPC/MainForm.Designer.cs
+@@ -54,6 +54,7 @@
+             this.runOnStartupToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+             this.startMinimizedToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+             this.autoconnectToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
++            this.voiceBridgeToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+             this.toolStripSeparatorSettings1 = new System.Windows.Forms.ToolStripSeparator();
+             this.checkUpdatesToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+             this.allowAnalyticsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+@@ -284,6 +285,7 @@
+             this.runOnStartupToolStripMenuItem,
+             this.startMinimizedToolStripMenuItem,
+             this.autoconnectToolStripMenuItem,
++            this.voiceBridgeToolStripMenuItem,
+             this.toolStripSeparatorSettings1,
+             this.checkUpdatesToolStripMenuItem,
+             this.allowAnalyticsToolStripMenuItem,
+@@ -319,6 +321,13 @@
+             resources.ApplyResources(this.autoconnectToolStripMenuItem, "autoconnectToolStripMenuItem");
+             this.autoconnectToolStripMenuItem.CheckedChanged += new System.EventHandler(this.SaveMenuSettings);
+             // 
++            // voiceBridgeToolStripMenuItem
++            // 
++            this.voiceBridgeToolStripMenuItem.Name = "voiceBridgeToolStripMenuItem";
++            this.voiceBridgeToolStripMenuItem.Size = new System.Drawing.Size(215, 22);
++            this.voiceBridgeToolStripMenuItem.Text = global::CustomRPC.Strings.voiceMenuItem;
++            this.voiceBridgeToolStripMenuItem.Click += new System.EventHandler(this.OpenVoiceBridgeSettings);
++            // 
+             // toolStripSeparatorSettings1
+             // 
+             this.toolStripSeparatorSettings1.Name = "toolStripSeparatorSettings1";
+@@ -1288,6 +1297,7 @@
+         private System.Windows.Forms.ToolStripMenuItem checkForUpdatesToolStripMenuItem;
+         private System.Windows.Forms.ToolStripMenuItem openToolStripMenuItem;
+         private System.Windows.Forms.ToolStripMenuItem autoconnectToolStripMenuItem;
++        private System.Windows.Forms.ToolStripMenuItem voiceBridgeToolStripMenuItem;
+         private System.Windows.Forms.ToolStripMenuItem trayMenuDisconnect;
+         private System.Windows.Forms.ToolStripSeparator toolStripSeparator3;
+         private System.Windows.Forms.ToolStripMenuItem allowAnalyticsToolStripMenuItem;
+diff --git a/CustomRPC/MainForm.cs b/CustomRPC/MainForm.cs
+index 36187fa..3f1508b 100644
+--- a/CustomRPC/MainForm.cs
++++ b/CustomRPC/MainForm.cs
+@@ -158,6 +158,11 @@ namespace CustomRPC
+         /// </summary>
+         Timer localTimeTimer = new Timer();
+ 
++        /// <summary>
++        /// Reads the voice channel the user is sitting in from the companion bot.
++        /// </summary>
++        VoiceBridge voiceBridge = new VoiceBridge();
++
+         /// <summary>
+         /// Settings of the application. Self-explanatory.
+         /// </summary>
+@@ -277,6 +282,10 @@ namespace CustomRPC
+             localTimeTimer.AutoReset = false;
+             localTimeTimer.Elapsed += LocalTimeTimer_Elapsed;
+ 
++            // Setting up the voice channel bridge
++            voiceBridge.StatusChanged += VoiceStatusChanged;
++            ApplyVoiceSettings();
++
+             // If we supply a preset file to import on load, load it right away
+             if (preset is string)
+                 LoadPreset(preset);
+@@ -1067,6 +1076,8 @@ namespace CustomRPC
+                     break;
+             }
+ 
++            ApplyVoiceStatus(rp);
++
+             try
+             {
+                 client.SetPresence(rp);
+@@ -1085,6 +1096,75 @@ namespace CustomRPC
+             return true;
+         }
+ 
++        /// <summary>
++        /// Replaces the presence text with the voice channel the user is sitting in.
++        /// </summary>
++        /// <remarks>
++        /// Deliberately the last thing to touch the presence, and a no-op whenever the user isn't
++        /// in voice: the rest of the time the presence set up in the main window stays in charge.
++        /// </remarks>
++        private void ApplyVoiceStatus(RichPresence rp)
++        {
++            if (!settings.voiceEnabled)
++                return;
++
++            var status = voiceBridge.Status;
++
++            // No answer from the bot, or the user left the channel — nothing to show
++            if (status == null || !status.InVoice)
++                return;
++
++            rp.Details = status.Format(settings.voiceDetails);
++            rp.State = status.Format(settings.voiceState);
++
++            if (settings.voiceTimestamp)
++                rp.Timestamps = new Timestamps(status.Since);
++        }
++
++        /// <summary>
++        /// Starts or stops polling the bot, depending on whether the feature is turned on.
++        /// </summary>
++        private void ApplyVoiceSettings()
++        {
++            if (settings.voiceEnabled)
++                voiceBridge.Start(settings.voiceUrl, settings.voiceToken);
++            else
++                voiceBridge.Stop();
++        }
++
++        /// <summary>
++        /// Called when the user joins or leaves a voice channel.
++        /// </summary>
++        /// <remarks>
++        /// Raised on the bridge's own thread, hence the invoke. Only fires when something actually
++        /// changed, so this can't spam Discord's presence rate limit.
++        /// </remarks>
++        private void VoiceStatusChanged(object sender, EventArgs e)
++        {
++            // The first poll is fired off from the constructor and can come back before the window
++            // exists, and Invoke throws on a form without a handle.
++            if (!settings.voiceEnabled || !IsHandleCreated || client == null || client.IsDisposed)
++                return;
++
++            Invoke(new MethodInvoker(() => SetPresence()));
++        }
++
++        /// <summary>
++        /// Called when you click Settings -> Voice channel status.
++        /// </summary>
++        private void OpenVoiceBridgeSettings(object sender, EventArgs e)
++        {
++            // The window polls the bot while it's open so a wrong address shows up right there
++            using (var form = new VoiceBridgeForm(voiceBridge))
++                form.ShowDialog(this);
++
++            Utils.SaveSettings();
++            ApplyVoiceSettings();
++
++            if (client != null && !client.IsDisposed)
++                SetPresence();
++        }
++
+         /// <summary>
+         /// Sets up the startup link for the app.
+         /// </summary>
+@@ -1421,6 +1501,8 @@ namespace CustomRPC
+             if (client != null)
+                 client.Dispose();
+ 
++            voiceBridge.Dispose();
++
+             if (Utils.SaveSettings())
+                 Application.Exit();
+         }
+diff --git a/CustomRPC/Properties/Settings.Designer.cs b/CustomRPC/Properties/Settings.Designer.cs
+index 1ef8db6..0e55179 100644
+--- a/CustomRPC/Properties/Settings.Designer.cs
++++ b/CustomRPC/Properties/Settings.Designer.cs
+@@ -478,5 +478,77 @@ namespace CustomRPC.Properties {
+                 this["smallURL"] = value;
+             }
+         }
++        
++        [global::System.Configuration.UserScopedSettingAttribute()]
++        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
++        [global::System.Configuration.DefaultSettingValueAttribute("False")]
++        public bool voiceEnabled {
++            get {
++                return ((bool)(this["voiceEnabled"]));
++            }
++            set {
++                this["voiceEnabled"] = value;
++            }
++        }
++        
++        [global::System.Configuration.UserScopedSettingAttribute()]
++        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
++        [global::System.Configuration.DefaultSettingValueAttribute("http://127.0.0.1:7373/voice")]
++        public string voiceUrl {
++            get {
++                return ((string)(this["voiceUrl"]));
++            }
++            set {
++                this["voiceUrl"] = value;
++            }
++        }
++        
++        [global::System.Configuration.UserScopedSettingAttribute()]
++        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
++        [global::System.Configuration.DefaultSettingValueAttribute("")]
++        public string voiceToken {
++            get {
++                return ((string)(this["voiceToken"]));
++            }
++            set {
++                this["voiceToken"] = value;
++            }
++        }
++        
++        [global::System.Configuration.UserScopedSettingAttribute()]
++        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
++        [global::System.Configuration.DefaultSettingValueAttribute("{server}")]
++        public string voiceDetails {
++            get {
++                return ((string)(this["voiceDetails"]));
++            }
++            set {
++                this["voiceDetails"] = value;
++            }
++        }
++        
++        [global::System.Configuration.UserScopedSettingAttribute()]
++        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
++        [global::System.Configuration.DefaultSettingValueAttribute("{channel}")]
++        public string voiceState {
++            get {
++                return ((string)(this["voiceState"]));
++            }
++            set {
++                this["voiceState"] = value;
++            }
++        }
++        
++        [global::System.Configuration.UserScopedSettingAttribute()]
++        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
++        [global::System.Configuration.DefaultSettingValueAttribute("True")]
++        public bool voiceTimestamp {
++            get {
++                return ((bool)(this["voiceTimestamp"]));
++            }
++            set {
++                this["voiceTimestamp"] = value;
++            }
++        }
+     }
+ }
+diff --git a/CustomRPC/Properties/Settings.settings b/CustomRPC/Properties/Settings.settings
+index 345f1b2..89880fa 100644
+--- a/CustomRPC/Properties/Settings.settings
++++ b/CustomRPC/Properties/Settings.settings
+@@ -116,5 +116,23 @@
+     <Setting Name="darkMode" Type="System.Boolean" Scope="User">
+       <Value Profile="(Default)">True</Value>
+     </Setting>
++    <Setting Name="voiceEnabled" Type="System.Boolean" Scope="User">
++      <Value Profile="(Default)">False</Value>
++    </Setting>
++    <Setting Name="voiceUrl" Type="System.String" Scope="User">
++      <Value Profile="(Default)">http://127.0.0.1:7373/voice</Value>
++    </Setting>
++    <Setting Name="voiceToken" Type="System.String" Scope="User">
++      <Value Profile="(Default)" />
++    </Setting>
++    <Setting Name="voiceDetails" Type="System.String" Scope="User">
++      <Value Profile="(Default)">{server}</Value>
++    </Setting>
++    <Setting Name="voiceState" Type="System.String" Scope="User">
++      <Value Profile="(Default)">{channel}</Value>
++    </Setting>
++    <Setting Name="voiceTimestamp" Type="System.Boolean" Scope="User">
++      <Value Profile="(Default)">True</Value>
++    </Setting>
+   </Settings>
+ </SettingsFile>
+\ No newline at end of file
+diff --git a/CustomRPC/Strings.Designer.cs b/CustomRPC/Strings.Designer.cs
+index d49eeec..96a5289 100644
+--- a/CustomRPC/Strings.Designer.cs
++++ b/CustomRPC/Strings.Designer.cs
+@@ -336,5 +336,167 @@ namespace CustomRPC {
+                 return ResourceManager.GetString("statusUpdatingPresence", resourceCulture);
+             }
+         }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на Voice channel status....
++        /// </summary>
++        internal static string voiceMenuItem {
++            get {
++                return ResourceManager.GetString("voiceMenuItem", resourceCulture);
++            }
++        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на Voice channel status.
++        /// </summary>
++        internal static string voiceTitle {
++            get {
++                return ResourceManager.GetString("voiceTitle", resourceCulture);
++            }
++        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на Show the voice channel I'm sitting in.
++        /// </summary>
++        internal static string voiceEnable {
++            get {
++                return ResourceManager.GetString("voiceEnable", resourceCulture);
++            }
++        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на Bot address:.
++        /// </summary>
++        internal static string voiceEndpoint {
++            get {
++                return ResourceManager.GetString("voiceEndpoint", resourceCulture);
++            }
++        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на Shared secret:.
++        /// </summary>
++        internal static string voiceSecret {
++            get {
++                return ResourceManager.GetString("voiceSecret", resourceCulture);
++            }
++        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на Top line:.
++        /// </summary>
++        internal static string voiceDetailsLabel {
++            get {
++                return ResourceManager.GetString("voiceDetailsLabel", resourceCulture);
++            }
++        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на Bottom line:.
++        /// </summary>
++        internal static string voiceStateLabel {
++            get {
++                return ResourceManager.GetString("voiceStateLabel", resourceCulture);
++            }
++        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на Placeholders: {server}, {channel}, {members}.
++        /// </summary>
++        internal static string voicePlaceholders {
++            get {
++                return ResourceManager.GetString("voicePlaceholders", resourceCulture);
++            }
++        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на Count the time spent in the channel.
++        /// </summary>
++        internal static string voiceUseTimestamp {
++            get {
++                return ResourceManager.GetString("voiceUseTimestamp", resourceCulture);
++            }
++        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на Check.
++        /// </summary>
++        internal static string voiceCheck {
++            get {
++                return ResourceManager.GetString("voiceCheck", resourceCulture);
++            }
++        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на Turned off..
++        /// </summary>
++        internal static string voiceStatusOff {
++            get {
++                return ResourceManager.GetString("voiceStatusOff", resourceCulture);
++            }
++        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на Asking the bot....
++        /// </summary>
++        internal static string voiceStatusChecking {
++            get {
++                return ResourceManager.GetString("voiceStatusChecking", resourceCulture);
++            }
++        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на The bot is not answering ({0}). Is it running?.
++        /// </summary>
++        internal static string voiceStatusNoBot {
++            get {
++                return ResourceManager.GetString("voiceStatusNoBot", resourceCulture);
++            }
++        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на The bot is running, but has lost its connection to Discord..
++        /// </summary>
++        internal static string voiceStatusOffline {
++            get {
++                return ResourceManager.GetString("voiceStatusOffline", resourceCulture);
++            }
++        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на The bot is connected. You are not in a voice channel..
++        /// </summary>
++        internal static string voiceStatusIdle {
++            get {
++                return ResourceManager.GetString("voiceStatusIdle", resourceCulture);
++            }
++        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на In voice: {0} / {1}, {2} people..
++        /// </summary>
++        internal static string voiceStatusInVoice {
++            get {
++                return ResourceManager.GetString("voiceStatusInVoice", resourceCulture);
++            }
++        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на the answer does not look like the bot's.
++        /// </summary>
++        internal static string voiceErrorBadResponse {
++            get {
++                return ResourceManager.GetString("voiceErrorBadResponse", resourceCulture);
++            }
++        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на Close.
++        /// </summary>
++        internal static string voiceClose {
++            get {
++                return ResourceManager.GetString("voiceClose", resourceCulture);
++            }
++        }
+     }
+ }
+diff --git a/CustomRPC/Strings.resx b/CustomRPC/Strings.resx
+index 001cd0e..95dcbdd 100644
+--- a/CustomRPC/Strings.resx
++++ b/CustomRPC/Strings.resx
+@@ -215,4 +215,58 @@ This cannot be undone.</value>
+   <data name="presenceTypeCompeting" xml:space="preserve">
+     <value>Competing</value>
+   </data>
++  <data name="voiceMenuItem" xml:space="preserve">
++    <value>Voice channel status...</value>
++  </data>
++  <data name="voiceTitle" xml:space="preserve">
++    <value>Voice channel status</value>
++  </data>
++  <data name="voiceEnable" xml:space="preserve">
++    <value>Show the voice channel I'm sitting in</value>
++  </data>
++  <data name="voiceEndpoint" xml:space="preserve">
++    <value>Bot address:</value>
++  </data>
++  <data name="voiceSecret" xml:space="preserve">
++    <value>Shared secret:</value>
++  </data>
++  <data name="voiceDetailsLabel" xml:space="preserve">
++    <value>Top line:</value>
++  </data>
++  <data name="voiceStateLabel" xml:space="preserve">
++    <value>Bottom line:</value>
++  </data>
++  <data name="voicePlaceholders" xml:space="preserve">
++    <value>Placeholders: {server}, {channel}, {members}</value>
++  </data>
++  <data name="voiceUseTimestamp" xml:space="preserve">
++    <value>Count the time spent in the channel</value>
++  </data>
++  <data name="voiceCheck" xml:space="preserve">
++    <value>Check</value>
++  </data>
++  <data name="voiceStatusOff" xml:space="preserve">
++    <value>Turned off.</value>
++  </data>
++  <data name="voiceStatusChecking" xml:space="preserve">
++    <value>Asking the bot...</value>
++  </data>
++  <data name="voiceStatusNoBot" xml:space="preserve">
++    <value>The bot is not answering ({0}). Is it running?</value>
++  </data>
++  <data name="voiceStatusOffline" xml:space="preserve">
++    <value>The bot is running, but has lost its connection to Discord.</value>
++  </data>
++  <data name="voiceStatusIdle" xml:space="preserve">
++    <value>The bot is connected. You are not in a voice channel.</value>
++  </data>
++  <data name="voiceStatusInVoice" xml:space="preserve">
++    <value>In voice: {0} / {1}, {2} people.</value>
++  </data>
++  <data name="voiceErrorBadResponse" xml:space="preserve">
++    <value>the answer does not look like the bot's</value>
++  </data>
++  <data name="voiceClose" xml:space="preserve">
++    <value>Close</value>
++  </data>
+ </root>
+\ No newline at end of file
+diff --git a/CustomRPC/Strings.ru.resx b/CustomRPC/Strings.ru.resx
+index 5b1e65b..206f195 100644
+--- a/CustomRPC/Strings.ru.resx
++++ b/CustomRPC/Strings.ru.resx
+@@ -216,4 +216,58 @@
+   <data name="presenceTypeCompeting" xml:space="preserve">
+     <value>Соревнуется</value>
+   </data>
++  <data name="voiceMenuItem" xml:space="preserve">
++    <value>Статус голосового канала...</value>
++  </data>
++  <data name="voiceTitle" xml:space="preserve">
++    <value>Статус голосового канала</value>
++  </data>
++  <data name="voiceEnable" xml:space="preserve">
++    <value>Показывать голосовой канал, в котором я сижу</value>
++  </data>
++  <data name="voiceEndpoint" xml:space="preserve">
++    <value>Адрес бота:</value>
++  </data>
++  <data name="voiceSecret" xml:space="preserve">
++    <value>Общий секрет:</value>
++  </data>
++  <data name="voiceDetailsLabel" xml:space="preserve">
++    <value>Верхняя строка:</value>
++  </data>
++  <data name="voiceStateLabel" xml:space="preserve">
++    <value>Нижняя строка:</value>
++  </data>
++  <data name="voicePlaceholders" xml:space="preserve">
++    <value>Подстановки: {server}, {channel}, {members}</value>
++  </data>
++  <data name="voiceUseTimestamp" xml:space="preserve">
++    <value>Считать время нахождения в канале</value>
++  </data>
++  <data name="voiceCheck" xml:space="preserve">
++    <value>Проверить</value>
++  </data>
++  <data name="voiceStatusOff" xml:space="preserve">
++    <value>Выключено.</value>
++  </data>
++  <data name="voiceStatusChecking" xml:space="preserve">
++    <value>Спрашиваю бота...</value>
++  </data>
++  <data name="voiceStatusNoBot" xml:space="preserve">
++    <value>Бот не отвечает ({0}). Он запущен?</value>
++  </data>
++  <data name="voiceStatusOffline" xml:space="preserve">
++    <value>Бот запущен, но потерял связь с Discord.</value>
++  </data>
++  <data name="voiceStatusIdle" xml:space="preserve">
++    <value>Бот на связи. В голосовом канале тебя нет.</value>
++  </data>
++  <data name="voiceStatusInVoice" xml:space="preserve">
++    <value>В голосовом: {0} / {1}, людей: {2}.</value>
++  </data>
++  <data name="voiceErrorBadResponse" xml:space="preserve">
++    <value>ответ не похож на ответ бота</value>
++  </data>
++  <data name="voiceClose" xml:space="preserve">
++    <value>Закрыть</value>
++  </data>
+ </root>
+\ No newline at end of file
+diff --git a/CustomRPC/VoiceBridge.cs b/CustomRPC/VoiceBridge.cs
+new file mode 100644
+index 0000000..bbf86bc
+--- /dev/null
++++ b/CustomRPC/VoiceBridge.cs
+@@ -0,0 +1,330 @@
++using System;
++using System.Collections.Generic;
++using System.Net.Http;
++using System.Text;
++using System.Threading.Tasks;
++using System.Web.Script.Serialization;
++using Timer = System.Timers.Timer;
++
++namespace CustomRPC
++{
++    /// <summary>
++    /// Voice state of the tracked user, as reported by the companion bot.
++    /// </summary>
++    public class VoiceStatus
++    {
++        /// <summary>
++        /// Whether the bot itself is connected to the Discord gateway. If it isn't, the rest of
++        /// the fields are the last thing it saw rather than the current state.
++        /// </summary>
++        public bool BotConnected { get; set; }
++
++        /// <summary>
++        /// Whether the user is sitting in a voice channel right now.
++        /// </summary>
++        public bool InVoice { get; set; }
++
++        /// <summary>
++        /// Name of the server the voice channel belongs to.
++        /// </summary>
++        public string Guild { get; set; } = "";
++
++        /// <summary>
++        /// Name of the voice channel.
++        /// </summary>
++        public string Channel { get; set; } = "";
++
++        /// <summary>
++        /// How many people (bots excluded) are in that channel.
++        /// </summary>
++        public int Members { get; set; }
++
++        /// <summary>
++        /// When the user joined the current channel, in UTC. This is what the presence timer counts from.
++        /// </summary>
++        public DateTime Since { get; set; } = DateTime.UtcNow;
++
++        /// <summary>
++        /// Fills a template like "{server}" or "{channel}" in with this status.
++        /// </summary>
++        /// <returns>The finished line, cut down to what Discord will accept.</returns>
++        public string Format(string template)
++        {
++            return TrimToLimit((template ?? "")
++                .Replace("{server}", Guild)
++                .Replace("{channel}", Channel)
++                .Replace("{members}", Members.ToString()));
++        }
++
++        /// <summary>
++        /// Cuts a string down to the 128 bytes Discord allows in a presence line.
++        /// </summary>
++        /// <remarks>
++        /// Counted in bytes, not characters, on purpose: Discord measures the UTF-8 length, and a
++        /// Cyrillic channel name eats two bytes per letter while an emoji eats four. A name that
++        /// looks well within the limit can still be rejected, and a rejected line takes the whole
++        /// presence update down with it.
++        /// </remarks>
++        static string TrimToLimit(string text)
++        {
++            const int limit = 128;
++
++            if (Encoding.UTF8.GetByteCount(text) <= limit)
++                return text;
++
++            var used = 0;
++
++            for (var i = 0; i < text.Length; i++)
++            {
++                // A surrogate pair is one character in two chars and must not be split in half
++                var chunk = char.IsHighSurrogate(text[i]) && i + 1 < text.Length ? 2 : 1;
++                var size = Encoding.UTF8.GetByteCount(text.Substring(i, chunk));
++
++                if (used + size > limit)
++                    return text.Substring(0, i);
++
++                used += size;
++                i += chunk - 1;
++            }
++
++            return text;
++        }
++
++        /// <summary>
++        /// Compares everything that can affect the presence.
++        /// </summary>
++        /// <remarks>
++        /// <see cref="BotConnected"/> is deliberately left out: it flips while the bot reconnects
++        /// and on its own says nothing about what the presence should look like.
++        /// </remarks>
++        public bool SameAs(VoiceStatus other)
++        {
++            if (other == null)
++                return false;
++
++            if (!InVoice || !other.InVoice)
++                return InVoice == other.InVoice;
++
++            return Guild == other.Guild && Channel == other.Channel && Members == other.Members && Since == other.Since;
++        }
++    }
++
++    /// <summary>
++    /// Polls the companion bot for the user's voice state.
++    /// </summary>
++    /// <remarks>
++    /// Discord doesn't let an app read someone's voice channel over the Rich Presence pipe, so a
++    /// bot sitting on the server watches the voice channels instead and serves what it sees on
++    /// localhost. This class is the client half of that: it asks, and raises
++    /// <see cref="StatusChanged"/> whenever the answer is different from the last one.
++    /// </remarks>
++    public class VoiceBridge : IDisposable
++    {
++        /// <summary>
++        /// How often the bot gets asked, in milliseconds.
++        /// </summary>
++        /// <remarks>
++        /// Discord rate limits presence updates to about one per five seconds, and we only push an
++        /// update when something actually changed, so polling this often can't outrun the limit.
++        /// </remarks>
++        const int PollInterval = 5 * 1000;
++
++        /// <summary>
++        /// The bot answers from memory, so anything slower than this means it's gone.
++        /// </summary>
++        const int RequestTimeout = 3 * 1000;
++
++        static readonly DateTime UnixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
++
++        readonly HttpClient http = new HttpClient { Timeout = TimeSpan.FromMilliseconds(RequestTimeout) };
++        readonly JavaScriptSerializer json = new JavaScriptSerializer();
++        readonly Timer timer = new Timer(PollInterval);
++
++        string url = "";
++        string authToken = "";
++        bool polling = false;
++        bool disposed = false;
++
++        /// <summary>
++        /// Raised when the voice state changes in a way the presence should follow.
++        /// </summary>
++        /// <remarks>
++        /// Raised on a timer thread, so handlers touching the UI have to marshal to it themselves.
++        /// </remarks>
++        public event EventHandler StatusChanged;
++
++        /// <summary>
++        /// Last known voice state, or <see langword="null"/> if the bot hasn't answered yet.
++        /// </summary>
++        public VoiceStatus Status { get; private set; }
++
++        /// <summary>
++        /// Whether the last poll got through. <see langword="False"/> usually just means the bot isn't running.
++        /// </summary>
++        public bool Reachable { get; private set; }
++
++        /// <summary>
++        /// Why the last poll failed, for showing in the settings window. Empty when all is well.
++        /// </summary>
++        public string LastError { get; private set; } = "";
++
++        public VoiceBridge()
++        {
++            timer.AutoReset = false; // Restarted by hand after each poll so slow answers can't pile up
++            timer.Elapsed += async (s, e) => await Poll();
++        }
++
++        /// <summary>
++        /// Starts polling the given endpoint, replacing whatever it was polling before.
++        /// </summary>
++        /// <param name="endpoint">Full URL of the bot's endpoint, e.g. http://127.0.0.1:7373/voice.</param>
++        /// <param name="token">Shared secret, or an empty string if the bot doesn't ask for one.</param>
++        public void Start(string endpoint, string token)
++        {
++            if (disposed)
++                return;
++
++            url = (endpoint ?? "").Trim();
++            authToken = (token ?? "").Trim();
++
++            Stop();
++
++            if (url.Length == 0)
++                return;
++
++            // Ask immediately instead of making the user stare at an empty panel for five seconds
++            Task.Run(async () => await Poll());
++        }
++
++        /// <summary>
++        /// Stops polling and forgets the last known state.
++        /// </summary>
++        public void Stop()
++        {
++            timer.Stop();
++            Status = null;
++            Reachable = false;
++            LastError = "";
++        }
++
++        /// <summary>
++        /// Asks the bot once and raises <see cref="StatusChanged"/> if the answer is new.
++        /// </summary>
++        async Task Poll()
++        {
++            // A previous poll can still be waiting on a timeout; skipping is better than queueing up
++            if (disposed || polling || url.Length == 0)
++                return;
++
++            polling = true;
++
++            try
++            {
++                var request = new HttpRequestMessage(HttpMethod.Get, url);
++
++                if (authToken.Length > 0)
++                    request.Headers.Add("X-Auth-Token", authToken);
++
++                var response = await http.SendAsync(request);
++
++                if (!response.IsSuccessStatusCode)
++                {
++                    Fail($"HTTP {(int)response.StatusCode}");
++                    return;
++                }
++
++                Apply(await response.Content.ReadAsStringAsync());
++            }
++            catch (Exception e)
++            {
++                // The bot being closed is the normal case here, not an error worth a message box
++                Fail(e.InnerException?.Message ?? e.Message);
++            }
++            finally
++            {
++                polling = false;
++
++                if (!disposed && url.Length > 0)
++                    timer.Start();
++            }
++        }
++
++        /// <summary>
++        /// Parses one answer from the bot and publishes it.
++        /// </summary>
++        void Apply(string body)
++        {
++            VoiceStatus parsed;
++
++            try
++            {
++                parsed = Parse(body);
++            }
++            catch
++            {
++                // Something is answering on that port, but it isn't our bot
++                Fail(Strings.voiceErrorBadResponse);
++                return;
++            }
++
++            Reachable = true;
++            LastError = "";
++
++            var previous = Status;
++            Status = parsed;
++
++            if (!parsed.SameAs(previous))
++                StatusChanged?.Invoke(this, EventArgs.Empty);
++        }
++
++        /// <summary>
++        /// Turns the bot's JSON into a <see cref="VoiceStatus"/>.
++        /// </summary>
++        VoiceStatus Parse(string body)
++        {
++            var raw = (Dictionary<string, object>)json.DeserializeObject(body);
++
++            var status = new VoiceStatus
++            {
++                BotConnected = Convert.ToBoolean(raw["connected"]),
++                InVoice = Convert.ToBoolean(raw["inVoice"]),
++            };
++
++            // Everything below only comes with the answer when the user is actually in a channel
++            if (!status.InVoice)
++                return status;
++
++            status.Guild = Convert.ToString(raw["guild"]) ?? "";
++            status.Channel = Convert.ToString(raw["channel"]) ?? "";
++            status.Members = Convert.ToInt32(raw["members"]);
++            status.Since = UnixEpoch.AddMilliseconds(Convert.ToDouble(raw["since"]));
++
++            return status;
++        }
++
++        /// <summary>
++        /// Records a failed poll, and tells the form about it if it means the presence has to change back.
++        /// </summary>
++        void Fail(string reason)
++        {
++            LastError = reason;
++            Reachable = false;
++
++            // Losing the bot means we can't claim the user is in voice anymore, so the presence
++            // has to fall back to whatever is configured in the main window.
++            var wasInVoice = Status != null && Status.InVoice;
++            Status = null;
++
++            if (wasInVoice)
++                StatusChanged?.Invoke(this, EventArgs.Empty);
++        }
++
++        public void Dispose()
++        {
++            disposed = true;
++            timer.Stop();
++            timer.Dispose();
++            http.Dispose();
++        }
++    }
++}
+diff --git a/CustomRPC/VoiceBridgeForm.Designer.cs b/CustomRPC/VoiceBridgeForm.Designer.cs
+new file mode 100644
+index 0000000..646af95
+--- /dev/null
++++ b/CustomRPC/VoiceBridgeForm.Designer.cs
+@@ -0,0 +1,220 @@
++namespace CustomRPC
++{
++    partial class VoiceBridgeForm
++    {
++        /// <summary>
++        /// Required designer variable.
++        /// </summary>
++        private System.ComponentModel.IContainer components = null;
++
++        /// <summary>
++        /// Clean up any resources being used.
++        /// </summary>
++        /// <param name="disposing">true if managed resources should be disposed; otherwise, false.</param>
++        protected override void Dispose(bool disposing)
++        {
++            if (disposing && (components != null))
++            {
++                components.Dispose();
++            }
++            base.Dispose(disposing);
++        }
++
++        #region Windows Form Designer generated code
++
++        /// <summary>
++        /// Required method for Designer support - do not modify
++        /// the contents of this method with the code editor.
++        /// </summary>
++        private void InitializeComponent()
++        {
++            this.components = new System.ComponentModel.Container();
++            this.checkBoxEnabled = new System.Windows.Forms.CheckBox();
++            this.labelEndpoint = new System.Windows.Forms.Label();
++            this.textBoxEndpoint = new System.Windows.Forms.TextBox();
++            this.labelSecret = new System.Windows.Forms.Label();
++            this.textBoxSecret = new System.Windows.Forms.TextBox();
++            this.labelDetails = new System.Windows.Forms.Label();
++            this.textBoxDetails = new System.Windows.Forms.TextBox();
++            this.labelState = new System.Windows.Forms.Label();
++            this.textBoxState = new System.Windows.Forms.TextBox();
++            this.labelPlaceholders = new System.Windows.Forms.Label();
++            this.checkBoxTimestamp = new System.Windows.Forms.CheckBox();
++            this.labelStatus = new System.Windows.Forms.Label();
++            this.buttonCheck = new System.Windows.Forms.Button();
++            this.buttonClose = new System.Windows.Forms.Button();
++            this.statusTimer = new System.Windows.Forms.Timer(this.components);
++            this.SuspendLayout();
++            // 
++            // checkBoxEnabled
++            // 
++            this.checkBoxEnabled.AutoSize = true;
++            this.checkBoxEnabled.Location = new System.Drawing.Point(12, 12);
++            this.checkBoxEnabled.Name = "checkBoxEnabled";
++            this.checkBoxEnabled.Size = new System.Drawing.Size(100, 17);
++            this.checkBoxEnabled.TabIndex = 0;
++            this.checkBoxEnabled.UseVisualStyleBackColor = true;
++            // 
++            // labelEndpoint
++            // 
++            this.labelEndpoint.AutoSize = true;
++            this.labelEndpoint.Location = new System.Drawing.Point(12, 45);
++            this.labelEndpoint.Name = "labelEndpoint";
++            this.labelEndpoint.Size = new System.Drawing.Size(60, 13);
++            this.labelEndpoint.TabIndex = 1;
++            // 
++            // textBoxEndpoint
++            // 
++            this.textBoxEndpoint.Location = new System.Drawing.Point(140, 42);
++            this.textBoxEndpoint.MaxLength = 256;
++            this.textBoxEndpoint.Name = "textBoxEndpoint";
++            this.textBoxEndpoint.Size = new System.Drawing.Size(302, 20);
++            this.textBoxEndpoint.TabIndex = 2;
++            // 
++            // labelSecret
++            // 
++            this.labelSecret.AutoSize = true;
++            this.labelSecret.Location = new System.Drawing.Point(12, 74);
++            this.labelSecret.Name = "labelSecret";
++            this.labelSecret.Size = new System.Drawing.Size(60, 13);
++            this.labelSecret.TabIndex = 3;
++            // 
++            // textBoxSecret
++            // 
++            this.textBoxSecret.Location = new System.Drawing.Point(140, 71);
++            this.textBoxSecret.MaxLength = 256;
++            this.textBoxSecret.Name = "textBoxSecret";
++            this.textBoxSecret.Size = new System.Drawing.Size(302, 20);
++            this.textBoxSecret.TabIndex = 4;
++            this.textBoxSecret.UseSystemPasswordChar = true;
++            // 
++            // labelDetails
++            // 
++            this.labelDetails.AutoSize = true;
++            this.labelDetails.Location = new System.Drawing.Point(12, 103);
++            this.labelDetails.Name = "labelDetails";
++            this.labelDetails.Size = new System.Drawing.Size(60, 13);
++            this.labelDetails.TabIndex = 5;
++            // 
++            // textBoxDetails
++            // 
++            this.textBoxDetails.Location = new System.Drawing.Point(140, 100);
++            this.textBoxDetails.MaxLength = 128;
++            this.textBoxDetails.Name = "textBoxDetails";
++            this.textBoxDetails.Size = new System.Drawing.Size(302, 20);
++            this.textBoxDetails.TabIndex = 6;
++            // 
++            // labelState
++            // 
++            this.labelState.AutoSize = true;
++            this.labelState.Location = new System.Drawing.Point(12, 132);
++            this.labelState.Name = "labelState";
++            this.labelState.Size = new System.Drawing.Size(60, 13);
++            this.labelState.TabIndex = 7;
++            // 
++            // textBoxState
++            // 
++            this.textBoxState.Location = new System.Drawing.Point(140, 129);
++            this.textBoxState.MaxLength = 128;
++            this.textBoxState.Name = "textBoxState";
++            this.textBoxState.Size = new System.Drawing.Size(302, 20);
++            this.textBoxState.TabIndex = 8;
++            // 
++            // labelPlaceholders
++            // 
++            this.labelPlaceholders.AutoSize = true;
++            this.labelPlaceholders.ForeColor = System.Drawing.SystemColors.GrayText;
++            this.labelPlaceholders.Location = new System.Drawing.Point(137, 155);
++            this.labelPlaceholders.Name = "labelPlaceholders";
++            this.labelPlaceholders.Size = new System.Drawing.Size(60, 13);
++            this.labelPlaceholders.TabIndex = 9;
++            // 
++            // checkBoxTimestamp
++            // 
++            this.checkBoxTimestamp.AutoSize = true;
++            this.checkBoxTimestamp.Location = new System.Drawing.Point(12, 182);
++            this.checkBoxTimestamp.Name = "checkBoxTimestamp";
++            this.checkBoxTimestamp.Size = new System.Drawing.Size(100, 17);
++            this.checkBoxTimestamp.TabIndex = 10;
++            this.checkBoxTimestamp.UseVisualStyleBackColor = true;
++            // 
++            // labelStatus
++            // 
++            this.labelStatus.Location = new System.Drawing.Point(12, 211);
++            this.labelStatus.Name = "labelStatus";
++            this.labelStatus.Size = new System.Drawing.Size(430, 40);
++            this.labelStatus.TabIndex = 11;
++            // 
++            // buttonCheck
++            // 
++            this.buttonCheck.Location = new System.Drawing.Point(246, 258);
++            this.buttonCheck.Name = "buttonCheck";
++            this.buttonCheck.Size = new System.Drawing.Size(94, 28);
++            this.buttonCheck.TabIndex = 12;
++            this.buttonCheck.UseVisualStyleBackColor = true;
++            this.buttonCheck.Click += new System.EventHandler(this.Check);
++            // 
++            // buttonClose
++            // 
++            this.buttonClose.DialogResult = System.Windows.Forms.DialogResult.OK;
++            this.buttonClose.Location = new System.Drawing.Point(348, 258);
++            this.buttonClose.Name = "buttonClose";
++            this.buttonClose.Size = new System.Drawing.Size(94, 28);
++            this.buttonClose.TabIndex = 13;
++            this.buttonClose.UseVisualStyleBackColor = true;
++            // 
++            // statusTimer
++            // 
++            this.statusTimer.Interval = 1000;
++            this.statusTimer.Tick += new System.EventHandler(this.RefreshStatus);
++            // 
++            // VoiceBridgeForm
++            // 
++            this.AcceptButton = this.buttonClose;
++            this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
++            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
++            this.ClientSize = new System.Drawing.Size(454, 298);
++            this.Controls.Add(this.checkBoxEnabled);
++            this.Controls.Add(this.labelEndpoint);
++            this.Controls.Add(this.textBoxEndpoint);
++            this.Controls.Add(this.labelSecret);
++            this.Controls.Add(this.textBoxSecret);
++            this.Controls.Add(this.labelDetails);
++            this.Controls.Add(this.textBoxDetails);
++            this.Controls.Add(this.labelState);
++            this.Controls.Add(this.textBoxState);
++            this.Controls.Add(this.labelPlaceholders);
++            this.Controls.Add(this.checkBoxTimestamp);
++            this.Controls.Add(this.labelStatus);
++            this.Controls.Add(this.buttonCheck);
++            this.Controls.Add(this.buttonClose);
++            this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
++            this.MaximizeBox = false;
++            this.MinimizeBox = false;
++            this.Name = "VoiceBridgeForm";
++            this.ShowIcon = false;
++            this.ShowInTaskbar = false;
++            this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
++            this.ResumeLayout(false);
++            this.PerformLayout();
++        }
++
++        #endregion
++
++        private System.Windows.Forms.CheckBox checkBoxEnabled;
++        private System.Windows.Forms.Label labelEndpoint;
++        private System.Windows.Forms.TextBox textBoxEndpoint;
++        private System.Windows.Forms.Label labelSecret;
++        private System.Windows.Forms.TextBox textBoxSecret;
++        private System.Windows.Forms.Label labelDetails;
++        private System.Windows.Forms.TextBox textBoxDetails;
++        private System.Windows.Forms.Label labelState;
++        private System.Windows.Forms.TextBox textBoxState;
++        private System.Windows.Forms.Label labelPlaceholders;
++        private System.Windows.Forms.CheckBox checkBoxTimestamp;
++        private System.Windows.Forms.Label labelStatus;
++        private System.Windows.Forms.Button buttonCheck;
++        private System.Windows.Forms.Button buttonClose;
++        private System.Windows.Forms.Timer statusTimer;
++    }
++}
+diff --git a/CustomRPC/VoiceBridgeForm.cs b/CustomRPC/VoiceBridgeForm.cs
+new file mode 100644
+index 0000000..390ec19
+--- /dev/null
++++ b/CustomRPC/VoiceBridgeForm.cs
+@@ -0,0 +1,122 @@
++using System;
++using System.Windows.Forms;
++
++namespace CustomRPC
++{
++    /// <summary>
++    /// Settings window for the voice channel feature.
++    /// </summary>
++    /// <remarks>
++    /// Shows the bot's answer live while it's open, so that a wrong address or a bot that isn't
++    /// running is visible right here instead of as a presence that silently never changes.
++    /// </remarks>
++    public partial class VoiceBridgeForm : Form
++    {
++        readonly VoiceBridge bridge;
++        readonly Properties.Settings settings = Properties.Settings.Default;
++
++        public VoiceBridgeForm(VoiceBridge voiceBridge)
++        {
++            InitializeComponent();
++
++            bridge = voiceBridge;
++
++            WinApi.UseImmersiveDarkMode(Handle);
++
++            BackColor = CurrentColors.BgColor;
++            ForeColor = CurrentColors.TextColor;
++
++            foreach (Control control in Controls)
++            {
++                if (control is TextBox)
++                {
++                    control.BackColor = CurrentColors.BgTextFields;
++                    control.ForeColor = CurrentColors.TextColor;
++                }
++
++                if (control is Button button)
++                    button.FlatStyle = settings.darkMode ? FlatStyle.Flat : FlatStyle.Standard;
++            }
++
++            Text = Strings.voiceTitle;
++            checkBoxEnabled.Text = Strings.voiceEnable;
++            labelEndpoint.Text = Strings.voiceEndpoint;
++            labelSecret.Text = Strings.voiceSecret;
++            labelDetails.Text = Strings.voiceDetailsLabel;
++            labelState.Text = Strings.voiceStateLabel;
++            labelPlaceholders.Text = Strings.voicePlaceholders;
++            checkBoxTimestamp.Text = Strings.voiceUseTimestamp;
++            buttonCheck.Text = Strings.voiceCheck;
++            buttonClose.Text = Strings.voiceClose;
++
++            checkBoxEnabled.Checked = settings.voiceEnabled;
++            textBoxEndpoint.Text = settings.voiceUrl;
++            textBoxSecret.Text = settings.voiceToken;
++            textBoxDetails.Text = settings.voiceDetails;
++            textBoxState.Text = settings.voiceState;
++            checkBoxTimestamp.Checked = settings.voiceTimestamp;
++
++            RefreshStatus(this, EventArgs.Empty);
++            statusTimer.Start();
++        }
++
++        /// <summary>
++        /// Where to ask and what to show, as currently typed into the window.
++        /// </summary>
++        string Endpoint => textBoxEndpoint.Text.Trim();
++        string Secret => textBoxSecret.Text.Trim();
++
++        /// <summary>
++        /// Points the bridge at whatever is typed in right now, without waiting for the window to close.
++        /// </summary>
++        private void Check(object sender, EventArgs e)
++        {
++            labelStatus.Text = Strings.voiceStatusChecking;
++            bridge.Start(Endpoint, Secret);
++        }
++
++        /// <summary>
++        /// Repaints the status line from the bridge's latest answer.
++        /// </summary>
++        private void RefreshStatus(object sender, EventArgs e)
++        {
++            var status = bridge.Status;
++
++            if (!bridge.Reachable)
++            {
++                // An empty error means it was never asked in the first place
++                labelStatus.Text = bridge.LastError.Length == 0
++                    ? Strings.voiceStatusOff
++                    : string.Format(Strings.voiceStatusNoBot, bridge.LastError);
++                return;
++            }
++
++            if (status == null)
++            {
++                labelStatus.Text = Strings.voiceStatusChecking;
++                return;
++            }
++
++            if (!status.BotConnected)
++                labelStatus.Text = Strings.voiceStatusOffline;
++            else if (!status.InVoice)
++                labelStatus.Text = Strings.voiceStatusIdle;
++            else
++                labelStatus.Text = string.Format(Strings.voiceStatusInVoice, status.Guild, status.Channel, status.Members);
++        }
++
++        protected override void OnFormClosing(FormClosingEventArgs e)
++        {
++            statusTimer.Stop();
++
++            settings.voiceEnabled = checkBoxEnabled.Checked;
++            settings.voiceUrl = Endpoint;
++            settings.voiceToken = Secret;
++            settings.voiceDetails = textBoxDetails.Text;
++            settings.voiceState = textBoxState.Text;
++            settings.voiceTimestamp = checkBoxTimestamp.Checked;
++
++            base.OnFormClosing(e);
++        }
++    }
++}

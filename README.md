@@ -52,15 +52,35 @@
 
 ## Часть 2. Запустить бота
 
-Нужна **Java 17 или новее** — проверить можно командой `java -version`.
+Нужна **Java 17 или новее**. Проверить — открыть PowerShell и выполнить:
 
 ```
-cd bot
+java -version
+```
+
+Если команда не найдена, поставь JDK: https://adoptium.net
+
+### Вариант А: взять готовый jar
+
+Если `voice-bridge-bot.jar` уже собран, ничего клонировать и собирать не надо.
+Положи `voice-bridge-bot.jar`, `run.bat` и `config.properties` в одну папку —
+и переходи к настройке ниже.
+
+### Вариант Б: собрать самому
+
+Понадобится ещё и [Maven](https://maven.apache.org/download.cgi).
+
+```
+git clone https://github.com/ViRuS-MomentX/user-status-discord
+cd user-status-discord\bot
 mvn package
 ```
 
-Готовый `target/voice-bridge-bot.jar` вместе с `run.bat` положи в любую папку.
-Рядом создай `config.properties` по образцу `config.properties.example`:
+Готовый `target\voice-bridge-bot.jar` вместе с `run.bat` положи в любую папку.
+
+### Настройка
+
+Рядом с jar создай файл `config.properties` по образцу `config.properties.example`:
 
 ```properties
 bot.token=токен-из-шага-2
@@ -72,8 +92,13 @@ http.port=7373
 http.token=
 ```
 
-Запускай через `run.bat` — он выставляет кодировку консоли, иначе русские
-сообщения превратятся в кракозябры.
+Запускай двойным кликом по `run.bat` — он выставляет кодировку консоли, иначе
+русские сообщения превратятся в кракозябры. Из PowerShell — так:
+
+```
+cd путь\к\папке\с\ботом
+.\run.bat
+```
 
 Если всё верно, в консоли появится:
 

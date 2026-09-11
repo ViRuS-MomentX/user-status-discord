@@ -11,26 +11,30 @@ package ru.virus.voicebridge;
 public final class VoiceSnapshot {
 
     /** Снимок для состояния «в голосовом канале не сидит». */
-    public static final VoiceSnapshot IDLE = new VoiceSnapshot(false, 0L, null, null, 0, 0L);
+    public static final VoiceSnapshot IDLE = new VoiceSnapshot(false, 0L, null, null, null, 0, 0L);
 
     private final boolean inVoice;
     private final long channelId;
     private final String guildName;
     private final String channelName;
+    private final String iconUrl;
     private final int members;
     private final long since;
 
-    private VoiceSnapshot(boolean inVoice, long channelId, String guildName, String channelName, int members, long since) {
+    private VoiceSnapshot(boolean inVoice, long channelId, String guildName, String channelName, String iconUrl,
+                          int members, long since) {
         this.inVoice = inVoice;
         this.channelId = channelId;
         this.guildName = guildName;
         this.channelName = channelName;
+        this.iconUrl = iconUrl;
         this.members = members;
         this.since = since;
     }
 
-    public static VoiceSnapshot inChannel(long channelId, String guildName, String channelName, int members, long since) {
-        return new VoiceSnapshot(true, channelId, guildName, channelName, members, since);
+    public static VoiceSnapshot inChannel(long channelId, String guildName, String channelName, String iconUrl,
+                                          int members, long since) {
+        return new VoiceSnapshot(true, channelId, guildName, channelName, iconUrl, members, since);
     }
 
     public boolean isInVoice() {
@@ -47,6 +51,11 @@ public final class VoiceSnapshot {
 
     public String getChannelName() {
         return channelName;
+    }
+
+    /** Ссылка на иконку сервера, или пустая строка, если иконки у сервера нет. */
+    public String getIconUrl() {
+        return iconUrl;
     }
 
     public int getMembers() {
@@ -73,6 +82,7 @@ public final class VoiceSnapshot {
         if (inVoice) {
             sb.append(",\"guild\":").append(quote(guildName));
             sb.append(",\"channel\":").append(quote(channelName));
+            sb.append(",\"icon\":").append(quote(iconUrl == null ? "" : iconUrl));
             sb.append(",\"members\":").append(members);
             sb.append(",\"since\":").append(since);
         }

@@ -67,7 +67,7 @@ index be75b18..9fcdb04 100644
          private System.Windows.Forms.ToolStripSeparator toolStripSeparator3;
          private System.Windows.Forms.ToolStripMenuItem allowAnalyticsToolStripMenuItem;
 diff --git a/CustomRPC/MainForm.cs b/CustomRPC/MainForm.cs
-index 36187fa..3f1508b 100644
+index 36187fa..96c5481 100644
 --- a/CustomRPC/MainForm.cs
 +++ b/CustomRPC/MainForm.cs
 @@ -158,6 +158,11 @@ namespace CustomRPC
@@ -102,7 +102,7 @@ index 36187fa..3f1508b 100644
              try
              {
                  client.SetPresence(rp);
-@@ -1085,6 +1096,75 @@ namespace CustomRPC
+@@ -1085,6 +1096,88 @@ namespace CustomRPC
              return true;
          }
  
@@ -124,11 +124,24 @@ index 36187fa..3f1508b 100644
 +            if (status == null || !status.InVoice)
 +                return;
 +
++            rp.Name = status.Format(settings.voiceName);
 +            rp.Details = status.Format(settings.voiceDetails);
 +            rp.State = status.Format(settings.voiceState);
 +
 +            if (settings.voiceTimestamp)
 +                rp.Timestamps = new Timestamps(status.Since);
++
++            if (settings.voiceIcon && status.Icon.Length > 0)
++            {
++                if (rp.Assets == null)
++                    rp.Assets = new Assets();
++
++                // Discord refuses to take its own CDN as an external asset, and a server icon always
++                // lives there, so the link goes through the same proxy the image fields above use.
++                rp.Assets.LargeImageKey = Regex.Replace(status.Icon,
++                    @"//((cdn)|(media))\.discordapp\.((com)|(net))/", "//customrp.xyz/proxy/");
++                rp.Assets.LargeImageText = status.Guild;
++            }
 +        }
 +
 +        /// <summary>
@@ -178,7 +191,7 @@ index 36187fa..3f1508b 100644
          /// <summary>
          /// Sets up the startup link for the app.
          /// </summary>
-@@ -1421,6 +1501,8 @@ namespace CustomRPC
+@@ -1421,6 +1514,8 @@ namespace CustomRPC
              if (client != null)
                  client.Dispose();
  
@@ -188,10 +201,10 @@ index 36187fa..3f1508b 100644
                  Application.Exit();
          }
 diff --git a/CustomRPC/Properties/Settings.Designer.cs b/CustomRPC/Properties/Settings.Designer.cs
-index 1ef8db6..0e55179 100644
+index 1ef8db6..7721860 100644
 --- a/CustomRPC/Properties/Settings.Designer.cs
 +++ b/CustomRPC/Properties/Settings.Designer.cs
-@@ -478,5 +478,77 @@ namespace CustomRPC.Properties {
+@@ -478,5 +478,101 @@ namespace CustomRPC.Properties {
                  this["smallURL"] = value;
              }
          }
@@ -267,13 +280,37 @@ index 1ef8db6..0e55179 100644
 +                this["voiceTimestamp"] = value;
 +            }
 +        }
++        
++        [global::System.Configuration.UserScopedSettingAttribute()]
++        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
++        [global::System.Configuration.DefaultSettingValueAttribute("{server}")]
++        public string voiceName {
++            get {
++                return ((string)(this["voiceName"]));
++            }
++            set {
++                this["voiceName"] = value;
++            }
++        }
++        
++        [global::System.Configuration.UserScopedSettingAttribute()]
++        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
++        [global::System.Configuration.DefaultSettingValueAttribute("True")]
++        public bool voiceIcon {
++            get {
++                return ((bool)(this["voiceIcon"]));
++            }
++            set {
++                this["voiceIcon"] = value;
++            }
++        }
      }
  }
 diff --git a/CustomRPC/Properties/Settings.settings b/CustomRPC/Properties/Settings.settings
-index 345f1b2..89880fa 100644
+index 345f1b2..0b90483 100644
 --- a/CustomRPC/Properties/Settings.settings
 +++ b/CustomRPC/Properties/Settings.settings
-@@ -116,5 +116,23 @@
+@@ -116,5 +116,29 @@
      <Setting Name="darkMode" Type="System.Boolean" Scope="User">
        <Value Profile="(Default)">True</Value>
      </Setting>
@@ -295,14 +332,20 @@ index 345f1b2..89880fa 100644
 +    <Setting Name="voiceTimestamp" Type="System.Boolean" Scope="User">
 +      <Value Profile="(Default)">True</Value>
 +    </Setting>
++    <Setting Name="voiceName" Type="System.String" Scope="User">
++      <Value Profile="(Default)">{server}</Value>
++    </Setting>
++    <Setting Name="voiceIcon" Type="System.Boolean" Scope="User">
++      <Value Profile="(Default)">True</Value>
++    </Setting>
    </Settings>
  </SettingsFile>
 \ No newline at end of file
 diff --git a/CustomRPC/Strings.Designer.cs b/CustomRPC/Strings.Designer.cs
-index d49eeec..96a5289 100644
+index d49eeec..d398094 100644
 --- a/CustomRPC/Strings.Designer.cs
 +++ b/CustomRPC/Strings.Designer.cs
-@@ -336,5 +336,167 @@ namespace CustomRPC {
+@@ -336,5 +336,194 @@ namespace CustomRPC {
                  return ResourceManager.GetString("statusUpdatingPresence", resourceCulture);
              }
          }
@@ -468,13 +511,40 @@ index d49eeec..96a5289 100644
 +                return ResourceManager.GetString("voiceClose", resourceCulture);
 +            }
 +        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на Activity name:.
++        /// </summary>
++        internal static string voiceNameLabel {
++            get {
++                return ResourceManager.GetString("voiceNameLabel", resourceCulture);
++            }
++        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на Use the server's avatar as the picture.
++        /// </summary>
++        internal static string voiceShowIcon {
++            get {
++                return ResourceManager.GetString("voiceShowIcon", resourceCulture);
++            }
++        }
++        
++        /// <summary>
++        ///   Ищет локализованную строку, похожую на The feature is off - tick the box above, or the presence won't change..
++        /// </summary>
++        internal static string voiceNotApplied {
++            get {
++                return ResourceManager.GetString("voiceNotApplied", resourceCulture);
++            }
++        }
      }
  }
 diff --git a/CustomRPC/Strings.resx b/CustomRPC/Strings.resx
-index 001cd0e..95dcbdd 100644
+index 001cd0e..5d71ae4 100644
 --- a/CustomRPC/Strings.resx
 +++ b/CustomRPC/Strings.resx
-@@ -215,4 +215,58 @@ This cannot be undone.</value>
+@@ -215,4 +215,67 @@ This cannot be undone.</value>
    <data name="presenceTypeCompeting" xml:space="preserve">
      <value>Competing</value>
    </data>
@@ -532,13 +602,22 @@ index 001cd0e..95dcbdd 100644
 +  <data name="voiceClose" xml:space="preserve">
 +    <value>Close</value>
 +  </data>
++  <data name="voiceNameLabel" xml:space="preserve">
++    <value>Activity name:</value>
++  </data>
++  <data name="voiceShowIcon" xml:space="preserve">
++    <value>Use the server's avatar as the picture</value>
++  </data>
++  <data name="voiceNotApplied" xml:space="preserve">
++    <value>The feature is off - tick the box above, or the presence won't change.</value>
++  </data>
  </root>
 \ No newline at end of file
 diff --git a/CustomRPC/Strings.ru.resx b/CustomRPC/Strings.ru.resx
-index 5b1e65b..206f195 100644
+index 5b1e65b..e47b5a6 100644
 --- a/CustomRPC/Strings.ru.resx
 +++ b/CustomRPC/Strings.ru.resx
-@@ -216,4 +216,58 @@
+@@ -216,4 +216,67 @@
    <data name="presenceTypeCompeting" xml:space="preserve">
      <value>Соревнуется</value>
    </data>
@@ -596,14 +675,23 @@ index 5b1e65b..206f195 100644
 +  <data name="voiceClose" xml:space="preserve">
 +    <value>Закрыть</value>
 +  </data>
++  <data name="voiceNameLabel" xml:space="preserve">
++    <value>Название активности:</value>
++  </data>
++  <data name="voiceShowIcon" xml:space="preserve">
++    <value>Ставить аватар сервера картинкой</value>
++  </data>
++  <data name="voiceNotApplied" xml:space="preserve">
++    <value>Функция выключена - поставь галочку сверху, иначе статус не изменится.</value>
++  </data>
  </root>
 \ No newline at end of file
 diff --git a/CustomRPC/VoiceBridge.cs b/CustomRPC/VoiceBridge.cs
 new file mode 100644
-index 0000000..bbf86bc
+index 0000000..d724892
 --- /dev/null
 +++ b/CustomRPC/VoiceBridge.cs
-@@ -0,0 +1,330 @@
+@@ -0,0 +1,349 @@
 +using System;
 +using System.Collections.Generic;
 +using System.Net.Http;
@@ -639,6 +727,11 @@ index 0000000..bbf86bc
 +        /// Name of the voice channel.
 +        /// </summary>
 +        public string Channel { get; set; } = "";
++
++        /// <summary>
++        /// Link to the server's icon, or an empty string if the server has none.
++        /// </summary>
++        public string Icon { get; set; } = "";
 +
 +        /// <summary>
 +        /// How many people (bots excluded) are in that channel.
@@ -711,7 +804,8 @@ index 0000000..bbf86bc
 +            if (!InVoice || !other.InVoice)
 +                return InVoice == other.InVoice;
 +
-+            return Guild == other.Guild && Channel == other.Channel && Members == other.Members && Since == other.Since;
++            return Guild == other.Guild && Channel == other.Channel && Icon == other.Icon
++                && Members == other.Members && Since == other.Since;
 +        }
 +    }
 +
@@ -902,10 +996,23 @@ index 0000000..bbf86bc
 +
 +            status.Guild = Convert.ToString(raw["guild"]) ?? "";
 +            status.Channel = Convert.ToString(raw["channel"]) ?? "";
++            status.Icon = Convert.ToString(Field(raw, "icon")) ?? "";
 +            status.Members = Convert.ToInt32(raw["members"]);
 +            status.Since = UnixEpoch.AddMilliseconds(Convert.ToDouble(raw["since"]));
 +
 +            return status;
++        }
++
++        /// <summary>
++        /// Reads one field, tolerating its absence.
++        /// </summary>
++        /// <remarks>
++        /// Used for fields added after the first release, so that a newer app keeps working against
++        /// an older bot that doesn't send them yet instead of rejecting the whole answer.
++        /// </remarks>
++        static object Field(Dictionary<string, object> raw, string key)
++        {
++            return raw.TryGetValue(key, out var value) ? value : null;
 +        }
 +
 +        /// <summary>
@@ -936,10 +1043,10 @@ index 0000000..bbf86bc
 +}
 diff --git a/CustomRPC/VoiceBridgeForm.Designer.cs b/CustomRPC/VoiceBridgeForm.Designer.cs
 new file mode 100644
-index 0000000..646af95
+index 0000000..5ac95b4
 --- /dev/null
 +++ b/CustomRPC/VoiceBridgeForm.Designer.cs
-@@ -0,0 +1,220 @@
+@@ -0,0 +1,255 @@
 +namespace CustomRPC
 +{
 +    partial class VoiceBridgeForm
@@ -976,12 +1083,15 @@ index 0000000..646af95
 +            this.textBoxEndpoint = new System.Windows.Forms.TextBox();
 +            this.labelSecret = new System.Windows.Forms.Label();
 +            this.textBoxSecret = new System.Windows.Forms.TextBox();
++            this.labelName = new System.Windows.Forms.Label();
++            this.textBoxName = new System.Windows.Forms.TextBox();
 +            this.labelDetails = new System.Windows.Forms.Label();
 +            this.textBoxDetails = new System.Windows.Forms.TextBox();
 +            this.labelState = new System.Windows.Forms.Label();
 +            this.textBoxState = new System.Windows.Forms.TextBox();
 +            this.labelPlaceholders = new System.Windows.Forms.Label();
 +            this.checkBoxTimestamp = new System.Windows.Forms.CheckBox();
++            this.checkBoxIcon = new System.Windows.Forms.CheckBox();
 +            this.labelStatus = new System.Windows.Forms.Label();
 +            this.buttonCheck = new System.Windows.Forms.Button();
 +            this.buttonClose = new System.Windows.Forms.Button();
@@ -996,6 +1106,7 @@ index 0000000..646af95
 +            this.checkBoxEnabled.Size = new System.Drawing.Size(100, 17);
 +            this.checkBoxEnabled.TabIndex = 0;
 +            this.checkBoxEnabled.UseVisualStyleBackColor = true;
++            this.checkBoxEnabled.CheckedChanged += new System.EventHandler(this.RefreshStatus);
 +            // 
 +            // labelEndpoint
 +            // 
@@ -1007,10 +1118,10 @@ index 0000000..646af95
 +            // 
 +            // textBoxEndpoint
 +            // 
-+            this.textBoxEndpoint.Location = new System.Drawing.Point(140, 42);
++            this.textBoxEndpoint.Location = new System.Drawing.Point(160, 42);
 +            this.textBoxEndpoint.MaxLength = 256;
 +            this.textBoxEndpoint.Name = "textBoxEndpoint";
-+            this.textBoxEndpoint.Size = new System.Drawing.Size(302, 20);
++            this.textBoxEndpoint.Size = new System.Drawing.Size(282, 20);
 +            this.textBoxEndpoint.TabIndex = 2;
 +            // 
 +            // labelSecret
@@ -1023,86 +1134,111 @@ index 0000000..646af95
 +            // 
 +            // textBoxSecret
 +            // 
-+            this.textBoxSecret.Location = new System.Drawing.Point(140, 71);
++            this.textBoxSecret.Location = new System.Drawing.Point(160, 71);
 +            this.textBoxSecret.MaxLength = 256;
 +            this.textBoxSecret.Name = "textBoxSecret";
-+            this.textBoxSecret.Size = new System.Drawing.Size(302, 20);
++            this.textBoxSecret.Size = new System.Drawing.Size(282, 20);
 +            this.textBoxSecret.TabIndex = 4;
 +            this.textBoxSecret.UseSystemPasswordChar = true;
++            // 
++            // labelName
++            // 
++            this.labelName.AutoSize = true;
++            this.labelName.Location = new System.Drawing.Point(12, 103);
++            this.labelName.Name = "labelName";
++            this.labelName.Size = new System.Drawing.Size(60, 13);
++            this.labelName.TabIndex = 5;
++            // 
++            // textBoxName
++            // 
++            this.textBoxName.Location = new System.Drawing.Point(160, 100);
++            this.textBoxName.MaxLength = 128;
++            this.textBoxName.Name = "textBoxName";
++            this.textBoxName.Size = new System.Drawing.Size(282, 20);
++            this.textBoxName.TabIndex = 6;
 +            // 
 +            // labelDetails
 +            // 
 +            this.labelDetails.AutoSize = true;
-+            this.labelDetails.Location = new System.Drawing.Point(12, 103);
++            this.labelDetails.Location = new System.Drawing.Point(12, 132);
 +            this.labelDetails.Name = "labelDetails";
 +            this.labelDetails.Size = new System.Drawing.Size(60, 13);
-+            this.labelDetails.TabIndex = 5;
++            this.labelDetails.TabIndex = 7;
 +            // 
 +            // textBoxDetails
 +            // 
-+            this.textBoxDetails.Location = new System.Drawing.Point(140, 100);
++            this.textBoxDetails.Location = new System.Drawing.Point(160, 129);
 +            this.textBoxDetails.MaxLength = 128;
 +            this.textBoxDetails.Name = "textBoxDetails";
-+            this.textBoxDetails.Size = new System.Drawing.Size(302, 20);
-+            this.textBoxDetails.TabIndex = 6;
++            this.textBoxDetails.Size = new System.Drawing.Size(282, 20);
++            this.textBoxDetails.TabIndex = 8;
 +            // 
 +            // labelState
 +            // 
 +            this.labelState.AutoSize = true;
-+            this.labelState.Location = new System.Drawing.Point(12, 132);
++            this.labelState.Location = new System.Drawing.Point(12, 161);
 +            this.labelState.Name = "labelState";
 +            this.labelState.Size = new System.Drawing.Size(60, 13);
-+            this.labelState.TabIndex = 7;
++            this.labelState.TabIndex = 9;
 +            // 
 +            // textBoxState
 +            // 
-+            this.textBoxState.Location = new System.Drawing.Point(140, 129);
++            this.textBoxState.Location = new System.Drawing.Point(160, 158);
 +            this.textBoxState.MaxLength = 128;
 +            this.textBoxState.Name = "textBoxState";
-+            this.textBoxState.Size = new System.Drawing.Size(302, 20);
-+            this.textBoxState.TabIndex = 8;
++            this.textBoxState.Size = new System.Drawing.Size(282, 20);
++            this.textBoxState.TabIndex = 10;
 +            // 
 +            // labelPlaceholders
 +            // 
 +            this.labelPlaceholders.AutoSize = true;
 +            this.labelPlaceholders.ForeColor = System.Drawing.SystemColors.GrayText;
-+            this.labelPlaceholders.Location = new System.Drawing.Point(137, 155);
++            this.labelPlaceholders.Location = new System.Drawing.Point(157, 184);
 +            this.labelPlaceholders.Name = "labelPlaceholders";
 +            this.labelPlaceholders.Size = new System.Drawing.Size(60, 13);
-+            this.labelPlaceholders.TabIndex = 9;
++            this.labelPlaceholders.TabIndex = 11;
 +            // 
 +            // checkBoxTimestamp
 +            // 
 +            this.checkBoxTimestamp.AutoSize = true;
-+            this.checkBoxTimestamp.Location = new System.Drawing.Point(12, 182);
++            this.checkBoxTimestamp.Location = new System.Drawing.Point(12, 211);
 +            this.checkBoxTimestamp.Name = "checkBoxTimestamp";
 +            this.checkBoxTimestamp.Size = new System.Drawing.Size(100, 17);
-+            this.checkBoxTimestamp.TabIndex = 10;
++            this.checkBoxTimestamp.TabIndex = 12;
 +            this.checkBoxTimestamp.UseVisualStyleBackColor = true;
++            // 
++            // checkBoxIcon
++            // 
++            this.checkBoxIcon.AutoSize = true;
++            this.checkBoxIcon.Location = new System.Drawing.Point(12, 234);
++            this.checkBoxIcon.Name = "checkBoxIcon";
++            this.checkBoxIcon.Size = new System.Drawing.Size(100, 17);
++            this.checkBoxIcon.TabIndex = 13;
++            this.checkBoxIcon.UseVisualStyleBackColor = true;
 +            // 
 +            // labelStatus
 +            // 
-+            this.labelStatus.Location = new System.Drawing.Point(12, 211);
++            this.labelStatus.Location = new System.Drawing.Point(12, 263);
 +            this.labelStatus.Name = "labelStatus";
 +            this.labelStatus.Size = new System.Drawing.Size(430, 40);
-+            this.labelStatus.TabIndex = 11;
++            this.labelStatus.TabIndex = 14;
 +            // 
 +            // buttonCheck
 +            // 
-+            this.buttonCheck.Location = new System.Drawing.Point(246, 258);
++            this.buttonCheck.Location = new System.Drawing.Point(246, 313);
 +            this.buttonCheck.Name = "buttonCheck";
 +            this.buttonCheck.Size = new System.Drawing.Size(94, 28);
-+            this.buttonCheck.TabIndex = 12;
++            this.buttonCheck.TabIndex = 15;
 +            this.buttonCheck.UseVisualStyleBackColor = true;
 +            this.buttonCheck.Click += new System.EventHandler(this.Check);
 +            // 
 +            // buttonClose
 +            // 
 +            this.buttonClose.DialogResult = System.Windows.Forms.DialogResult.OK;
-+            this.buttonClose.Location = new System.Drawing.Point(348, 258);
++            this.buttonClose.Location = new System.Drawing.Point(348, 313);
 +            this.buttonClose.Name = "buttonClose";
 +            this.buttonClose.Size = new System.Drawing.Size(94, 28);
-+            this.buttonClose.TabIndex = 13;
++            this.buttonClose.TabIndex = 16;
 +            this.buttonClose.UseVisualStyleBackColor = true;
 +            // 
 +            // statusTimer
@@ -1115,18 +1251,21 @@ index 0000000..646af95
 +            this.AcceptButton = this.buttonClose;
 +            this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
 +            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-+            this.ClientSize = new System.Drawing.Size(454, 298);
++            this.ClientSize = new System.Drawing.Size(454, 353);
 +            this.Controls.Add(this.checkBoxEnabled);
 +            this.Controls.Add(this.labelEndpoint);
 +            this.Controls.Add(this.textBoxEndpoint);
 +            this.Controls.Add(this.labelSecret);
 +            this.Controls.Add(this.textBoxSecret);
++            this.Controls.Add(this.labelName);
++            this.Controls.Add(this.textBoxName);
 +            this.Controls.Add(this.labelDetails);
 +            this.Controls.Add(this.textBoxDetails);
 +            this.Controls.Add(this.labelState);
 +            this.Controls.Add(this.textBoxState);
 +            this.Controls.Add(this.labelPlaceholders);
 +            this.Controls.Add(this.checkBoxTimestamp);
++            this.Controls.Add(this.checkBoxIcon);
 +            this.Controls.Add(this.labelStatus);
 +            this.Controls.Add(this.buttonCheck);
 +            this.Controls.Add(this.buttonClose);
@@ -1148,12 +1287,15 @@ index 0000000..646af95
 +        private System.Windows.Forms.TextBox textBoxEndpoint;
 +        private System.Windows.Forms.Label labelSecret;
 +        private System.Windows.Forms.TextBox textBoxSecret;
++        private System.Windows.Forms.Label labelName;
++        private System.Windows.Forms.TextBox textBoxName;
 +        private System.Windows.Forms.Label labelDetails;
 +        private System.Windows.Forms.TextBox textBoxDetails;
 +        private System.Windows.Forms.Label labelState;
 +        private System.Windows.Forms.TextBox textBoxState;
 +        private System.Windows.Forms.Label labelPlaceholders;
 +        private System.Windows.Forms.CheckBox checkBoxTimestamp;
++        private System.Windows.Forms.CheckBox checkBoxIcon;
 +        private System.Windows.Forms.Label labelStatus;
 +        private System.Windows.Forms.Button buttonCheck;
 +        private System.Windows.Forms.Button buttonClose;
@@ -1162,10 +1304,10 @@ index 0000000..646af95
 +}
 diff --git a/CustomRPC/VoiceBridgeForm.cs b/CustomRPC/VoiceBridgeForm.cs
 new file mode 100644
-index 0000000..390ec19
+index 0000000..d1168aa
 --- /dev/null
 +++ b/CustomRPC/VoiceBridgeForm.cs
-@@ -0,0 +1,122 @@
+@@ -0,0 +1,136 @@
 +using System;
 +using System.Windows.Forms;
 +
@@ -1210,19 +1352,23 @@ index 0000000..390ec19
 +            checkBoxEnabled.Text = Strings.voiceEnable;
 +            labelEndpoint.Text = Strings.voiceEndpoint;
 +            labelSecret.Text = Strings.voiceSecret;
++            labelName.Text = Strings.voiceNameLabel;
 +            labelDetails.Text = Strings.voiceDetailsLabel;
 +            labelState.Text = Strings.voiceStateLabel;
 +            labelPlaceholders.Text = Strings.voicePlaceholders;
 +            checkBoxTimestamp.Text = Strings.voiceUseTimestamp;
++            checkBoxIcon.Text = Strings.voiceShowIcon;
 +            buttonCheck.Text = Strings.voiceCheck;
 +            buttonClose.Text = Strings.voiceClose;
 +
 +            checkBoxEnabled.Checked = settings.voiceEnabled;
 +            textBoxEndpoint.Text = settings.voiceUrl;
 +            textBoxSecret.Text = settings.voiceToken;
++            textBoxName.Text = settings.voiceName;
 +            textBoxDetails.Text = settings.voiceDetails;
 +            textBoxState.Text = settings.voiceState;
 +            checkBoxTimestamp.Checked = settings.voiceTimestamp;
++            checkBoxIcon.Checked = settings.voiceIcon;
 +
 +            RefreshStatus(this, EventArgs.Empty);
 +            statusTimer.Start();
@@ -1248,29 +1394,37 @@ index 0000000..390ec19
 +        /// </summary>
 +        private void RefreshStatus(object sender, EventArgs e)
 +        {
-+            var status = bridge.Status;
++            labelStatus.Text = Describe();
 +
++            // A successful check with the box unticked looks like everything is set up, but nothing
++            // will actually reach the presence. Say so rather than let it read as working.
++            if (bridge.Reachable && !checkBoxEnabled.Checked)
++                labelStatus.Text += Environment.NewLine + Strings.voiceNotApplied;
++        }
++
++        /// <summary>
++        /// Puts the bridge's latest answer into one line of text.
++        /// </summary>
++        private string Describe()
++        {
 +            if (!bridge.Reachable)
-+            {
 +                // An empty error means it was never asked in the first place
-+                labelStatus.Text = bridge.LastError.Length == 0
++                return bridge.LastError.Length == 0
 +                    ? Strings.voiceStatusOff
 +                    : string.Format(Strings.voiceStatusNoBot, bridge.LastError);
-+                return;
-+            }
++
++            var status = bridge.Status;
 +
 +            if (status == null)
-+            {
-+                labelStatus.Text = Strings.voiceStatusChecking;
-+                return;
-+            }
++                return Strings.voiceStatusChecking;
 +
 +            if (!status.BotConnected)
-+                labelStatus.Text = Strings.voiceStatusOffline;
-+            else if (!status.InVoice)
-+                labelStatus.Text = Strings.voiceStatusIdle;
-+            else
-+                labelStatus.Text = string.Format(Strings.voiceStatusInVoice, status.Guild, status.Channel, status.Members);
++                return Strings.voiceStatusOffline;
++
++            if (!status.InVoice)
++                return Strings.voiceStatusIdle;
++
++            return string.Format(Strings.voiceStatusInVoice, status.Guild, status.Channel, status.Members);
 +        }
 +
 +        protected override void OnFormClosing(FormClosingEventArgs e)
@@ -1280,9 +1434,11 @@ index 0000000..390ec19
 +            settings.voiceEnabled = checkBoxEnabled.Checked;
 +            settings.voiceUrl = Endpoint;
 +            settings.voiceToken = Secret;
++            settings.voiceName = textBoxName.Text;
 +            settings.voiceDetails = textBoxDetails.Text;
 +            settings.voiceState = textBoxState.Text;
 +            settings.voiceTimestamp = checkBoxTimestamp.Checked;
++            settings.voiceIcon = checkBoxIcon.Checked;
 +
 +            base.OnFormClosing(e);
 +        }

@@ -137,7 +137,11 @@ public final class VoiceTracker extends ListenerAdapter {
             }
         }
 
-        current = VoiceSnapshot.inChannel(channel.getIdLong(), guild.getName(), channel.getName(), members, since);
+        // У сервера иконки может не быть — тогда CustomRP просто не станет менять картинку
+        var iconUrl = guild.getIconUrl();
+
+        current = VoiceSnapshot.inChannel(channel.getIdLong(), guild.getName(), channel.getName(),
+                iconUrl == null ? "" : iconUrl, members, since);
 
         if (!sameChannel) {
             log.info("Зашёл в «{}» на сервере «{}».", channel.getName(), guild.getName());

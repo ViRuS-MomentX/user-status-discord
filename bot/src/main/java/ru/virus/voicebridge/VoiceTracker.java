@@ -4,9 +4,11 @@ import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
 import net.dv8tion.jda.api.events.channel.update.ChannelUpdateNameEvent;
+import net.dv8tion.jda.api.events.guild.GuildReadyEvent;
 import net.dv8tion.jda.api.events.guild.voice.GuildVoiceUpdateEvent;
 import net.dv8tion.jda.api.events.session.ReadyEvent;
 import net.dv8tion.jda.api.events.session.SessionDisconnectEvent;
+import net.dv8tion.jda.api.events.session.SessionRecreateEvent;
 import net.dv8tion.jda.api.events.session.SessionResumeEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import org.slf4j.Logger;
@@ -75,6 +77,26 @@ public final class VoiceTracker extends ListenerAdapter {
         if (guild != null) {
             recompute(guild);
         }
+    }
+
+    @Override
+    public void onSessionRecreate(SessionRecreateEvent event) {
+        // Сессию не возобновили, а создали заново: кэш гильдий приедет следующим,
+        // пересчёт сделает onGuildReady.
+        connected = true;
+        log.info("Связь с Discord восстановлена.");
+    }
+
+    @Override
+    public void onGuildReady(GuildReadyEvent event) {
+        if (event.getGuild().getIdLong() != guildId) {
+            return;
+        }
+
+        // Единственный момент, когда голосовые состояния гильдии точно загружены.
+        // После обрыва связи снимок восстанавливается именно отсюда.
+        connected = true;
+        recompute(event.getGuild());
     }
 
     @Override

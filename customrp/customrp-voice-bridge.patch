@@ -688,10 +688,10 @@ index 5b1e65b..e47b5a6 100644
 \ No newline at end of file
 diff --git a/CustomRPC/VoiceBridge.cs b/CustomRPC/VoiceBridge.cs
 new file mode 100644
-index 0000000..d724892
+index 0000000..1661f17
 --- /dev/null
 +++ b/CustomRPC/VoiceBridge.cs
-@@ -0,0 +1,349 @@
+@@ -0,0 +1,355 @@
 +using System;
 +using System.Collections.Generic;
 +using System.Net.Http;
@@ -749,10 +749,16 @@ index 0000000..d724892
 +        /// <returns>The finished line, cut down to what Discord will accept.</returns>
 +        public string Format(string template)
 +        {
-+            return TrimToLimit((template ?? "")
++            var text = TrimToLimit((template ?? "")
 +                .Replace("{server}", Guild)
 +                .Replace("{channel}", Channel)
 +                .Replace("{members}", Members.ToString()));
++
++            // Discord rejects a one-character line, and takes the whole presence update down with
++            // it, so a bare "{members}" or a single-letter channel name would break everything.
++            // A zero-width space pads it out and shows nothing - the same trick the main window
++            // uses on lines that start with a space.
++            return text.Length == 1 ? text + '\u200B' : text;
 +        }
 +
 +        /// <summary>

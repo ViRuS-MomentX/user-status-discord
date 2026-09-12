@@ -14,6 +14,8 @@ import java.io.IOException;
 import java.net.BindException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Точка входа.
@@ -42,6 +44,23 @@ public final class VoiceBridgeBot {
         }
 
         VoiceTracker tracker = new VoiceTracker(config.getGuildId(), config.getUserId());
+        RankLadder ladder = config.getLadder();
+
+        // Ранговой системе нужно читать текст сообщений, а это привилегированный интент.
+        // Без неё он не запрашивается вовсе, чтобы бот работал и с выключенной галочкой.
+        List<GatewayIntent> intents = new ArrayList<>();
+        intents.add(GatewayIntent.GUILD_VOICE_STATES);
+
+        RankStore store = null;
+        RankCommands commands = null;
+
+        if (ladder.isEnabled()) {
+            intents.add(GatewayIntent.GUILD_MESSAGES);
+            intents.add(GatewayIntent.MESSAGE_CONTENT);
+
+            store = new RankStore(configPath.toAbsolutePath().resolveSibling("ranks.json"));
+            commands = new RankCommands(config.getGuildId(), store, ladder);
+        }
 
         HttpBridge bridge;
         try {
@@ -60,13 +79,18 @@ public final class VoiceBridgeBot {
 
         JDA jda;
         try {
-            jda = JDABuilder.createLight(config.getToken(), GatewayIntent.GUILD_VOICE_STATES)
+            JDABuilder builder = JDABuilder.createLight(config.getToken(), intents)
                     // Кэш голосовых состояний — единственное, что нам нужно от JDA.
                     .enableCache(CacheFlag.VOICE_STATE)
                     .setMemberCachePolicy(MemberCachePolicy.VOICE)
                     .setStatus(OnlineStatus.INVISIBLE)
-                    .addEventListeners(tracker)
-                    .build();
+                    .addEventListeners(tracker);
+
+            if (commands != null) {
+                builder.addEventListeners(commands);
+            }
+
+            jda = builder.build();
         } catch (InvalidTokenException e) {
             log.error("Discord не принял токен. Проверь bot.token — возможно, он был сброшен "
                     + "в настройках приложения.");
@@ -75,9 +99,42 @@ public final class VoiceBridgeBot {
             return;
         }
 
+        VoiceCoinTicker ticker = null;
+
+        if (ladder.isEnabled()) {
+            ticker = new VoiceCoinTicker(jda, config.getGuildId(), store, ladder.getMinutesPerCoin());
+
+            try {
+                // Ждём загрузки гильдий: до этого ролей ещё нет и проверять нечего.
+                jda.awaitReady();
+
+                var guild = jda.getGuildById(config.getGuildId());
+                if (guild != null) {
+                    ladder.verify(guild);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
+            ticker.start();
+        }
+
+        var runningTicker = ticker;
+        var runningStore = store;
+
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("Останавливаюсь.");
             bridge.stop();
+
+            // Сохранить балансы надо до разрыва связи: после shutdown начисление уже не идёт,
+            // а недописанная минута иначе потерялась бы.
+            if (runningTicker != null) {
+                runningTicker.stop();
+            }
+            if (runningStore != null) {
+                runningStore.save();
+            }
+
             jda.shutdown();
         }, "voice-bridge-shutdown"));
     }

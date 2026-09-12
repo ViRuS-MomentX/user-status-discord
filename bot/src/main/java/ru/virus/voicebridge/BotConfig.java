@@ -24,14 +24,17 @@ public final class BotConfig {
     private final String httpHost;
     private final int httpPort;
     private final String httpToken;
+    private final RankLadder ladder;
 
-    private BotConfig(String token, long guildId, long userId, String httpHost, int httpPort, String httpToken) {
+    private BotConfig(String token, long guildId, long userId, String httpHost, int httpPort, String httpToken,
+                      RankLadder ladder) {
         this.token = token;
         this.guildId = guildId;
         this.userId = userId;
         this.httpHost = httpHost;
         this.httpPort = httpPort;
         this.httpToken = httpToken;
+        this.ladder = ladder;
     }
 
     public String getToken() {
@@ -57,6 +60,11 @@ public final class BotConfig {
     /** Общий секрет для запросов к эндпоинту. Пустая строка — проверка выключена. */
     public String getHttpToken() {
         return httpToken;
+    }
+
+    /** Настройки ранговой системы. */
+    public RankLadder getLadder() {
+        return ladder;
     }
 
     /**
@@ -104,7 +112,8 @@ public final class BotConfig {
             }
         }
 
-        return new BotConfig(token, guildId, userId, host, port, pick(props, "http.token", "VOICEBRIDGE_HTTP_TOKEN"));
+        return new BotConfig(token, guildId, userId, host, port, pick(props, "http.token", "VOICEBRIDGE_HTTP_TOKEN"),
+                RankLadder.from(props));
     }
 
     /** Переменная окружения приоритетнее файла: так удобнее подменять токен на месте. */

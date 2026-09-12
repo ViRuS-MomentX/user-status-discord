@@ -54,6 +54,65 @@ public final class RankCommands extends ListenerAdapter {
             postLadder(event);
         } else if (text.equals("баланс")) {
             postBalance(event);
+        } else if (text.equals("ранг айди")) {
+            postIds(event);
+        }
+    }
+
+    /**
+     * Выводит ID всех ролей и коды эмодзи сервера — то, что нужно вписать в config.properties.
+     *
+     * <p>Собирать это руками через правый клик по каждой роли долго и легко ошибиться,
+     * а бот и так всё это видит.
+     */
+    private void postIds(MessageReceivedEvent event) {
+        var member = event.getMember();
+
+        if (member == null || !member.hasPermission(Permission.MANAGE_SERVER)) {
+            event.getMessage().reply("Эту команду может использовать только управляющий сервером.").queue();
+            return;
+        }
+
+        var guild = event.getGuild();
+        var lines = new ArrayList<String>();
+
+        lines.add("# Роли сервера (сверху самые высокие)");
+        for (var role : guild.getRoles()) {
+            if (!role.isPublicRole()) { // @everyone в конфиге не нужна
+                lines.add(role.getId() + "  " + role.getName());
+            }
+        }
+
+        var emojis = guild.getEmojis();
+        if (!emojis.isEmpty()) {
+            lines.add("");
+            lines.add("# Эмодзи сервера");
+            for (var emoji : emojis) {
+                lines.add(emoji.getAsMention() + "  :" + emoji.getName() + ":");
+            }
+        }
+
+        sendChunked(event, lines);
+    }
+
+    /**
+     * Отправляет список блоками, укладываясь в лимит длины сообщения Discord.
+     */
+    private void sendChunked(MessageReceivedEvent event, List<String> lines) {
+        // Лимит сообщения — 2000 символов, оставляем запас на обрамление блока кода
+        final var limit = 1900;
+        var chunk = new StringBuilder();
+
+        for (var line : lines) {
+            if (chunk.length() + line.length() + 1 > limit) {
+                event.getChannel().sendMessage("```\n" + chunk + "```").queue();
+                chunk.setLength(0);
+            }
+            chunk.append(line).append('\n');
+        }
+
+        if (chunk.length() > 0) {
+            event.getChannel().sendMessage("```\n" + chunk + "```").queue();
         }
     }
 

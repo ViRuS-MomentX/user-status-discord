@@ -206,7 +206,17 @@ public final class LastFm {
                     HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() != 200) {
-                log.error("Last.fm ответил {} на {}", response.statusCode(), method);
+                // Last.fm объясняет отказ прямо в теле: «Invalid API key», превышение
+                // лимита и прочее. Без этого текста остаётся только гадать.
+                var body = response.body();
+                log.error("Last.fm ответил {} на {}: {}", response.statusCode(), method,
+                        body.length() > 300 ? body.substring(0, 300) : body);
+
+                if (response.statusCode() == 403) {
+                    log.error("Проверь music.lastfm.key. На странице Last.fm два поля — "
+                            + "нужен API key, а не Shared secret.");
+                }
+
                 return null;
             }
 

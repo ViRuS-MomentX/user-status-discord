@@ -42,6 +42,14 @@ public final class BotRoleKeeper extends ListenerAdapter {
             return;
         }
 
+        // Проверяем положение роли один раз здесь, а не ловим исключение на каждом боте:
+        // Discord не даёт выдавать роли, которые стоят не ниже собственной роли бота.
+        if (!guild.getSelfMember().canInteract(role)) {
+            log.error("Роль «{}» стоит не ниже роли самого бота, выдать её нельзя. "
+                    + "Подними роль бота выше неё в настройках сервера.", role.getName());
+            return;
+        }
+
         // Список участников приходит отдельной пачкой по гейтвею, в кэше его ещё нет
         guild.loadMembers().onSuccess(members -> {
             var given = 0;
@@ -69,12 +77,23 @@ public final class BotRoleKeeper extends ListenerAdapter {
         }
 
         var role = Roles.find(event.getGuild(), roleRef);
-        if (role != null) {
+        if (role != null && event.getGuild().getSelfMember().canInteract(role)) {
             assign(event.getGuild(), event.getMember(), role);
         }
     }
 
     private void assign(Guild guild, Member member, Role role) {
+        try {
+            queueAssign(guild, member, role);
+        } catch (RuntimeException e) {
+            // Часть проверок JDA делает до отправки запроса и бросает исключение сразу,
+            // мимо колбэка ошибки — без этого перехвата падал бы весь обход списка.
+            log.error("Не удалось выдать роль «{}» боту «{}»: {}", role.getName(),
+                    member.getUser().getName(), e.getMessage());
+        }
+    }
+
+    private void queueAssign(Guild guild, Member member, Role role) {
         guild.addRoleToMember(member, role).queue(
                 ok -> log.info("Боту «{}» выдана роль «{}».", member.getUser().getName(), role.getName()),
                 error -> log.error("Не удалось выдать роль «{}» боту «{}»: {}. "

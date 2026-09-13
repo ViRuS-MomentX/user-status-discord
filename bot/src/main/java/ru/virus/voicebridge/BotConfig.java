@@ -27,9 +27,13 @@ public final class BotConfig {
     private final RankLadder ladder;
     private final String botsRole;
     private final boolean moderation;
+    private final boolean music;
+    private final String lastFmKey;
+    private final int playlistSize;
 
     private BotConfig(String token, long guildId, long userId, String httpHost, int httpPort, String httpToken,
-                      RankLadder ladder, String botsRole, boolean moderation) {
+                      RankLadder ladder, String botsRole, boolean moderation,
+                      boolean music, String lastFmKey, int playlistSize) {
         this.token = token;
         this.guildId = guildId;
         this.userId = userId;
@@ -39,6 +43,9 @@ public final class BotConfig {
         this.ladder = ladder;
         this.botsRole = botsRole;
         this.moderation = moderation;
+        this.music = music;
+        this.lastFmKey = lastFmKey;
+        this.playlistSize = playlistSize;
     }
 
     public String getToken() {
@@ -79,6 +86,21 @@ public final class BotConfig {
     /** Включена ли команда очистки канала. */
     public boolean isModerationEnabled() {
         return moderation;
+    }
+
+    /** Включены ли музыкальные команды. */
+    public boolean isMusicEnabled() {
+        return music;
+    }
+
+    /** Ключ Last.fm для подбора плейлиста. */
+    public String getLastFmKey() {
+        return lastFmKey;
+    }
+
+    /** Сколько треков класть в очередь за одну команду start. */
+    public int getPlaylistSize() {
+        return playlistSize;
     }
 
     /**
@@ -129,7 +151,26 @@ public final class BotConfig {
         return new BotConfig(token, guildId, userId, host, port, pick(props, "http.token", "VOICEBRIDGE_HTTP_TOKEN"),
                 RankLadder.from(props),
                 props.getProperty("bots.role", "").trim(),
-                Boolean.parseBoolean(props.getProperty("moderation.enabled", "false").trim()));
+                Boolean.parseBoolean(props.getProperty("moderation.enabled", "false").trim()),
+                Boolean.parseBoolean(props.getProperty("music.enabled", "false").trim()),
+                pick(props, "music.lastfm.key", "VOICEBRIDGE_LASTFM_KEY"),
+                parsePlaylistSize(props.getProperty("music.playlist", "").trim()));
+    }
+
+    /**
+     * Размер плейлиста. За пределами разумного его ограничиваем: каждый трек — это
+     * отдельный поиск на SoundCloud, и сотня записей собиралась бы минутами.
+     */
+    private static int parsePlaylistSize(String raw) {
+        if (raw.isEmpty()) {
+            return 15;
+        }
+
+        try {
+            return Math.max(1, Math.min(50, Integer.parseInt(raw)));
+        } catch (NumberFormatException e) {
+            return 15;
+        }
     }
 
     /** Переменная окружения приоритетнее файла: так удобнее подменять токен на месте. */

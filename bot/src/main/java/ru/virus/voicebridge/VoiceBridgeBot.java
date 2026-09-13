@@ -58,7 +58,7 @@ public final class VoiceBridgeBot {
 
         // Текстовые команды читают содержимое сообщений — это привилегированный интент.
         // Запрашиваем его только если хоть что-то из команд включено.
-        if (ladder.isEnabled() || config.isModerationEnabled()) {
+        if (ladder.isEnabled() || config.isModerationEnabled() || config.isMusicEnabled()) {
             intents.add(GatewayIntent.GUILD_MESSAGES);
             intents.add(GatewayIntent.MESSAGE_CONTENT);
         }
@@ -70,6 +70,15 @@ public final class VoiceBridgeBot {
 
         if (config.isModerationEnabled()) {
             moderation = new ModerationCommands(config.getGuildId());
+        }
+
+        MusicService music = null;
+        MusicCommands musicCommands = null;
+
+        if (config.isMusicEnabled()) {
+            music = new MusicService();
+            musicCommands = new MusicCommands(config.getGuildId(), music,
+                    new LastFm(config.getLastFmKey()), config.getPlaylistSize());
         }
 
         if (!config.getBotsRole().isEmpty()) {
@@ -102,7 +111,7 @@ public final class VoiceBridgeBot {
                     .setStatus(OnlineStatus.INVISIBLE)
                     .addEventListeners(tracker);
 
-            for (var listener : new Object[] { commands, moderation, botRoles }) {
+            for (var listener : new Object[] { commands, moderation, botRoles, musicCommands }) {
                 if (listener != null) {
                     builder.addEventListeners(listener);
                 }
@@ -139,6 +148,7 @@ public final class VoiceBridgeBot {
 
         var runningTicker = ticker;
         var runningStore = store;
+        var runningMusic = music;
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("Останавливаюсь.");
@@ -151,6 +161,10 @@ public final class VoiceBridgeBot {
             }
             if (runningStore != null) {
                 runningStore.save();
+            }
+
+            if (runningMusic != null) {
+                runningMusic.shutdown();
             }
 
             jda.shutdown();

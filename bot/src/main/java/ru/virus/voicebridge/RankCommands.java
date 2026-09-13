@@ -129,6 +129,12 @@ public final class RankCommands extends ListenerAdapter {
             return;
         }
 
+        if (ladder.getSteps().isEmpty()) {
+            event.getMessage().reply("Ступени рангов ещё не заданы. Напиши «ранг айди», "
+                    + "впиши роли в config.properties и перезапусти бота.").queue();
+            return;
+        }
+
         var button = Button.success(BUTTON_ID, "Повысить ранг").withEmoji(Emoji.fromUnicode("🚀"));
 
         event.getChannel()

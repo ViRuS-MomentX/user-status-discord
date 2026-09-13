@@ -119,7 +119,7 @@ public final class RankLadder {
             }
         }
 
-        if (ok) {
+        if (ok && !steps.isEmpty()) {
             log.info("Ранговая система: {} ступеней, монета за {} минут.", steps.size(), minutesPerCoin);
         }
 
@@ -192,8 +192,11 @@ public final class RankLadder {
         }
 
         if (enabled && steps.isEmpty()) {
-            log.error("rank.enabled=true, но ни одной ступени не задано — ранговая система выключена.");
-            enabled = false;
+            // Ровно то состояние, в котором сервер настраивают впервые: ступени ещё неизвестны,
+            // потому что их ID как раз и собирают командой «ранг айди». Выключаться тут нельзя,
+            // иначе до этой команды не добраться.
+            log.warn("Ступени не заданы. Пока работает только команда «ранг айди» "
+                    + "— она покажет ID ролей для настройки.");
         }
 
         return new RankLadder(enabled, coin, minutes, props.getProperty("rank.start", "").trim(), steps);

@@ -14,7 +14,9 @@
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <maven.compiler.release>17</maven.compiler.release>
+    <!-- 25 требует jdave: шифрование голоса у Discord работает через
+         новый нативный интерфейс Java, появившийся только там -->
+    <maven.compiler.release>25</maven.compiler.release>
   </properties>
 
   <dependencies>
@@ -30,6 +32,20 @@
         </exclusion>
       </exclusions>
     </dependency>
+    <!-- Сквозное шифрование голоса (DAVE). Без него Discord закрывает
+         голосовое соединение сразу после подключения. -->
+    <dependency>
+      <groupId>club.minnced</groupId>
+      <artifactId>jdave-api</artifactId>
+      <version>0.1.8</version>
+    </dependency>
+    <dependency>
+      <groupId>club.minnced</groupId>
+      <artifactId>jdave-native-win-x86-64</artifactId>
+      <version>0.1.8</version>
+      <scope>runtime</scope>
+    </dependency>
+
     <dependency>
       <groupId>dev.arbjerg</groupId>
       <artifactId>lavaplayer</artifactId>
@@ -69,9 +85,11 @@
                     <exclude>META-INF/*.DSA</exclude>
                     <exclude>META-INF/*.RSA</exclude>
                     <exclude>module-info.class</exclude>
-                    <!-- Нативные кодеки lavaplayer идут под десяток платформ и весят
-                         36 МБ. Оставляем две, на которых бот реально запускают:
-                         Windows и обычный 64-битный Linux для будущего VPS. -->
+                    <!-- Нативные библиотеки идут под десяток платформ сразу и весят
+                         под 40 МБ. Оставляем только Windows, на которой бот и
+                         запускают. Для Linux нужно убрать строку с linux-x86-64
+                         ниже и вернуть зависимость jdave-native-linux-x86-64. -->
+                    <exclude>natives/linux-x86-64/**</exclude>
                     <exclude>natives/darwin/**</exclude>
                     <exclude>natives/linux-aarch32/**</exclude>
                     <exclude>natives/linux-aarch64/**</exclude>

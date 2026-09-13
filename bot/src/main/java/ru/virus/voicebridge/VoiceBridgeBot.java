@@ -2,7 +2,9 @@ package ru.virus.voicebridge;
 
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
+import club.minnced.discord.jdave.interop.JDaveSessionFactory;
 import net.dv8tion.jda.api.OnlineStatus;
+import net.dv8tion.jda.api.audio.AudioModuleConfig;
 import net.dv8tion.jda.api.exceptions.InvalidTokenException;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import net.dv8tion.jda.api.utils.MemberCachePolicy;
@@ -109,6 +111,11 @@ public final class VoiceBridgeBot {
                     .enableCache(CacheFlag.VOICE_STATE)
                     .setMemberCachePolicy(MemberCachePolicy.VOICE)
                     .setStatus(OnlineStatus.INVISIBLE)
+                    // Discord требует сквозного шифрования голоса. Своей реализации у JDA
+                    // нет — со встроенной заглушкой соединение закрывается через секунду
+                    // после подключения, и бот бесконечно входит и выходит из канала.
+                    .setAudioModuleConfig(new AudioModuleConfig()
+                            .withDaveSessionFactory(new JDaveSessionFactory()))
                     .addEventListeners(tracker);
 
             for (var listener : new Object[] { commands, moderation, botRoles, musicCommands }) {

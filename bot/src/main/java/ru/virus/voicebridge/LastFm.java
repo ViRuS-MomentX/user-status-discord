@@ -206,13 +206,15 @@ public final class LastFm implements MusicCatalog {
                             + "нужен API key, а не Shared secret.");
                 }
 
-                return null;
+                throw new CatalogUnavailableException("HTTP " + response.statusCode());
             }
 
             return DataObject.fromJson(response.body());
+        } catch (CatalogUnavailableException e) {
+            throw e;
         } catch (Exception e) {
             log.error("Запрос к Last.fm не удался ({}): {}", method, e.getMessage());
-            return null;
+            throw new CatalogUnavailableException(e.getMessage());
         }
     }
 

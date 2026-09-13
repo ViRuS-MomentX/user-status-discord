@@ -27,6 +27,11 @@ public final class ITunes implements MusicCatalog {
 
     private static final String API = "https://itunes.apple.com/search";
 
+    /** Сколько раз пробовать, прежде чем признать сервис недоступным. */
+    private static final int ATTEMPTS = 3;
+
+    private static final long RETRY_PAUSE_MS = 1000;
+
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
@@ -85,7 +90,12 @@ public final class ITunes implements MusicCatalog {
     /**
      * Ищет песни.
      *
+     * <p>При неудаче повторяет запрос: у iTunes бывают разовые отказы и обрывы, и
+     * сдаваться с первой попытки значит показывать «ничего не найдено» на песню,
+     * которая минуту назад прекрасно игралась.
+     *
      * @param byArtist искать только по полю исполнителя, а не по названию тоже
+     * @throws CatalogUnavailableException если сервис так и не ответил
      */
     private List<Song> search(String term, int limit, boolean byArtist) {
         var url = API + "?term=" + encode(term)
@@ -93,27 +103,42 @@ public final class ITunes implements MusicCatalog {
                 + "&country=" + encode(country)
                 + (byArtist ? "&attribute=artistTerm" : "");
 
-        try {
-            var response = http.send(
-                    HttpRequest.newBuilder(URI.create(url))
-                            .timeout(Duration.ofSeconds(10))
-                            .header("User-Agent",
-                                    "voice-bridge-bot/1.0 (+https://github.com/ViRuS-MomentX/user-status-discord)")
-                            .build(),
-                    HttpResponse.BodyHandlers.ofString());
+        String reason = null;
 
-            if (response.statusCode() != 200) {
+        for (var attempt = 1; attempt <= ATTEMPTS; attempt++) {
+            try {
+                var response = http.send(
+                        HttpRequest.newBuilder(URI.create(url))
+                                .timeout(Duration.ofSeconds(10))
+                                .header("User-Agent",
+                                        "voice-bridge-bot/1.0 (+https://github.com/ViRuS-MomentX/user-status-discord)")
+                                .build(),
+                        HttpResponse.BodyHandlers.ofString());
+
+                if (response.statusCode() == 200) {
+                    return parse(response.body());
+                }
+
                 var body = response.body();
-                log.error("iTunes ответил {}: {}", response.statusCode(),
-                        body.length() > 300 ? body.substring(0, 300) : body);
-                return List.of();
+                reason = "HTTP " + response.statusCode() + ": "
+                        + (body.length() > 200 ? body.substring(0, 200) : body);
+            } catch (Exception e) {
+                reason = e.getMessage() == null ? e.toString() : e.getMessage();
             }
 
-            return parse(response.body());
-        } catch (Exception e) {
-            log.error("Запрос к iTunes не удался: {}", e.getMessage());
-            return List.of();
+            log.warn("iTunes не ответил (попытка {} из {}): {}", attempt, ATTEMPTS, reason);
+
+            if (attempt < ATTEMPTS) {
+                try {
+                    Thread.sleep(RETRY_PAUSE_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
         }
+
+        throw new CatalogUnavailableException(reason);
     }
 
     private List<Song> parse(String body) {

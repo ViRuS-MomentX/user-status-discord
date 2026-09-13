@@ -7,6 +7,7 @@ import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -119,7 +120,16 @@ public final class MusicCommands extends ListenerAdapter {
      */
     private void buildPlaylist(MessageChannel reply, String query) {
         try {
-            var songs = catalog.playlistFor(query, playlistSize);
+            List<Song> songs;
+
+            try {
+                songs = catalog.playlistFor(query, playlistSize);
+            } catch (CatalogUnavailableException e) {
+                // Отказ сервиса и отсутствие песни — разные беды, и советы к ним разные
+                log.error("{} недоступен: {}", catalog.name(), e.getMessage());
+                reply.sendMessage(catalog.name() + " не отвечает. Попробуй ещё раз через минуту.").queue();
+                return;
+            }
 
             if (songs.isEmpty()) {
                 reply.sendMessage(catalog.name() + " ничего не знает про «" + query + "».").queue();

@@ -28,7 +28,8 @@ public final class RankCommands extends ListenerAdapter {
     private static final Logger log = LoggerFactory.getLogger(RankCommands.class);
 
     /** Идентификатор кнопки. Сообщение с ней живёт вечно, так что он должен пережить перезапуск. */
-    private static final String BUTTON_ID = "rank:up";
+    private static final String BUTTON_UP = "rank:up";
+    private static final String BUTTON_BALANCE = "rank:balance";
 
     private static final Color EMBED_COLOR = new Color(0x8B5CF6);
 
@@ -135,11 +136,12 @@ public final class RankCommands extends ListenerAdapter {
             return;
         }
 
-        var button = Button.success(BUTTON_ID, "Повысить ранг").withEmoji(Emoji.fromUnicode("🚀"));
+        var up = Button.success(BUTTON_UP, "Повысить ранг").withEmoji(Emoji.fromUnicode("🚀"));
+        var balance = Button.secondary(BUTTON_BALANCE, "Баланс").withEmoji(Emoji.fromUnicode("💰"));
 
         event.getChannel()
                 .sendMessageEmbeds(buildLadderEmbed(event.getGuild()))
-                .setComponents(ActionRow.of(button))
+                .setComponents(ActionRow.of(up, balance))
                 .queue();
     }
 
@@ -152,8 +154,14 @@ public final class RankCommands extends ListenerAdapter {
             return;
         }
 
+        event.getMessage().replyEmbeds(buildBalanceEmbed(member, event.getGuild())).queue();
+    }
+
+    /**
+     * Собирает карточку с балансом участника.
+     */
+    private MessageEmbed buildBalanceEmbed(Member member, Guild guild) {
         var entry = store.get(member.getId());
-        var guild = event.getGuild();
         var current = ladder.resolveCurrentRole(guild, entry.rank);
 
         var embed = new EmbedBuilder()
@@ -178,7 +186,7 @@ public final class RankCommands extends ListenerAdapter {
         // Минуты, ещё не превратившиеся в монету: иначе непонятно, идёт ли вообще начисление
         embed.setFooter("до следующей монеты: " + (ladder.getMinutesPerCoin() - entry.minutes) + " мин");
 
-        event.getMessage().replyEmbeds(embed.build()).queue();
+        return embed.build();
     }
 
     /**
@@ -226,14 +234,21 @@ public final class RankCommands extends ListenerAdapter {
 
     @Override
     public void onButtonInteraction(ButtonInteractionEvent event) {
-        if (!BUTTON_ID.equals(event.getComponentId())) {
-            return;
-        }
-
         var member = event.getMember();
         var guild = event.getGuild();
 
         if (member == null || guild == null || guild.getIdLong() != guildId) {
+            return;
+        }
+
+        // Ответ виден только нажавшему: иначе кнопка под общим сообщением
+        // засыпала бы канал чужими балансами.
+        if (BUTTON_BALANCE.equals(event.getComponentId())) {
+            event.replyEmbeds(buildBalanceEmbed(member, guild)).setEphemeral(true).queue();
+            return;
+        }
+
+        if (!BUTTON_UP.equals(event.getComponentId())) {
             return;
         }
 

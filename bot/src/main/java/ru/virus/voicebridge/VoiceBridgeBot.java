@@ -53,13 +53,29 @@ public final class VoiceBridgeBot {
 
         RankStore store = null;
         RankCommands commands = null;
+        ModerationCommands moderation = null;
+        BotRoleKeeper botRoles = null;
 
-        if (ladder.isEnabled()) {
+        // Текстовые команды читают содержимое сообщений — это привилегированный интент.
+        // Запрашиваем его только если хоть что-то из команд включено.
+        if (ladder.isEnabled() || config.isModerationEnabled()) {
             intents.add(GatewayIntent.GUILD_MESSAGES);
             intents.add(GatewayIntent.MESSAGE_CONTENT);
+        }
 
+        if (ladder.isEnabled()) {
             store = new RankStore(configPath.toAbsolutePath().resolveSibling("ranks.json"));
             commands = new RankCommands(config.getGuildId(), store, ladder);
+        }
+
+        if (config.isModerationEnabled()) {
+            moderation = new ModerationCommands(config.getGuildId());
+        }
+
+        if (!config.getBotsRole().isEmpty()) {
+            // Список участников тоже за привилегированным интентом
+            intents.add(GatewayIntent.GUILD_MEMBERS);
+            botRoles = new BotRoleKeeper(config.getGuildId(), config.getBotsRole());
         }
 
         HttpBridge bridge;
@@ -86,8 +102,10 @@ public final class VoiceBridgeBot {
                     .setStatus(OnlineStatus.INVISIBLE)
                     .addEventListeners(tracker);
 
-            if (commands != null) {
-                builder.addEventListeners(commands);
+            for (var listener : new Object[] { commands, moderation, botRoles }) {
+                if (listener != null) {
+                    builder.addEventListeners(listener);
+                }
             }
 
             jda = builder.build();

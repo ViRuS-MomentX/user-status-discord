@@ -35,7 +35,7 @@ public final class RankLadder {
         }
 
         public Role resolve(Guild guild) {
-            return findRole(guild, roleRef);
+            return Roles.find(guild, roleRef);
         }
 
         public String getRoleRef() {
@@ -80,7 +80,7 @@ public final class RankLadder {
      * Роль, которую носят до первого повышения. Может отсутствовать, если её не задали.
      */
     public Role resolveStartRole(Guild guild) {
-        return startRoleRef.isEmpty() ? null : findRole(guild, startRoleRef);
+        return Roles.find(guild, startRoleRef);
     }
 
     /**
@@ -124,22 +124,6 @@ public final class RankLadder {
         }
 
         return ok;
-    }
-
-    /**
-     * Ищет роль по ID или, если ссылка не число, по точному названию.
-     *
-     * <p>Названия ролей тут с длинными тире и вертикальными чертами, набирать их руками
-     * больно, поэтому основной способ — ID. Но если кому-то удобнее название, пусть работает
-     * и оно.
-     */
-    private static Role findRole(Guild guild, String ref) {
-        if (ref.chars().allMatch(Character::isDigit)) {
-            return guild.getRoleById(ref);
-        }
-
-        var byName = guild.getRolesByName(ref, false);
-        return byName.isEmpty() ? null : byName.get(0);
     }
 
     /**

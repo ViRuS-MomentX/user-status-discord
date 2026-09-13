@@ -25,9 +25,11 @@ public final class BotConfig {
     private final int httpPort;
     private final String httpToken;
     private final RankLadder ladder;
+    private final String botsRole;
+    private final boolean moderation;
 
     private BotConfig(String token, long guildId, long userId, String httpHost, int httpPort, String httpToken,
-                      RankLadder ladder) {
+                      RankLadder ladder, String botsRole, boolean moderation) {
         this.token = token;
         this.guildId = guildId;
         this.userId = userId;
@@ -35,6 +37,8 @@ public final class BotConfig {
         this.httpPort = httpPort;
         this.httpToken = httpToken;
         this.ladder = ladder;
+        this.botsRole = botsRole;
+        this.moderation = moderation;
     }
 
     public String getToken() {
@@ -65,6 +69,16 @@ public final class BotConfig {
     /** Настройки ранговой системы. */
     public RankLadder getLadder() {
         return ladder;
+    }
+
+    /** Роль, которая выдаётся всем ботам сервера. Пустая строка — выдача выключена. */
+    public String getBotsRole() {
+        return botsRole;
+    }
+
+    /** Включена ли команда очистки канала. */
+    public boolean isModerationEnabled() {
+        return moderation;
     }
 
     /**
@@ -113,7 +127,9 @@ public final class BotConfig {
         }
 
         return new BotConfig(token, guildId, userId, host, port, pick(props, "http.token", "VOICEBRIDGE_HTTP_TOKEN"),
-                RankLadder.from(props));
+                RankLadder.from(props),
+                props.getProperty("bots.role", "").trim(),
+                Boolean.parseBoolean(props.getProperty("moderation.enabled", "false").trim()));
     }
 
     /** Переменная окружения приоритетнее файла: так удобнее подменять токен на месте. */

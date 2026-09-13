@@ -10,6 +10,7 @@ import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
 import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import net.dv8tion.jda.api.entities.Guild;
+import org.apache.http.client.config.RequestConfig;
 import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,9 +31,25 @@ public final class MusicService {
     private final AudioPlayer player;
     private final TrackQueue queue;
 
+    /** Сколько ждать соединения с SoundCloud. Штатные три секунды до него не дотягиваются. */
+    private static final int CONNECT_TIMEOUT_MS = 15_000;
+
+    /** Сколько ждать данных после соединения. */
+    private static final int SOCKET_TIMEOUT_MS = 30_000;
+
     public MusicService() {
         // Просим сразу Opus: именно его ждёт Discord, и лишнего перекодирования не будет
         manager.getConfiguration().setOutputFormat(StandardAudioDataFormats.DISCORD_OPUS);
+
+        // По умолчанию lavaplayer отводит на соединение три секунды. До серверов
+        // SoundCloud маршрут бывает длиннее, и поиск отваливается по таймауту там,
+        // где достаточно было подождать.
+        manager.setHttpRequestConfigurator(config -> RequestConfig.copy(config)
+                .setConnectTimeout(CONNECT_TIMEOUT_MS)
+                .setConnectionRequestTimeout(CONNECT_TIMEOUT_MS)
+                .setSocketTimeout(SOCKET_TIMEOUT_MS)
+                .build());
+
         manager.registerSourceManager(SoundCloudAudioSourceManager.createDefault());
 
         player = manager.createPlayer();

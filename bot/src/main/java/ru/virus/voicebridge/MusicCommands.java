@@ -1,5 +1,6 @@
 package ru.virus.voicebridge;
 
+import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 import net.dv8tion.jda.api.events.guild.voice.GuildVoiceUpdateEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
@@ -136,19 +137,27 @@ public final class MusicCommands extends ListenerAdapter {
                 return;
             }
 
-            var first = music.search(songs.get(0).query()).join();
+            // Идём по плейлисту, пока что-нибудь не найдётся: одна ненайденная песня
+            // не повод отменять весь запрос, дальше в списке есть ещё четырнадцать
+            AudioTrack first = null;
+            var index = 0;
+
+            while (index < songs.size() && first == null) {
+                first = music.search(songs.get(index).query()).join();
+                index++;
+            }
 
             if (first == null) {
-                reply.sendMessage("На SoundCloud не нашлось: " + songs.get(0)).queue();
+                reply.sendMessage("На SoundCloud не нашлось ничего по запросу «" + query + "».").queue();
                 return;
             }
 
             music.getQueue().add(first);
             reply.sendMessage("Играет: **" + first.getInfo().title + "**\n"
-                    + "Догружаю ещё " + (songs.size() - 1) + " треков...").queue();
+                    + "Догружаю ещё " + (songs.size() - index) + " треков...").queue();
 
             var added = 0;
-            for (var song : songs.subList(1, songs.size())) {
+            for (var song : songs.subList(index, songs.size())) {
                 var track = music.search(song.query()).join();
                 if (track != null) {
                     music.getQueue().add(track);

@@ -201,7 +201,10 @@ public final class LastFm {
             var response = http.send(
                     HttpRequest.newBuilder(URI.create(url.toString()))
                             .timeout(Duration.ofSeconds(10))
-                            .header("User-Agent", "voice-bridge-bot")
+                            // Отдельные API отказывают клиентам без внятного
+                            // User-Agent, поэтому представляемся по принятой форме
+                            .header("User-Agent",
+                                    "voice-bridge-bot/1.0 (+https://github.com/ViRuS-MomentX/user-status-discord)")
                             .build(),
                     HttpResponse.BodyHandlers.ofString());
 

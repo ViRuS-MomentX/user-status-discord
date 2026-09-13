@@ -121,26 +121,42 @@ public final class RankStore {
     /**
      * Записывает файл, если с прошлого раза что-то изменилось.
      */
-    public synchronized void save() {
-        if (!dirty) {
-            return;
-        }
+    public void save() {
+        String json;
 
-        var root = DataObject.empty();
-        entries.forEach((id, entry) -> root.put(id, DataObject.empty()
-                .put("coins", entry.coins)
-                .put("minutes", entry.minutes)
-                .put("rank", entry.rank)));
+        // Под блокировкой только снимок данных. Сама запись идёт снаружи: файловые
+        // операции на Windows легко задерживаются об антивирус, а балансы в это время
+        // читает поток событий Discord — и нажатие кнопки успело бы просрочиться,
+        // просто ожидая своей очереди к хранилищу.
+        synchronized (this) {
+            if (!dirty) {
+                return;
+            }
+
+            var root = DataObject.empty();
+            entries.forEach((id, entry) -> root.put(id, DataObject.empty()
+                    .put("coins", entry.coins)
+                    .put("minutes", entry.minutes)
+                    .put("rank", entry.rank)));
+
+            json = root.toString();
+            dirty = false;
+        }
 
         try {
             // Пишем через временный файл: выключение питания на середине записи
             // иначе оставило бы обрезанный JSON вместо всех балансов.
             var temp = file.resolveSibling(file.getFileName() + ".tmp");
-            Files.write(temp, root.toString().getBytes(StandardCharsets.UTF_8));
+            Files.write(temp, json.getBytes(StandardCharsets.UTF_8));
             Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING);
-            dirty = false;
         } catch (IOException e) {
             log.error("Не удалось сохранить балансы в {}: {}", file, e.getMessage());
+
+            // Записать не вышло — данные снова считаются несохранёнными,
+            // иначе следующий вызов решил бы, что сохранять нечего.
+            synchronized (this) {
+                dirty = true;
+            }
         }
     }
 

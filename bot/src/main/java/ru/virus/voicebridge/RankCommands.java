@@ -234,6 +234,12 @@ public final class RankCommands extends ListenerAdapter {
 
     @Override
     public void onButtonInteraction(ButtonInteractionEvent event) {
+        var id = event.getComponentId();
+
+        if (!BUTTON_UP.equals(id) && !BUTTON_BALANCE.equals(id)) {
+            return;
+        }
+
         var member = event.getMember();
         var guild = event.getGuild();
 
@@ -241,21 +247,23 @@ public final class RankCommands extends ListenerAdapter {
             return;
         }
 
-        // Ответ виден только нажавшему: иначе кнопка под общим сообщением
-        // засыпала бы канал чужими балансами.
-        if (BUTTON_BALANCE.equals(event.getComponentId())) {
-            event.replyEmbeds(buildBalanceEmbed(member, guild)).setEphemeral(true).queue();
-            return;
-        }
+        // Discord отводит на подтверждение нажатия три секунды и после этого считает
+        // взаимодействие потерянным. Подтверждаем сразу, до всякой работы: дальше на
+        // ответ есть пятнадцать минут, и медленный запрос к ролям уже ничего не сорвёт.
+        // Ответ виден только нажавшему: иначе кнопка под общим сообщением засыпала бы
+        // канал чужими балансами.
+        event.deferReply(true).queue();
+        var hook = event.getHook();
 
-        if (!BUTTON_UP.equals(event.getComponentId())) {
+        if (BUTTON_BALANCE.equals(id)) {
+            hook.sendMessageEmbeds(buildBalanceEmbed(member, guild)).queue();
             return;
         }
 
         var entry = store.get(member.getId());
 
         if (entry.rank >= ladder.getSteps().size()) {
-            event.reply("Ты уже на вершине, выше рангов нет.").setEphemeral(true).queue();
+            hook.sendMessage("Ты уже на вершине, выше рангов нет.").queue();
             return;
         }
 
@@ -264,16 +272,15 @@ public final class RankCommands extends ListenerAdapter {
 
         if (nextRole == null) {
             log.error("Роль ступени {} не найдена, повышение невозможно.", entry.rank + 1);
-            event.reply("Роль для следующего ранга не найдена на сервере. Скажи администратору.")
-                    .setEphemeral(true).queue();
+            hook.sendMessage("Роль для следующего ранга не найдена на сервере. Скажи администратору.").queue();
             return;
         }
 
         // Списываем до выдачи роли: иначе два быстрых нажатия успели бы пройти проверку
         // баланса оба. Если роль выдать не выйдет, деньги вернём ниже.
         if (!store.promote(member.getId(), step.getPrice())) {
-            event.reply("Не хватает монет: нужно " + step.getPrice() + " " + ladder.getCoinEmoji()
-                    + ", у тебя " + entry.coins + ".").setEphemeral(true).queue();
+            hook.sendMessage("Не хватает монет: нужно " + step.getPrice() + " " + ladder.getCoinEmoji()
+                    + ", у тебя " + entry.coins + ".").queue();
             return;
         }
 
@@ -287,17 +294,16 @@ public final class RankCommands extends ListenerAdapter {
         guild.modifyMemberRoles(member, Collections.singletonList(nextRole), toRemove).queue(
                 ok -> {
                     store.save();
-                    event.reply("Ранг повышен: " + nextRole.getAsMention() + ". Списано "
-                            + step.getPrice() + " " + ladder.getCoinEmoji() + ".").setEphemeral(true).queue();
+                    hook.sendMessage("Ранг повышен: " + nextRole.getAsMention() + ". Списано "
+                            + step.getPrice() + " " + ladder.getCoinEmoji() + ".").queue();
                     log.info("{} повысил ранг до «{}».", member.getUser().getName(), nextRole.getName());
                 },
                 error -> {
                     store.refund(member.getId(), step.getPrice());
                     store.save();
                     log.error("Не удалось выдать роль «{}»: {}", nextRole.getName(), error.getMessage());
-                    event.reply("Не получилось выдать роль, монеты возвращены. "
-                            + "Скорее всего у бота нет права «Управление ролями» или его роль ниже выдаваемой.")
-                            .setEphemeral(true).queue();
+                    hook.sendMessage("Не получилось выдать роль, монеты возвращены. "
+                            + "Скорее всего у бота нет права «Управление ролями» или его роль ниже выдаваемой.").queue();
                 });
     }
 }

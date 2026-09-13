@@ -56,7 +56,7 @@ public final class VoiceBridgeBot {
         RankStore store = null;
         RankCommands commands = null;
         ModerationCommands moderation = null;
-        BotRoleKeeper botRoles = null;
+        MemberRoleKeeper memberRoles = null;
 
         // Текстовые команды читают содержимое сообщений — это привилегированный интент.
         // Запрашиваем его только если хоть что-то из команд включено.
@@ -65,16 +65,9 @@ public final class VoiceBridgeBot {
             intents.add(GatewayIntent.MESSAGE_CONTENT);
         }
 
-        RankRoleKeeper rankRoles = null;
-
         if (ladder.isEnabled()) {
             store = new RankStore(configPath.toAbsolutePath().resolveSibling("ranks.json"));
             commands = new RankCommands(config.getGuildId(), store, ladder);
-
-            // Роль должна быть у каждого, а не только у тех, кто её покупал,
-            // поэтому нужен обход всех участников — а он за привилегированным интентом.
-            intents.add(GatewayIntent.GUILD_MEMBERS);
-            rankRoles = new RankRoleKeeper(config.getGuildId(), store, ladder);
         }
 
         if (config.isModerationEnabled()) {
@@ -90,11 +83,15 @@ public final class VoiceBridgeBot {
                     config.getCatalog(), config.getPlaylistSize());
         }
 
-        if (!config.getBotsRole().isEmpty()) {
-            // Список участников тоже за привилегированным интентом. Дубль в списке
-            // безвреден: JDA складывает интенты в битовую маску.
+        // Роль ботам и ранг каждому участнику раздаёт один обход: список участников
+        // нельзя запрашивать дважды, второй запрос отваливается по таймауту.
+        var roleKeeper = new MemberRoleKeeper(config.getGuildId(), config.getBotsRole(),
+                store, ladder.isEnabled() ? ladder : null);
+
+        if (roleKeeper.hasWork()) {
+            // Обход всех участников сервера — за привилегированным интентом
             intents.add(GatewayIntent.GUILD_MEMBERS);
-            botRoles = new BotRoleKeeper(config.getGuildId(), config.getBotsRole());
+            memberRoles = roleKeeper;
         }
 
         HttpBridge bridge;
@@ -126,7 +123,7 @@ public final class VoiceBridgeBot {
                             .withDaveSessionFactory(new JDaveSessionFactory()))
                     .addEventListeners(tracker);
 
-            for (var listener : new Object[] { commands, moderation, botRoles, rankRoles, musicCommands }) {
+            for (var listener : new Object[] { commands, moderation, memberRoles, musicCommands }) {
                 if (listener != null) {
                     builder.addEventListeners(listener);
                 }

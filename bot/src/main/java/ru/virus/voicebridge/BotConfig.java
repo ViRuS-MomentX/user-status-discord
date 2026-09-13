@@ -178,7 +178,8 @@ public final class BotConfig {
             return new LastFm(pick(props, "music.lastfm.key", "VOICEBRIDGE_LASTFM_KEY"));
         }
 
-        return new ITunes(props.getProperty("music.itunes.country", "US").trim());
+        return new ITunes(props.getProperty("music.itunes.country", "US").trim(),
+                    props.getProperty("music.itunes.useragent", "").trim());
     }
 
     /**

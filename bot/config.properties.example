@@ -81,6 +81,10 @@ music.catalog=itunes
 # Магазин iTunes, в котором искать. US находит почти всё, включая русское.
 music.itunes.country=US
 
+# Чем представляться iTunes. Пусто — обычный браузерный заголовок: Apple
+# отвечает 403 с пустым телом клиентам, которых не узнаёт.
+music.itunes.useragent=
+
 # Ключ Last.fm: https://www.last.fm/api/account/create
 # Нужен только при music.catalog=lastfm.
 music.lastfm.key=

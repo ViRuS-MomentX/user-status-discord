@@ -32,14 +32,23 @@ public final class ITunes implements MusicCatalog {
 
     private static final long RETRY_PAUSE_MS = 1000;
 
+    private static final String DEFAULT_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    + "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
 
     private final String country;
+    private final String userAgent;
 
-    public ITunes(String country) {
+    public ITunes(String country, String userAgent) {
         this.country = country.isEmpty() ? "US" : country;
+        // Apple отвечает 403 с пустым телом клиентам, которых не узнаёт: тот же запрос
+        // из браузера проходит, а с именем бота в заголовке — нет. Поэтому по умолчанию
+        // представляемся как обычный браузер, а строку можно переопределить в настройках.
+        this.userAgent = userAgent.isEmpty() ? DEFAULT_USER_AGENT : userAgent;
     }
 
     @Override
@@ -110,8 +119,8 @@ public final class ITunes implements MusicCatalog {
                 var response = http.send(
                         HttpRequest.newBuilder(URI.create(url))
                                 .timeout(Duration.ofSeconds(10))
-                                .header("User-Agent",
-                                        "voice-bridge-bot/1.0 (+https://github.com/ViRuS-MomentX/user-status-discord)")
+                                .header("User-Agent", userAgent)
+                                .header("Accept", "application/json")
                                 .build(),
                         HttpResponse.BodyHandlers.ofString());
 

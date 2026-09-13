@@ -38,6 +38,9 @@ public final class ITunes implements MusicCatalog {
 
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
+            // Java по умолчанию ходит по HTTP/2, а браузеры к Apple — нет. Придирчивые
+            // CDN на этом иногда и отсекают клиентов, поэтому идём как браузер.
+            .version(HttpClient.Version.HTTP_1_1)
             .build();
 
     private final String country;
@@ -121,6 +124,7 @@ public final class ITunes implements MusicCatalog {
                                 .timeout(Duration.ofSeconds(10))
                                 .header("User-Agent", userAgent)
                                 .header("Accept", "application/json")
+                                .header("Accept-Language", "en-US,en;q=0.9")
                                 .build(),
                         HttpResponse.BodyHandlers.ofString());
 
@@ -135,7 +139,10 @@ public final class ITunes implements MusicCatalog {
                 reason = e.getMessage() == null ? e.toString() : e.getMessage();
             }
 
-            log.warn("iTunes не ответил (попытка {} из {}): {}", attempt, ATTEMPTS, reason);
+            // Ссылку пишем целиком: её можно открыть в браузере и сравнить,
+            // отвечает ли сервис на тот же самый запрос
+            log.warn("iTunes не ответил (попытка {} из {}): {}\n  запрос: {}",
+                    attempt, ATTEMPTS, reason, url);
 
             if (attempt < ATTEMPTS) {
                 try {

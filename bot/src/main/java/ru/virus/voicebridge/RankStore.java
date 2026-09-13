@@ -58,7 +58,10 @@ public final class RankStore {
      * пока начисление монет может менять оригинал.
      */
     public synchronized Entry get(String userId) {
-        return entries.computeIfAbsent(userId, id -> new Entry()).copy();
+        // Именно get, а не computeIfAbsent: обход всех участников сервера иначе
+        // завёл бы пустую запись на каждого, кто никогда ничего не делал.
+        var entry = entries.get(userId);
+        return entry == null ? new Entry() : entry.copy();
     }
 
     /**

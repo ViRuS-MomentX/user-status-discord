@@ -65,9 +65,16 @@ public final class VoiceBridgeBot {
             intents.add(GatewayIntent.MESSAGE_CONTENT);
         }
 
+        RankRoleKeeper rankRoles = null;
+
         if (ladder.isEnabled()) {
             store = new RankStore(configPath.toAbsolutePath().resolveSibling("ranks.json"));
             commands = new RankCommands(config.getGuildId(), store, ladder);
+
+            // Роль должна быть у каждого, а не только у тех, кто её покупал,
+            // поэтому нужен обход всех участников — а он за привилегированным интентом.
+            intents.add(GatewayIntent.GUILD_MEMBERS);
+            rankRoles = new RankRoleKeeper(config.getGuildId(), store, ladder);
         }
 
         if (config.isModerationEnabled()) {
@@ -84,7 +91,8 @@ public final class VoiceBridgeBot {
         }
 
         if (!config.getBotsRole().isEmpty()) {
-            // Список участников тоже за привилегированным интентом
+            // Список участников тоже за привилегированным интентом. Дубль в списке
+            // безвреден: JDA складывает интенты в битовую маску.
             intents.add(GatewayIntent.GUILD_MEMBERS);
             botRoles = new BotRoleKeeper(config.getGuildId(), config.getBotsRole());
         }
@@ -118,7 +126,7 @@ public final class VoiceBridgeBot {
                             .withDaveSessionFactory(new JDaveSessionFactory()))
                     .addEventListeners(tracker);
 
-            for (var listener : new Object[] { commands, moderation, botRoles, musicCommands }) {
+            for (var listener : new Object[] { commands, moderation, botRoles, rankRoles, musicCommands }) {
                 if (listener != null) {
                     builder.addEventListeners(listener);
                 }

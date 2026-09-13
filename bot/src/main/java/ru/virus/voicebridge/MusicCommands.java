@@ -1,6 +1,7 @@
 package ru.virus.voicebridge;
 
 import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
+import net.dv8tion.jda.api.events.guild.voice.GuildVoiceUpdateEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import org.slf4j.Logger;
@@ -56,6 +57,30 @@ public final class MusicCommands extends ListenerAdapter {
             stop(event);
         } else if (lower.equals("очередь") || lower.equals("queue")) {
             showQueue(event);
+        }
+    }
+
+    /**
+     * Следит за тем, как сам бот входит и выходит из голосовых каналов.
+     *
+     * <p>Нужно, чтобы отличить «подключились и молчим» от «соединение рвётся и
+     * пересоздаётся по кругу»: снаружи и то и другое выглядит одинаково.
+     */
+    @Override
+    public void onGuildVoiceUpdate(GuildVoiceUpdateEvent event) {
+        if (event.getGuild().getIdLong() != guildId
+                || event.getMember().getIdLong() != event.getJDA().getSelfUser().getIdLong()) {
+            return;
+        }
+
+        var playing = music.getQueue().current();
+        var what = playing == null ? "ничего не играет" : "играет «" + playing.getInfo().title + "»";
+
+        if (event.getChannelJoined() != null) {
+            log.info("Бот вошёл в «{}» ({}).", event.getChannelJoined().getName(), what);
+        } else if (event.getChannelLeft() != null) {
+            log.warn("Бот вышел из «{}» ({}). Если это повторяется — рвётся голосовое соединение.",
+                    event.getChannelLeft().getName(), what);
         }
     }
 

@@ -69,6 +69,18 @@
                     <exclude>META-INF/*.DSA</exclude>
                     <exclude>META-INF/*.RSA</exclude>
                     <exclude>module-info.class</exclude>
+                    <!-- Нативные кодеки lavaplayer идут под десяток платформ и весят
+                         36 МБ. Оставляем две, на которых бот реально запускают:
+                         Windows и обычный 64-битный Linux для будущего VPS. -->
+                    <exclude>natives/darwin/**</exclude>
+                    <exclude>natives/linux-aarch32/**</exclude>
+                    <exclude>natives/linux-aarch64/**</exclude>
+                    <exclude>natives/linux-arm/**</exclude>
+                    <exclude>natives/linux-armhf/**</exclude>
+                    <exclude>natives/linux-musl-x86-64/**</exclude>
+                    <exclude>natives/linux-musl-aarch64/**</exclude>
+                    <exclude>natives/linux-x86/**</exclude>
+                    <exclude>natives/win-x86/**</exclude>
                   </excludes>
                 </filter>
               </filters>

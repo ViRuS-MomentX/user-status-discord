@@ -18,7 +18,7 @@ public final class MusicCommands extends ListenerAdapter {
 
     private final long guildId;
     private final MusicService music;
-    private final LastFm lastFm;
+    private final MusicCatalog catalog;
     private final int playlistSize;
 
     /**
@@ -32,10 +32,10 @@ public final class MusicCommands extends ListenerAdapter {
         return thread;
     });
 
-    public MusicCommands(long guildId, MusicService music, LastFm lastFm, int playlistSize) {
+    public MusicCommands(long guildId, MusicService music, MusicCatalog catalog, int playlistSize) {
         this.guildId = guildId;
         this.music = music;
-        this.lastFm = lastFm;
+        this.catalog = catalog;
         this.playlistSize = playlistSize;
     }
 
@@ -73,8 +73,9 @@ public final class MusicCommands extends ListenerAdapter {
             return;
         }
 
-        if (!lastFm.isConfigured()) {
-            event.getChannel().sendMessage("Не задан ключ Last.fm — подборка не работает.").queue();
+        if (!catalog.isConfigured()) {
+            event.getChannel().sendMessage("Каталог " + catalog.name()
+                    + " не настроен — подбирать плейлист нечем.").queue();
             return;
         }
 
@@ -93,10 +94,10 @@ public final class MusicCommands extends ListenerAdapter {
      */
     private void buildPlaylist(MessageChannel reply, String query) {
         try {
-            var songs = lastFm.playlistFor(query, playlistSize);
+            var songs = catalog.playlistFor(query, playlistSize);
 
             if (songs.isEmpty()) {
-                reply.sendMessage("Last.fm ничего не знает про «" + query + "».").queue();
+                reply.sendMessage(catalog.name() + " ничего не знает про «" + query + "».").queue();
                 return;
             }
 

@@ -30,10 +30,11 @@ public final class BotConfig {
     private final boolean music;
     private final String lastFmKey;
     private final int playlistSize;
+    private final MusicCatalog catalog;
 
     private BotConfig(String token, long guildId, long userId, String httpHost, int httpPort, String httpToken,
                       RankLadder ladder, String botsRole, boolean moderation,
-                      boolean music, String lastFmKey, int playlistSize) {
+                      boolean music, String lastFmKey, int playlistSize, MusicCatalog catalog) {
         this.token = token;
         this.guildId = guildId;
         this.userId = userId;
@@ -46,6 +47,7 @@ public final class BotConfig {
         this.music = music;
         this.lastFmKey = lastFmKey;
         this.playlistSize = playlistSize;
+        this.catalog = catalog;
     }
 
     public String getToken() {
@@ -96,6 +98,13 @@ public final class BotConfig {
     /** Ключ Last.fm для подбора плейлиста. */
     public String getLastFmKey() {
         return lastFmKey;
+    }
+
+    /**
+     * Каталог подсказок: откуда брать, что играть после введённого.
+     */
+    public MusicCatalog getCatalog() {
+        return catalog;
     }
 
     /** Сколько треков класть в очередь за одну команду start. */
@@ -154,7 +163,22 @@ public final class BotConfig {
                 Boolean.parseBoolean(props.getProperty("moderation.enabled", "false").trim()),
                 Boolean.parseBoolean(props.getProperty("music.enabled", "false").trim()),
                 pick(props, "music.lastfm.key", "VOICEBRIDGE_LASTFM_KEY"),
-                parsePlaylistSize(props.getProperty("music.playlist", "").trim()));
+                parsePlaylistSize(props.getProperty("music.playlist", "").trim()),
+                pickCatalog(props));
+    }
+
+    /**
+     * Выбирает каталог подсказок. По умолчанию iTunes: он отвечает без ключей и
+     * оттуда, откуда Last.fm отказывает.
+     */
+    private static MusicCatalog pickCatalog(Properties props) {
+        var choice = props.getProperty("music.catalog", "itunes").trim().toLowerCase();
+
+        if (choice.equals("lastfm")) {
+            return new LastFm(pick(props, "music.lastfm.key", "VOICEBRIDGE_LASTFM_KEY"));
+        }
+
+        return new ITunes(props.getProperty("music.itunes.country", "US").trim());
     }
 
     /**

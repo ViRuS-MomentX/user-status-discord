@@ -78,7 +78,7 @@ public final class VoiceBridgeBot {
         if (config.isMusicEnabled()) {
             music = new MusicService();
             musicCommands = new MusicCommands(config.getGuildId(), music,
-                    new LastFm(config.getLastFmKey()), config.getPlaylistSize());
+                    config.getCatalog(), config.getPlaylistSize());
         }
 
         if (!config.getBotsRole().isEmpty()) {

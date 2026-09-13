@@ -20,32 +20,11 @@ import java.util.List;
  *
  * <p>Сам звук Last.fm не отдаёт, только названия. Их бот потом ищет на SoundCloud.
  */
-public final class LastFm {
+public final class LastFm implements MusicCatalog {
 
     private static final Logger log = LoggerFactory.getLogger(LastFm.class);
 
     private static final String API = "https://ws.audioscrobbler.com/2.0/";
-
-    /** Одна песня в плейлисте: исполнитель и название. */
-    public static final class Song {
-        public final String artist;
-        public final String title;
-
-        Song(String artist, String title) {
-            this.artist = artist;
-            this.title = title;
-        }
-
-        /** Строка для поиска на SoundCloud. */
-        public String query() {
-            return artist.isEmpty() ? title : artist + " " + title;
-        }
-
-        @Override
-        public String toString() {
-            return artist.isEmpty() ? title : artist + " — " + title;
-        }
-    }
 
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -57,8 +36,14 @@ public final class LastFm {
         this.key = key;
     }
 
+    @Override
     public boolean isConfigured() {
         return !key.isEmpty();
+    }
+
+    @Override
+    public String name() {
+        return "Last.fm";
     }
 
     /**
@@ -70,6 +55,7 @@ public final class LastFm {
      *
      * @param limit сколько песен нужно всего
      */
+    @Override
     public List<Song> playlistFor(String input, int limit) {
         var top = topTracks(input, limit);
         if (!top.isEmpty()) {
@@ -106,7 +92,7 @@ public final class LastFm {
             var container = json.getObject("toptracks");
             var real = container.getObject("@attr").getString("artist", "");
 
-            if (!normalize(real).equals(normalize(artist))) {
+            if (!Song.normalize(real).equals(Song.normalize(artist))) {
                 return List.of();
             }
 
@@ -228,11 +214,6 @@ public final class LastFm {
             log.error("Запрос к Last.fm не удался ({}): {}", method, e.getMessage());
             return null;
         }
-    }
-
-    /** Сравнение имён без оглядки на регистр и лишние пробелы. */
-    private static String normalize(String value) {
-        return value == null ? "" : value.trim().toLowerCase().replaceAll("\\s+", " ");
     }
 
     private static String encode(String value) {

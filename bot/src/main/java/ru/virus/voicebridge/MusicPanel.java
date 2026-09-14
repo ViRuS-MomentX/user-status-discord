@@ -11,7 +11,6 @@ import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.MessageEmbed;
 import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
 import net.dv8tion.jda.api.entities.channel.middleman.GuildMessageChannel;
-import net.dv8tion.jda.api.entities.emoji.Emoji;
 import net.dv8tion.jda.api.events.interaction.ModalInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
@@ -67,6 +66,7 @@ public final class MusicPanel extends ListenerAdapter {
     private final long guildId;
     private final MusicRequests requests;
     private final PanelSettings settings;
+    private final PanelIcons icons;
 
     /**
      * Где висит последняя панель. Новая заменяет её, чтобы в голосовом чате не
@@ -75,10 +75,11 @@ public final class MusicPanel extends ListenerAdapter {
     private volatile long lastChannelId = 0;
     private volatile long lastMessageId = 0;
 
-    public MusicPanel(long guildId, MusicRequests requests, PanelSettings settings) {
+    public MusicPanel(long guildId, MusicRequests requests, PanelSettings settings, PanelIcons icons) {
         this.guildId = guildId;
         this.requests = requests;
         this.settings = settings;
+        this.icons = icons;
     }
 
     @Override
@@ -149,27 +150,30 @@ public final class MusicPanel extends ListenerAdapter {
 
         return List.of(
                 ActionRow.of(
-                        icon(QUIETER, "🔉"),
-                        icon(PREVIOUS, "⏮️"),
-                        icon(PAUSE, paused ? "▶️" : "⏸️"),
-                        icon(NEXT, "⏭️"),
-                        icon(LOUDER, "🔊")),
+                        icon(QUIETER, "quieter", "🔉"),
+                        icon(PREVIOUS, "previous", "⏮️"),
+                        paused ? icon(PAUSE, "play", "▶️") : icon(PAUSE, "pause", "⏸️"),
+                        icon(NEXT, "next", "⏭️"),
+                        icon(LOUDER, "louder", "🔊")),
                 ActionRow.of(
-                        icon(WINTER, "🎄"),
-                        icon(SPRING, "🌸"),
-                        icon(CHARTS, "🔥"),
-                        icon(AUTUMN, "🍂"),
-                        icon(SUMMER, "☀️")),
+                        icon(WINTER, "winter", "🎄"),
+                        icon(SPRING, "spring", "🌸"),
+                        icon(CHARTS, "charts", "🔥"),
+                        icon(AUTUMN, "autumn", "🍂"),
+                        icon(SUMMER, "summer", "☀️")),
                 ActionRow.of(
-                        icon(OWN, "🔍"),
-                        icon(ARTIST, "🎤"),
-                        icon(STOP, "🛑"),
-                        icon(CODE, "🔢"),
-                        icon(CLEAR, "🗑️")));
+                        icon(OWN, "own", "🔍"),
+                        icon(ARTIST, "artist", "🎤"),
+                        icon(STOP, "stop", "🛑"),
+                        icon(CODE, "code", "🔢"),
+                        icon(CLEAR, "clear", "🗑️")));
     }
 
-    private static Button icon(String id, String emoji) {
-        return Button.secondary(id, Emoji.fromUnicode(emoji));
+    /**
+     * Кнопка с иконкой сервера, а пока её нет — со стандартным символом.
+     */
+    private Button icon(String id, String key, String fallback) {
+        return Button.secondary(id, icons.get(key, fallback));
     }
 
     /**

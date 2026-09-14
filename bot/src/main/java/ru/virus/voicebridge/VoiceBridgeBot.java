@@ -77,11 +77,16 @@ public final class VoiceBridgeBot {
         MusicRequests musicRequests = null;
         MusicCommands musicCommands = null;
         MusicPanel musicPanel = null;
+        PanelIcons panelIcons = null;
 
         if (config.isMusicEnabled()) {
             music = new MusicService();
             musicRequests = new MusicRequests(music, config.getCatalog(), config.getPlaylistSize());
-            musicPanel = new MusicPanel(config.getGuildId(), musicRequests, config.getPanel());
+            // Лист иконок ищем рядом с настройками, а не в текущей папке: бота запускают
+            // и ярлыком, и из планировщика, и «текущая папка» там каждый раз своя
+            panelIcons = new PanelIcons(config.getGuildId(),
+                    configPath.toAbsolutePath().resolveSibling(config.getPanel().sheet()));
+            musicPanel = new MusicPanel(config.getGuildId(), musicRequests, config.getPanel(), panelIcons);
             musicCommands = new MusicCommands(config.getGuildId(), musicRequests, musicPanel);
         }
 
@@ -125,7 +130,8 @@ public final class VoiceBridgeBot {
                             .withDaveSessionFactory(new JDaveSessionFactory()))
                     .addEventListeners(tracker);
 
-            for (var listener : new Object[] { commands, moderation, memberRoles, musicCommands, musicPanel }) {
+            for (var listener : new Object[] { commands, moderation, memberRoles,
+                    panelIcons, musicCommands, musicPanel }) {
                 if (listener != null) {
                     builder.addEventListeners(listener);
                 }

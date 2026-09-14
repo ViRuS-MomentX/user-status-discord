@@ -17,11 +17,13 @@ public final class MusicCommands extends ListenerAdapter {
     private final long guildId;
     private final MusicRequests requests;
     private final MusicService music;
+    private final MusicPanel panel;
 
-    public MusicCommands(long guildId, MusicRequests requests) {
+    public MusicCommands(long guildId, MusicRequests requests, MusicPanel panel) {
         this.guildId = guildId;
         this.requests = requests;
         this.music = requests.getMusic();
+        this.panel = panel;
     }
 
     @Override
@@ -93,6 +95,10 @@ public final class MusicCommands extends ListenerAdapter {
         var reply = event.getChannel();
         reply.sendMessage("Ищу «" + query + "»...").queue();
         requests.submit(query, text -> reply.sendMessage(text).queue());
+
+        // Панель — в чат самого голосового канала: там её увидят все, кто слушает,
+        // а не только тот, кто написал команду в другом месте
+        panel.postInVoice(event.getGuild(), state.getChannel(), member);
     }
 
     /**

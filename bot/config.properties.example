@@ -100,3 +100,11 @@ music.playlist=15
 # Прямая ссылка на изображение — например, загрузить его в любой канал
 # Discord и скопировать ссылку на файл. Пусто — панель будет без картинки.
 music.panel.image=
+
+# Что искать по сезонным кнопкам панели (🎄 🌸 🍂 ☀️). Это обычный поисковый
+# запрос к каталогу, так что на русском и на английском найдётся разное.
+# Пусто — значения по умолчанию, указанные ниже.
+music.season.winter=christmas songs
+music.season.spring=spring hits
+music.season.autumn=autumn chill
+music.season.summer=summer hits

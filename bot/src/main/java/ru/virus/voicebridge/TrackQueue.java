@@ -8,55 +8,123 @@ import com.sedmelluq.discord.lavaplayer.track.AudioTrackEndReason;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.LinkedList;
 import java.util.List;
-import java.util.concurrent.BlockingDeque;
-import java.util.concurrent.LinkedBlockingDeque;
 
 /**
- * Очередь воспроизведения: ставит следующий трек, когда закончился предыдущий.
+ * Очередь воспроизведения: что играет сейчас, что дальше и что уже отыграло.
+ *
+ * <p>Очередь делится на две части. Впереди идут личные просьбы — то, что люди заказали
+ * кнопкой или командой; за ними подобранный плейлист. Просьба всегда обгоняет плейлист,
+ * но не обгоняет чужую просьбу: между собой они выстраиваются в порядке поступления.
  */
 public final class TrackQueue extends AudioEventAdapter {
 
     private static final Logger log = LoggerFactory.getLogger(TrackQueue.class);
 
+    /** Сколько отыгравших треков помнить ради кнопки «предыдущая». */
+    private static final int HISTORY_LIMIT = 50;
+
     private final AudioPlayer player;
-    // Двусторонняя: новую просьбу во время проигрывания кладём в голову,
-    // а не в хвост к полутора десяткам треков плейлиста
-    private final BlockingDeque<AudioTrack> queue = new LinkedBlockingDeque<>();
+
+    private final LinkedList<AudioTrack> queue = new LinkedList<>();
+    private final Deque<AudioTrack> history = new ArrayDeque<>();
+
+    /**
+     * Сколько треков в голове очереди — личные просьбы.
+     *
+     * <p>Новая просьба встаёт сразу за ними: так она обгонит плейлист, но не отберёт
+     * очередь у того, кто попросил раньше.
+     */
+    private int requests = 0;
 
     public TrackQueue(AudioPlayer player) {
         this.player = player;
     }
 
     /**
-     * Ставит трек в очередь или включает сразу, если ничего не играет.
+     * Ставит трек в конец очереди или включает сразу, если ничего не играет.
      */
-    public void add(AudioTrack track) {
+    public synchronized void add(AudioTrack track) {
         // startTrack с noInterrupt возвращает false, если что-то уже играет,
         // и тогда трек просто ждёт своей очереди
         if (!player.startTrack(track, true)) {
-            queue.offerLast(track);
+            queue.addLast(track);
         }
     }
 
     /**
-     * Ставит трек следующим: он заиграет сразу после текущего, не дожидаясь остального.
+     * Ставит личную просьбу: она заиграет после текущего трека и после просьб,
+     * поступивших раньше, но раньше подобранного плейлиста.
      */
-    public void addNext(AudioTrack track) {
-        if (!player.startTrack(track, true)) {
-            queue.offerFirst(track);
+    public synchronized void addRequest(AudioTrack track) {
+        if (player.startTrack(track, true)) {
+            return;
         }
+
+        queue.add(Math.min(requests, queue.size()), track);
+        requests++;
     }
 
     /**
      * Включает следующий трек. Если очередь пуста, воспроизведение останавливается.
      */
-    public void next() {
-        player.startTrack(queue.poll(), false);
+    public synchronized void next() {
+        remember(player.getPlayingTrack());
+
+        var track = queue.pollFirst();
+
+        if (requests > 0) {
+            requests--;
+        }
+
+        player.startTrack(track, false);
+    }
+
+    /**
+     * Возвращается к предыдущему треку. Текущий при этом встаёт в голову очереди,
+     * чтобы его можно было доиграть.
+     */
+    public synchronized boolean previous() {
+        var earlier = history.pollLast();
+
+        if (earlier == null) {
+            return false;
+        }
+
+        var current = player.getPlayingTrack();
+
+        if (current != null) {
+            // Клон нужен потому, что отыгравший трек нельзя запустить заново:
+            // у него уже израсходован внутренний исполнитель
+            queue.addFirst(current.makeClone());
+            requests++;
+        }
+
+        player.startTrack(earlier.makeClone(), false);
+        return true;
+    }
+
+    /** Стоит ли воспроизведение на паузе. */
+    public boolean isPaused() {
+        return player.isPaused();
+    }
+
+    /**
+     * Переключает паузу.
+     *
+     * @return <code>true</code>, если после переключения стоит пауза
+     */
+    public boolean togglePause() {
+        var paused = !player.isPaused();
+        player.setPaused(paused);
+        return paused;
     }
 
     /** Треки, ожидающие очереди. Играющий сюда не входит. */
-    public List<AudioTrack> waiting() {
+    public synchronized List<AudioTrack> waiting() {
         return List.copyOf(queue);
     }
 
@@ -65,11 +133,35 @@ public final class TrackQueue extends AudioEventAdapter {
     }
 
     /**
-     * Останавливает воспроизведение и забывает очередь.
+     * Убирает всё, что ждёт очереди, не трогая текущий трек.
      */
-    public void clear() {
+    public synchronized void clearQueue() {
         queue.clear();
+        requests = 0;
+    }
+
+    /**
+     * Останавливает воспроизведение и забывает всё.
+     */
+    public synchronized void clear() {
+        queue.clear();
+        history.clear();
+        requests = 0;
+        player.setPaused(false);
         player.stopTrack();
+    }
+
+    private void remember(AudioTrack track) {
+        if (track == null) {
+            return;
+        }
+
+        history.addLast(track);
+
+        // История нужна только для шага назад, хранить её всю незачем
+        if (history.size() > HISTORY_LIMIT) {
+            history.pollFirst();
+        }
     }
 
     @Override

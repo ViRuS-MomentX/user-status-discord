@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * Обработка музыкальных запросов: подобрать, найти на SoundCloud, поставить в очередь.
@@ -84,16 +85,34 @@ public final class MusicRequests {
         });
     }
 
-    /**
-     * Ставит в очередь чарт популярного.
-     */
+    /** Ставит в очередь чарт популярного. */
     public void submitTrending(Consumer<String> reply) {
+        submitPlaylist("чарт", reply, () -> catalog.trending(playlistSize));
+    }
+
+    /** Ставит в очередь подборку по слову — сезонную и любую другую. */
+    public void submitTerm(String term, String label, Consumer<String> reply) {
+        submitPlaylist(label, reply, () -> catalog.byTerm(term, playlistSize));
+    }
+
+    /** Ставит в очередь популярные песни исполнителя. */
+    public void submitArtist(String artist, Consumer<String> reply) {
+        submitPlaylist(artist, reply, () -> catalog.byArtist(artist, playlistSize));
+    }
+
+    /**
+     * Общая часть для всех подборок: получить список, проверить, поставить в очередь.
+     *
+     * <p>Подборка — это плейлист целиком, а не одна просьба, поэтому она всегда идёт
+     * в хвост, даже если сейчас что-то играет.
+     */
+    private void submitPlaylist(String label, Consumer<String> reply, Supplier<List<Song>> source) {
         worker.submit(() -> {
             try {
                 List<Song> songs;
 
                 try {
-                    songs = catalog.trending(playlistSize);
+                    songs = source.get();
                 } catch (CatalogUnavailableException e) {
                     log.error("{} недоступен: {}", catalog.name(), e.getMessage());
                     reply.accept(catalog.name() + " не отвечает. Попробуй ещё раз через минуту.");
@@ -101,16 +120,14 @@ public final class MusicRequests {
                 }
 
                 if (songs.isEmpty()) {
-                    reply.accept("Чарт получить не вышло.");
+                    reply.accept("Ничего не нашлось: " + label + ".");
                     return;
                 }
 
-                // Чарт — это плейлист целиком, а не одна просьба, поэтому он всегда
-                // идёт в хвост, даже если сейчас что-то играет
-                enqueue(songs, false, "трендовое", reply);
+                enqueue(songs, false, label, reply);
             } catch (Exception e) {
-                log.error("Не удалось получить чарт: {}", e.toString());
-                reply.accept("Что-то пошло не так при получении чарта.");
+                log.error("Не удалось собрать подборку «{}»: {}", label, e.toString());
+                reply.accept("Что-то пошло не так при сборке подборки.");
             }
         });
     }
@@ -140,7 +157,7 @@ public final class MusicRequests {
         }
 
         if (asNext) {
-            music.getQueue().addNext(first);
+            music.getQueue().addRequest(first);
             reply.accept("Следующим будет: **" + first.getInfo().title + "**");
             return;
         }

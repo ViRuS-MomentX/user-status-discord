@@ -75,6 +75,38 @@ public final class LastFm implements MusicCatalog {
     }
 
     @Override
+    public List<Song> byTerm(String term, int limit) {
+        var json = call("track.search", "track", term, "limit", String.valueOf(limit));
+
+        if (json == null) {
+            return List.of();
+        }
+
+        try {
+            var matches = json.getObject("results").getObject("trackmatches").getArray("track");
+            var songs = new ArrayList<Song>();
+
+            for (var i = 0; i < matches.length(); i++) {
+                var track = matches.getObject(i);
+                var name = track.getString("name", "");
+                if (!name.isEmpty()) {
+                    // Здесь исполнитель приходит строкой, а не объектом, как в других ответах
+                    songs.add(new Song(track.getString("artist", ""), name));
+                }
+            }
+
+            return songs;
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    @Override
+    public List<Song> byArtist(String artist, int limit) {
+        return topTracks(artist, limit);
+    }
+
+    @Override
     public List<Song> trending(int limit) {
         var json = call("chart.gettoptracks", "limit", String.valueOf(limit));
 

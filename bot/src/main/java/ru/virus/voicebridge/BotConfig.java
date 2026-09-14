@@ -38,12 +38,12 @@ public final class BotConfig {
     private final int playlistSize;
     private final MusicCatalog catalog;
     private final OnlineStatus status;
-    private final String panelImage;
+    private final PanelSettings panel;
 
     private BotConfig(String token, long guildId, long userId, String httpHost, int httpPort, String httpToken,
                       RankLadder ladder, String botsRole, boolean moderation,
                       boolean music, String lastFmKey, int playlistSize, MusicCatalog catalog,
-                      OnlineStatus status, String panelImage) {
+                      OnlineStatus status, PanelSettings panel) {
         this.token = token;
         this.guildId = guildId;
         this.userId = userId;
@@ -58,7 +58,7 @@ public final class BotConfig {
         this.playlistSize = playlistSize;
         this.catalog = catalog;
         this.status = status;
-        this.panelImage = panelImage;
+        this.panel = panel;
     }
 
     public String getToken() {
@@ -123,9 +123,9 @@ public final class BotConfig {
         return status;
     }
 
-    /** Ссылка на картинку-подсказку под панелью плеера. Пустая строка — без картинки. */
-    public String getPanelImage() {
-        return panelImage;
+    /** Картинка-подсказка и слова для сезонных подборок панели. */
+    public PanelSettings getPanel() {
+        return panel;
     }
 
     /** Сколько треков класть в очередь за одну команду start. */
@@ -187,7 +187,29 @@ public final class BotConfig {
                 parsePlaylistSize(props.getProperty("music.playlist", "").trim()),
                 pickCatalog(props),
                 parseStatus(props.getProperty("bot.status", "").trim()),
-                props.getProperty("music.panel.image", "").trim());
+                panelSettings(props));
+    }
+
+    /**
+     * Настройки панели.
+     *
+     * <p>Сезонные кнопки — это обычный поиск по каталогу, и запрос вынесен в файл:
+     * подборка «новогоднее» на английском и на русском находит разное, а какая нужна,
+     * знает только владелец сервера.
+     */
+    private static PanelSettings panelSettings(Properties props) {
+        return new PanelSettings(
+                props.getProperty("music.panel.image", "").trim(),
+                season(props, "music.season.winter", "christmas songs"),
+                season(props, "music.season.spring", "spring hits"),
+                season(props, "music.season.autumn", "autumn chill"),
+                season(props, "music.season.summer", "summer hits"));
+    }
+
+    /** Пустую строку в настройках считаем «не трогали» и берём значение по умолчанию. */
+    private static String season(Properties props, String key, String fallback) {
+        var value = props.getProperty(key, "").trim();
+        return value.isEmpty() ? fallback : value;
     }
 
     /**

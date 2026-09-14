@@ -101,6 +101,19 @@ public final class ITunes implements MusicCatalog {
         return playlist;
     }
 
+    @Override
+    public List<Song> byTerm(String term, int limit) {
+        return search(term, limit, false);
+    }
+
+    @Override
+    public List<Song> byArtist(String artist, int limit) {
+        var top = search(artist, limit, true);
+        // Если по полю исполнителя ничего не нашлось, пробуем обычным поиском:
+        // имя могли написать иначе, чем оно записано в каталоге
+        return top.isEmpty() ? search(artist, limit, false) : top;
+    }
+
     /**
      * Песни из чарта популярного.
      *

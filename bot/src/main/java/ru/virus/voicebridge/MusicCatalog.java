@@ -31,4 +31,17 @@ public interface MusicCatalog {
      * @return список от самой популярной; пустой, если каталог такого не умеет
      */
     List<Song> trending(int limit);
+
+    /**
+     * Песни по общему слову — «christmas», «summer» и тому подобное.
+     *
+     * <p>В отличие от {@link #playlistFor}, ничего не разгадывает: не пытается понять,
+     * исполнитель это или песня, а просто отдаёт подходящее.
+     */
+    List<Song> byTerm(String term, int limit);
+
+    /**
+     * Популярные песни конкретного исполнителя.
+     */
+    List<Song> byArtist(String artist, int limit);
 }

@@ -9,6 +9,8 @@ import net.dv8tion.jda.api.components.textinput.TextInputStyle;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.MessageEmbed;
+import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
+import net.dv8tion.jda.api.entities.channel.middleman.GuildMessageChannel;
 import net.dv8tion.jda.api.entities.emoji.Emoji;
 import net.dv8tion.jda.api.events.interaction.ModalInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
@@ -24,21 +26,38 @@ import java.util.List;
 
 /**
  * Панель управления плеером: сообщение с кнопками, которое не нужно вызывать заново.
+ *
+ * <p>Кнопки без подписей — различать их должна иконка. Что какая делает, объясняет
+ * картинка, ссылку на которую можно задать в настройках.
  */
 public final class MusicPanel extends ListenerAdapter {
 
     private static final Logger log = LoggerFactory.getLogger(MusicPanel.class);
 
-    private static final String SKIP = "music:skip";
-    private static final String STOP = "music:stop";
-    private static final String ADD = "music:add";
-    private static final String TRENDING = "music:trending";
+    // Первый ряд: управление воспроизведением
     private static final String QUIETER = "music:quieter";
+    private static final String PREVIOUS = "music:previous";
+    private static final String PAUSE = "music:pause";
+    private static final String NEXT = "music:next";
     private static final String LOUDER = "music:louder";
-    private static final String REFRESH = "music:refresh";
 
-    private static final String ADD_MODAL = "music:addmodal";
-    private static final String ADD_FIELD = "query";
+    // Второй ряд: готовые подборки
+    private static final String WINTER = "music:winter";
+    private static final String SPRING = "music:spring";
+    private static final String CHARTS = "music:charts";
+    private static final String AUTUMN = "music:autumn";
+    private static final String SUMMER = "music:summer";
+
+    // Третий ряд: заказы и управление очередью
+    private static final String OWN = "music:own";
+    private static final String ARTIST = "music:artist";
+    private static final String STOP = "music:stop";
+    private static final String CODE = "music:code";
+    private static final String CLEAR = "music:clear";
+
+    private static final String OWN_MODAL = "music:ownmodal";
+    private static final String ARTIST_MODAL = "music:artistmodal";
+    private static final String FIELD = "query";
 
     /** Насколько двигается громкость за одно нажатие. */
     private static final int VOLUME_STEP = 10;
@@ -47,14 +66,19 @@ public final class MusicPanel extends ListenerAdapter {
 
     private final long guildId;
     private final MusicRequests requests;
+    private final PanelSettings settings;
 
-    /** Картинка-подсказка под карточкой: что означает каждая иконка. Пусто — без неё. */
-    private final String legendUrl;
+    /**
+     * Где висит последняя панель. Новая заменяет её, чтобы в голосовом чате не
+     * копились одинаковые сообщения.
+     */
+    private volatile long lastChannelId = 0;
+    private volatile long lastMessageId = 0;
 
-    public MusicPanel(long guildId, MusicRequests requests, String legendUrl) {
+    public MusicPanel(long guildId, MusicRequests requests, PanelSettings settings) {
         this.guildId = guildId;
         this.requests = requests;
-        this.legendUrl = legendUrl;
+        this.settings = settings;
     }
 
     @Override
@@ -66,36 +90,92 @@ public final class MusicPanel extends ListenerAdapter {
         var text = event.getMessage().getContentRaw().trim().toLowerCase();
 
         if (text.equals("панель") || text.equals("плеер")) {
-            event.getChannel()
-                    .sendMessageEmbeds(buildPanel(event.getGuild()))
-                    .setComponents(buttons())
-                    .queue();
+            post(event.getChannel().asGuildMessageChannel(), null);
         }
     }
 
     /**
-     * Ряд кнопок без подписей — только иконки.
+     * Публикует панель, убрав предыдущую.
      *
-     * <p>Все одного стиля: цвет плитки в такой сетке только мешает, различать кнопки
-     * должна сама иконка. Что какая делает, объясняет картинка в карточке.
+     * @param requester кого упомянуть; <code>null</code>, если панель вызвали вручную
+     */
+    public void post(GuildMessageChannel channel, Member requester) {
+        removeOld(channel.getGuild());
+
+        var action = requester == null
+                ? channel.sendMessageEmbeds(buildPanel())
+                : channel.sendMessage(requester.getAsMention() + " включает музыку")
+                        .setEmbeds(buildPanel());
+
+        action.setComponents(buttons()).queue(message -> {
+            lastChannelId = channel.getIdLong();
+            lastMessageId = message.getIdLong();
+        }, error -> log.error("Не удалось опубликовать панель: {}", error.getMessage()));
+    }
+
+    /**
+     * Показывает панель в текстовом чате голосового канала.
+     */
+    public void postInVoice(Guild guild, AudioChannel channel, Member requester) {
+        if (channel instanceof GuildMessageChannel voiceChat) {
+            post(voiceChat, requester);
+        }
+    }
+
+    private void removeOld(Guild guild) {
+        if (lastMessageId == 0) {
+            return;
+        }
+
+        var channel = guild.getChannelById(GuildMessageChannel.class, lastChannelId);
+        var messageId = lastMessageId;
+
+        lastMessageId = 0;
+
+        if (channel != null) {
+            // Старую панель могли удалить руками — тогда молчим, это не беда
+            channel.deleteMessageById(messageId).queue(ok -> { }, error -> { });
+        }
+    }
+
+    /**
+     * Три ряда по пять иконок.
+     *
+     * <p>Иконка паузы меняется на «продолжить», когда воспроизведение остановлено:
+     * кнопка одна, и по ней должно быть видно, что она сделает.
      */
     private List<ActionRow> buttons() {
+        var paused = requests.getMusic().getQueue().isPaused();
+
         return List.of(
                 ActionRow.of(
-                        Button.secondary(SKIP, Emoji.fromUnicode("\u23ED\uFE0F")),
-                        Button.secondary(STOP, Emoji.fromUnicode("\uD83D\uDED1")),
-                        Button.secondary(ADD, Emoji.fromUnicode("\u2795")),
-                        Button.secondary(QUIETER, Emoji.fromUnicode("\uD83D\uDD09")),
-                        Button.secondary(LOUDER, Emoji.fromUnicode("\uD83D\uDD0A"))),
+                        icon(QUIETER, "🔉"),
+                        icon(PREVIOUS, "⏮️"),
+                        icon(PAUSE, paused ? "▶️" : "⏸️"),
+                        icon(NEXT, "⏭️"),
+                        icon(LOUDER, "🔊")),
                 ActionRow.of(
-                        Button.secondary(TRENDING, Emoji.fromUnicode("\uD83D\uDD25")),
-                        Button.secondary(REFRESH, Emoji.fromUnicode("\uD83D\uDD04"))));
+                        icon(WINTER, "🎄"),
+                        icon(SPRING, "🌸"),
+                        icon(CHARTS, "🔥"),
+                        icon(AUTUMN, "🍂"),
+                        icon(SUMMER, "☀️")),
+                ActionRow.of(
+                        icon(OWN, "🔍"),
+                        icon(ARTIST, "🎤"),
+                        icon(STOP, "🛑"),
+                        icon(CODE, "🔢"),
+                        icon(CLEAR, "🗑️")));
+    }
+
+    private static Button icon(String id, String emoji) {
+        return Button.secondary(id, Emoji.fromUnicode(emoji));
     }
 
     /**
      * Собирает саму карточку плеера.
      */
-    private MessageEmbed buildPanel(Guild guild) {
+    private MessageEmbed buildPanel() {
         var queue = requests.getMusic().getQueue();
         var current = queue.current();
         var waiting = queue.waiting();
@@ -105,11 +185,10 @@ public final class MusicPanel extends ListenerAdapter {
                 .setTitle("🎵 Плеер");
 
         if (current == null) {
-            embed.setDescription("Сейчас ничего не играет.\n"
-                    + "Зайди в голосовой канал и нажми «В очередь» или «Трендовое».");
+            embed.setDescription("Сейчас ничего не играет.");
         } else {
-            embed.setDescription("**" + current.getInfo().title + "**\n"
-                    + current.getInfo().author);
+            embed.setDescription((queue.isPaused() ? "⏸️ " : "")
+                    + "**" + current.getInfo().title + "**\n" + current.getInfo().author);
         }
 
         embed.addField("В очереди", waiting.size() + " треков", true);
@@ -124,11 +203,11 @@ public final class MusicPanel extends ListenerAdapter {
             embed.addField("Дальше", next.toString(), false);
         }
 
-        if (!legendUrl.isEmpty()) {
-            embed.setImage(legendUrl);
+        if (!settings.image().isEmpty()) {
+            embed.setImage(settings.image());
         }
 
-        return embed.setFooter("Кнопки работают у всех, кто сидит в голосовом канале").build();
+        return embed.build();
     }
 
     @Override
@@ -146,79 +225,123 @@ public final class MusicPanel extends ListenerAdapter {
             return;
         }
 
-        // Кнопка добавления открывает окно ввода, а показать его можно только в ответ
-        // на само нажатие — никаких подтверждений до этого быть не должно
-        if (ADD.equals(id)) {
-            if (!inVoice(member)) {
-                event.reply("Сначала зайди в голосовой канал.").setEphemeral(true).queue();
-                return;
-            }
-
-            event.replyModal(Modal.create(ADD_MODAL, "Добавить в очередь")
-                    .addComponents(Label.of("Название песни или исполнитель",
-                            TextInput.create(ADD_FIELD, TextInputStyle.SHORT)
-                                    .setPlaceholder("Кино — Группа крови")
-                                    .setRequired(true)
-                                    .setMaxLength(200)
-                                    .build()))
-                    .build()).queue();
+        // Кнопки с окном ввода нельзя подтверждать заранее: окно показывается только
+        // в ответ на само нажатие, и любой ответ до него закрывает эту возможность
+        if (OWN.equals(id) || ARTIST.equals(id)) {
+            openModal(event, member, id);
             return;
         }
 
-        // Остальные кнопки правят саму панель на месте. deferEdit подтверждает нажатие
-        // сразу: у Discord на это три секунды, а работа может занять больше.
+        // Остальные правят панель на месте. deferEdit подтверждает нажатие сразу:
+        // у Discord на это три секунды, а работа может занять больше.
         event.deferEdit().queue();
         var hook = event.getHook();
 
         switch (id) {
-            case SKIP -> skip(guild, hook);
+            case QUIETER -> volume(-VOLUME_STEP, hook);
+            case LOUDER -> volume(VOLUME_STEP, hook);
+            case PREVIOUS -> previous(hook);
+            case PAUSE -> pause(hook);
+            case NEXT -> skip(hook);
+            case WINTER -> playlist(member, guild, hook, settings.winter(), "новогоднее");
+            case SPRING -> playlist(member, guild, hook, settings.spring(), "весеннее");
+            case AUTUMN -> playlist(member, guild, hook, settings.autumn(), "осеннее");
+            case SUMMER -> playlist(member, guild, hook, settings.summer(), "летнее");
+            case CHARTS -> charts(member, guild, hook);
             case STOP -> {
                 requests.getMusic().disconnect(guild);
-                refresh(guild, hook);
+                refresh(hook);
             }
-            case QUIETER -> {
-                requests.getMusic().setVolume(requests.getMusic().getVolume() - VOLUME_STEP);
-                refresh(guild, hook);
+            case CLEAR -> {
+                requests.getMusic().getQueue().clearQueue();
+                refresh(hook);
             }
-            case LOUDER -> {
-                requests.getMusic().setVolume(requests.getMusic().getVolume() + VOLUME_STEP);
-                refresh(guild, hook);
-            }
-            case TRENDING -> trending(member, guild, hook);
-            case REFRESH -> refresh(guild, hook);
+            case CODE -> hook.sendMessage("Плейлисты по коду пока не подключены.")
+                    .setEphemeral(true).queue();
             default -> { }
         }
     }
 
-    private void skip(Guild guild, InteractionHook hook) {
+    private void openModal(ButtonInteractionEvent event, Member member, String id) {
+        if (member.getVoiceState() == null || member.getVoiceState().getChannel() == null) {
+            event.reply("Сначала зайди в голосовой канал.").setEphemeral(true).queue();
+            return;
+        }
+
+        var own = OWN.equals(id);
+
+        event.replyModal(Modal.create(own ? OWN_MODAL : ARTIST_MODAL,
+                        own ? "Указать свою" : "Указать исполнителя")
+                .addComponents(Label.of(own ? "Название песни" : "Имя исполнителя",
+                        TextInput.create(FIELD, TextInputStyle.SHORT)
+                                .setPlaceholder(own ? "Кино — Группа крови" : "Кино")
+                                .setRequired(true)
+                                .setMaxLength(200)
+                                .build()))
+                .build()).queue();
+    }
+
+    private void volume(int delta, InteractionHook hook) {
+        requests.getMusic().setVolume(requests.getMusic().getVolume() + delta);
+        refresh(hook);
+    }
+
+    private void pause(InteractionHook hook) {
+        if (requests.getMusic().getQueue().current() == null) {
+            hook.sendMessage("Сейчас ничего не играет.").setEphemeral(true).queue();
+            return;
+        }
+
+        requests.getMusic().getQueue().togglePause();
+        refresh(hook);
+    }
+
+    private void skip(InteractionHook hook) {
         if (requests.getMusic().getQueue().current() == null) {
             hook.sendMessage("Сейчас ничего не играет.").setEphemeral(true).queue();
             return;
         }
 
         requests.getMusic().getQueue().next();
-        refresh(guild, hook);
+        refresh(hook);
     }
 
-    private void trending(Member member, Guild guild, InteractionHook hook) {
+    private void previous(InteractionHook hook) {
+        if (!requests.getMusic().getQueue().previous()) {
+            hook.sendMessage("Раньше ничего не играло.").setEphemeral(true).queue();
+            return;
+        }
+
+        refresh(hook);
+    }
+
+    private void playlist(Member member, Guild guild, InteractionHook hook, String term, String label) {
         if (!connect(member, guild, hook)) {
             return;
         }
 
-        hook.sendMessage("Собираю чарт...").setEphemeral(true).queue();
-        requests.submitTrending(text -> hook.sendMessage(text).setEphemeral(true)
-                .queue(ok -> refresh(guild, hook), error -> { }));
+        requests.submitTerm(term, label, text -> notice(hook, text));
+    }
+
+    private void charts(Member member, Guild guild, InteractionHook hook) {
+        if (!connect(member, guild, hook)) {
+            return;
+        }
+
+        requests.submitTrending(text -> notice(hook, text));
     }
 
     @Override
     public void onModalInteraction(ModalInteractionEvent event) {
-        if (!ADD_MODAL.equals(event.getModalId())) {
+        var own = OWN_MODAL.equals(event.getModalId());
+
+        if (!own && !ARTIST_MODAL.equals(event.getModalId())) {
             return;
         }
 
         var member = event.getMember();
         var guild = event.getGuild();
-        var value = event.getValue(ADD_FIELD);
+        var value = event.getValue(FIELD);
 
         if (member == null || guild == null || value == null) {
             return;
@@ -231,7 +354,26 @@ public final class MusicPanel extends ListenerAdapter {
             return;
         }
 
-        requests.submit(value.getAsString().trim(), text -> hook.sendMessage(text).queue());
+        var query = value.getAsString().trim();
+
+        if (own) {
+            requests.submit(query, text -> hook.sendMessage(text).queue());
+        } else {
+            requests.submitArtist(query, text -> hook.sendMessage(text).queue());
+        }
+
+        // Панель показываем там, где сидит заказавший, с упоминанием его самого
+        var state = member.getVoiceState();
+        if (state != null && state.getChannel() != null) {
+            postInVoice(guild, state.getChannel(), member);
+        }
+    }
+
+    /**
+     * Сообщение о ходе дела плюс обновление панели.
+     */
+    private void notice(InteractionHook hook, String text) {
+        hook.sendMessage(text).setEphemeral(true).queue(ok -> refresh(hook), error -> { });
     }
 
     /**
@@ -251,16 +393,11 @@ public final class MusicPanel extends ListenerAdapter {
         return true;
     }
 
-    private boolean inVoice(Member member) {
-        var state = member.getVoiceState();
-        return state != null && state.getChannel() != null;
-    }
-
     /**
      * Перерисовывает панель в том же сообщении.
      */
-    private void refresh(Guild guild, InteractionHook hook) {
-        hook.editOriginalEmbeds(buildPanel(guild)).queue(ok -> { },
+    private void refresh(InteractionHook hook) {
+        hook.editOriginalEmbeds(buildPanel()).setComponents(buttons()).queue(ok -> { },
                 error -> log.error("Не удалось обновить панель: {}", error.getMessage()));
     }
 }

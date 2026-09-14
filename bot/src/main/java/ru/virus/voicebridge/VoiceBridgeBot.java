@@ -74,12 +74,15 @@ public final class VoiceBridgeBot {
         }
 
         MusicService music = null;
+        MusicRequests musicRequests = null;
         MusicCommands musicCommands = null;
+        MusicPanel musicPanel = null;
 
         if (config.isMusicEnabled()) {
             music = new MusicService();
-            musicCommands = new MusicCommands(config.getGuildId(), music,
-                    config.getCatalog(), config.getPlaylistSize());
+            musicRequests = new MusicRequests(music, config.getCatalog(), config.getPlaylistSize());
+            musicCommands = new MusicCommands(config.getGuildId(), musicRequests);
+            musicPanel = new MusicPanel(config.getGuildId(), musicRequests);
         }
 
         // Роль ботам и ранг каждому участнику раздаёт один обход: список участников
@@ -122,7 +125,7 @@ public final class VoiceBridgeBot {
                             .withDaveSessionFactory(new JDaveSessionFactory()))
                     .addEventListeners(tracker);
 
-            for (var listener : new Object[] { commands, moderation, memberRoles, musicCommands }) {
+            for (var listener : new Object[] { commands, moderation, memberRoles, musicCommands, musicPanel }) {
                 if (listener != null) {
                     builder.addEventListeners(listener);
                 }
@@ -160,6 +163,7 @@ public final class VoiceBridgeBot {
         var runningTicker = ticker;
         var runningStore = store;
         var runningMusic = music;
+        var runningRequests = musicRequests;
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("Останавливаюсь.");
@@ -174,6 +178,9 @@ public final class VoiceBridgeBot {
                 runningStore.save();
             }
 
+            if (runningRequests != null) {
+                runningRequests.shutdown();
+            }
             if (runningMusic != null) {
                 runningMusic.shutdown();
             }

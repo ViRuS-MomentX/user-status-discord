@@ -24,4 +24,11 @@ public interface MusicCatalog {
      * @return список от первой к последней; пустой, если ничего не нашлось
      */
     List<Song> playlistFor(String input, int limit);
+
+    /**
+     * Песни, популярные прямо сейчас.
+     *
+     * @return список от самой популярной; пустой, если каталог такого не умеет
+     */
+    List<Song> trending(int limit);
 }

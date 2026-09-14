@@ -1,16 +1,11 @@
 package ru.virus.voicebridge;
 
-import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
-import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 import net.dv8tion.jda.api.events.guild.voice.GuildVoiceUpdateEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 /**
  * Музыкальные команды.
@@ -20,26 +15,13 @@ public final class MusicCommands extends ListenerAdapter {
     private static final Logger log = LoggerFactory.getLogger(MusicCommands.class);
 
     private final long guildId;
+    private final MusicRequests requests;
     private final MusicService music;
-    private final MusicCatalog catalog;
-    private final int playlistSize;
 
-    /**
-     * Сборка плейлиста ходит в сеть и может занять секунды. Делать это в потоке событий
-     * JDA нельзя: он один на всего бота, и пока он ждёт Last.fm, остальные команды
-     * и голосовой статус стоят.
-     */
-    private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
-        var thread = new Thread(r, "music-loader");
-        thread.setDaemon(true);
-        return thread;
-    });
-
-    public MusicCommands(long guildId, MusicService music, MusicCatalog catalog, int playlistSize) {
+    public MusicCommands(long guildId, MusicRequests requests) {
         this.guildId = guildId;
-        this.music = music;
-        this.catalog = catalog;
-        this.playlistSize = playlistSize;
+        this.requests = requests;
+        this.music = requests.getMusic();
     }
 
     @Override
@@ -100,17 +82,17 @@ public final class MusicCommands extends ListenerAdapter {
             return;
         }
 
-        if (!catalog.isConfigured()) {
-            event.getChannel().sendMessage("Каталог " + catalog.name()
+        if (!requests.getCatalog().isConfigured()) {
+            event.getChannel().sendMessage("Каталог " + requests.getCatalog().name()
                     + " не настроен — подбирать плейлист нечем.").queue();
             return;
         }
 
-        var channel = state.getChannel();
-        music.connect(event.getGuild(), channel);
+        music.connect(event.getGuild(), state.getChannel());
 
-        event.getChannel().sendMessage("Ищу «" + query + "»...").queue();
-        worker.submit(() -> buildPlaylist(event.getChannel(), query));
+        var reply = event.getChannel();
+        reply.sendMessage("Ищу «" + query + "»...").queue();
+        requests.submit(query, text -> reply.sendMessage(text).queue());
     }
 
     /**
@@ -119,70 +101,6 @@ public final class MusicCommands extends ListenerAdapter {
      * <p>Первый трек ставится отдельно и сразу: ждать, пока найдутся все полтора десятка,
      * значит слушать тишину несколько секунд.
      */
-    private void buildPlaylist(MessageChannel reply, String query) {
-        try {
-            // Когда что-то уже играет, просьба означает «поставь это следующим», а не
-            // «подбери мне ещё полтора десятка треков»: иначе одна команда во время
-            // прослушивания хоронит очередь под чужим плейлистом.
-            var busy = music.getQueue().current() != null;
-
-            List<Song> songs;
-
-            try {
-                songs = catalog.playlistFor(query, busy ? 1 : playlistSize);
-            } catch (CatalogUnavailableException e) {
-                // Отказ сервиса и отсутствие песни — разные беды, и советы к ним разные
-                log.error("{} недоступен: {}", catalog.name(), e.getMessage());
-                reply.sendMessage(catalog.name() + " не отвечает. Попробуй ещё раз через минуту.").queue();
-                return;
-            }
-
-            if (songs.isEmpty()) {
-                reply.sendMessage(catalog.name() + " ничего не знает про «" + query + "».").queue();
-                return;
-            }
-
-            // Идём по плейлисту, пока что-нибудь не найдётся: одна ненайденная песня
-            // не повод отменять весь запрос, дальше в списке есть ещё четырнадцать
-            AudioTrack first = null;
-            var index = 0;
-
-            while (index < songs.size() && first == null) {
-                first = music.search(songs.get(index).query()).join();
-                index++;
-            }
-
-            if (first == null) {
-                reply.sendMessage("На SoundCloud не нашлось ничего по запросу «" + query + "».").queue();
-                return;
-            }
-
-            if (busy) {
-                music.getQueue().addNext(first);
-                reply.sendMessage("Следующим будет: **" + first.getInfo().title + "**").queue();
-                return;
-            }
-
-            music.getQueue().add(first);
-            reply.sendMessage("Играет: **" + first.getInfo().title + "**\n"
-                    + "Догружаю ещё " + (songs.size() - index) + " треков...").queue();
-
-            var added = 0;
-            for (var song : songs.subList(index, songs.size())) {
-                var track = music.search(song.query()).join();
-                if (track != null) {
-                    music.getQueue().add(track);
-                    added++;
-                }
-            }
-
-            reply.sendMessage("В очереди треков: " + added + ".").queue();
-        } catch (Exception e) {
-            log.error("Не удалось собрать плейлист по «{}»: {}", query, e.toString());
-            reply.sendMessage("Что-то пошло не так при сборке плейлиста.").queue();
-        }
-    }
-
     private void skip(MessageReceivedEvent event) {
         var current = music.getQueue().current();
 

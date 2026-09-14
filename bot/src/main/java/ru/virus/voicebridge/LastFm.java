@@ -74,6 +74,21 @@ public final class LastFm implements MusicCatalog {
         return playlist;
     }
 
+    @Override
+    public List<Song> trending(int limit) {
+        var json = call("chart.gettoptracks", "limit", String.valueOf(limit));
+
+        if (json == null) {
+            return List.of();
+        }
+
+        try {
+            return songs(json.getObject("tracks").getArray("track"), null);
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
     /**
      * Популярные песни исполнителя — но только если имя совпало точно.
      *

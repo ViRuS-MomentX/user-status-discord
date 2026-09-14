@@ -25,7 +25,9 @@ public final class ITunes implements MusicCatalog {
 
     private static final Logger log = LoggerFactory.getLogger(ITunes.class);
 
-    private static final String API = "https://itunes.apple.com/search";
+    private static final String API_HOST = "https://itunes.apple.com";
+
+    private static final String API = API_HOST + "/search";
 
     /** Сколько раз пробовать, прежде чем признать сервис недоступным. */
     private static final int ATTEMPTS = 3;
@@ -100,6 +102,76 @@ public final class ITunes implements MusicCatalog {
     }
 
     /**
+     * Песни из чарта популярного.
+     *
+     * <p>У Apple два разных адреса чарта и два разных формата ответа: старый лежит на
+     * том же хосте, что и поиск, новый — на отдельном. Пробуем сначала старый, потому
+     * что про его хост уже известно, что он отвечает.
+     */
+    @Override
+    public List<Song> trending(int limit) {
+        var safeLimit = Math.max(1, Math.min(limit, 100));
+
+        var legacy = fetchTrending(API_HOST + "/" + country.toLowerCase()
+                + "/rss/topsongs/limit=" + safeLimit + "/json");
+
+        if (!legacy.isEmpty()) {
+            return legacy;
+        }
+
+        return fetchTrending("https://rss.applemarketingtools.com/api/v2/"
+                + country.toLowerCase() + "/music/most-played/" + safeLimit + "/songs.json");
+    }
+
+    private List<Song> fetchTrending(String url) {
+        try {
+            return parseTrending(get(url));
+        } catch (Exception e) {
+            log.warn("Чарт по адресу {} не получен: {}", url, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * Разбирает чарт, понимая оба формата Apple.
+     *
+     * <p>Старый складывает название в «im:name.label», новый — просто в «name».
+     * Формат заранее неизвестен, поэтому смотрим, что из этого есть в ответе.
+     */
+    private List<Song> parseTrending(String body) {
+        var songs = new ArrayList<Song>();
+        var root = DataObject.fromJson(body);
+        var feed = root.getObject("feed");
+
+        var entries = feed.hasKey("results") ? feed.getArray("results") : feed.getArray("entry");
+
+        for (var i = 0; i < entries.length(); i++) {
+            try {
+                var entry = entries.getObject(i);
+                String title;
+                String artist;
+
+                if (entry.hasKey("im:name")) {
+                    title = entry.getObject("im:name").getString("label", "");
+                    artist = entry.hasKey("im:artist")
+                            ? entry.getObject("im:artist").getString("label", "") : "";
+                } else {
+                    title = entry.getString("name", "");
+                    artist = entry.getString("artistName", "");
+                }
+
+                if (!title.isEmpty()) {
+                    songs.add(new Song(artist, title));
+                }
+            } catch (Exception e) {
+                // Кривая запись не должна утащить за собой весь чарт
+            }
+        }
+
+        return songs;
+    }
+
+    /**
      * Ищет песни.
      *
      * <p>При неудаче повторяет запрос: у iTunes бывают разовые отказы и обрывы, и
@@ -119,22 +191,9 @@ public final class ITunes implements MusicCatalog {
 
         for (var attempt = 1; attempt <= ATTEMPTS; attempt++) {
             try {
-                var response = http.send(
-                        HttpRequest.newBuilder(URI.create(url))
-                                .timeout(Duration.ofSeconds(10))
-                                .header("User-Agent", userAgent)
-                                .header("Accept", "application/json")
-                                .header("Accept-Language", "en-US,en;q=0.9")
-                                .build(),
-                        HttpResponse.BodyHandlers.ofString());
-
-                if (response.statusCode() == 200) {
-                    return parse(response.body());
-                }
-
-                var body = response.body();
-                reason = "HTTP " + response.statusCode() + ": "
-                        + (body.length() > 200 ? body.substring(0, 200) : body);
+                return parse(get(url));
+            } catch (CatalogUnavailableException e) {
+                reason = e.getMessage();
             } catch (Exception e) {
                 reason = e.getMessage() == null ? e.toString() : e.getMessage();
             }
@@ -155,6 +214,30 @@ public final class ITunes implements MusicCatalog {
         }
 
         throw new CatalogUnavailableException(reason);
+    }
+
+    /**
+     * Один запрос к Apple с браузерным набором заголовков.
+     *
+     * @throws CatalogUnavailableException если сервис ответил не двухсотым
+     */
+    private String get(String url) throws Exception {
+        var response = http.send(
+                HttpRequest.newBuilder(URI.create(url))
+                        .timeout(Duration.ofSeconds(10))
+                        .header("User-Agent", userAgent)
+                        .header("Accept", "application/json")
+                        .header("Accept-Language", "en-US,en;q=0.9")
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() != 200) {
+            var body = response.body();
+            throw new CatalogUnavailableException("HTTP " + response.statusCode() + ": "
+                    + (body.length() > 200 ? body.substring(0, 200) : body));
+        }
+
+        return response.body();
     }
 
     private List<Song> parse(String body) {

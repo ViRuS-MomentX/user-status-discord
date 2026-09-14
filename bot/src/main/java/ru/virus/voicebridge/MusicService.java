@@ -61,6 +61,29 @@ public final class MusicService {
         return queue;
     }
 
+    /** Текущая громкость в процентах. */
+    public int getVolume() {
+        return player.getVolume();
+    }
+
+    /**
+     * Меняет громкость, удерживая её в разумных пределах.
+     *
+     * <p>Выше полутора сотен lavaplayer начинает заметно хрипеть, поэтому туда не пускаем.
+     *
+     * @return установленное значение
+     */
+    public int setVolume(int percent) {
+        var value = Math.max(0, Math.min(150, percent));
+        player.setVolume(value);
+        return value;
+    }
+
+    /** Подключён ли бот к голосовому каналу. */
+    public boolean isConnected(Guild guild) {
+        return guild.getAudioManager().getConnectedChannel() != null;
+    }
+
     /**
      * Подключается к голосовому каналу, если ещё не подключён.
      */

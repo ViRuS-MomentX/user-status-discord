@@ -9,8 +9,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.BlockingDeque;
+import java.util.concurrent.LinkedBlockingDeque;
 
 /**
  * Очередь воспроизведения: ставит следующий трек, когда закончился предыдущий.
@@ -20,7 +20,9 @@ public final class TrackQueue extends AudioEventAdapter {
     private static final Logger log = LoggerFactory.getLogger(TrackQueue.class);
 
     private final AudioPlayer player;
-    private final BlockingQueue<AudioTrack> queue = new LinkedBlockingQueue<>();
+    // Двусторонняя: новую просьбу во время проигрывания кладём в голову,
+    // а не в хвост к полутора десяткам треков плейлиста
+    private final BlockingDeque<AudioTrack> queue = new LinkedBlockingDeque<>();
 
     public TrackQueue(AudioPlayer player) {
         this.player = player;
@@ -33,7 +35,16 @@ public final class TrackQueue extends AudioEventAdapter {
         // startTrack с noInterrupt возвращает false, если что-то уже играет,
         // и тогда трек просто ждёт своей очереди
         if (!player.startTrack(track, true)) {
-            queue.offer(track);
+            queue.offerLast(track);
+        }
+    }
+
+    /**
+     * Ставит трек следующим: он заиграет сразу после текущего, не дожидаясь остального.
+     */
+    public void addNext(AudioTrack track) {
+        if (!player.startTrack(track, true)) {
+            queue.offerFirst(track);
         }
     }
 

@@ -121,10 +121,15 @@ public final class MusicCommands extends ListenerAdapter {
      */
     private void buildPlaylist(MessageChannel reply, String query) {
         try {
+            // Когда что-то уже играет, просьба означает «поставь это следующим», а не
+            // «подбери мне ещё полтора десятка треков»: иначе одна команда во время
+            // прослушивания хоронит очередь под чужим плейлистом.
+            var busy = music.getQueue().current() != null;
+
             List<Song> songs;
 
             try {
-                songs = catalog.playlistFor(query, playlistSize);
+                songs = catalog.playlistFor(query, busy ? 1 : playlistSize);
             } catch (CatalogUnavailableException e) {
                 // Отказ сервиса и отсутствие песни — разные беды, и советы к ним разные
                 log.error("{} недоступен: {}", catalog.name(), e.getMessage());
@@ -149,6 +154,12 @@ public final class MusicCommands extends ListenerAdapter {
 
             if (first == null) {
                 reply.sendMessage("На SoundCloud не нашлось ничего по запросу «" + query + "».").queue();
+                return;
+            }
+
+            if (busy) {
+                music.getQueue().addNext(first);
+                reply.sendMessage("Следующим будет: **" + first.getInfo().title + "**").queue();
                 return;
             }
 

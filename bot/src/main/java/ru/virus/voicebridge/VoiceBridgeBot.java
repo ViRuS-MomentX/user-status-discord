@@ -167,6 +167,19 @@ public final class VoiceBridgeBot {
             ticker.start();
         }
 
+        PostsWatcher postsWatcher = null;
+
+        if (config.getPosts().isUsable()) {
+            postsWatcher = new PostsWatcher(jda, config.getPosts().channel(),
+                    new PostsFeed(config.getPosts().url()),
+                    configPath.toAbsolutePath().resolveSibling("posts-seen.txt"),
+                    config.getPosts().minutes());
+            postsWatcher.start();
+        } else if (config.getPosts().enabled()) {
+            log.error("Слежение за лентой включено, но не задан posts.url или posts.channel.");
+        }
+
+        var runningWatcher = postsWatcher;
         var runningTicker = ticker;
         var runningStore = store;
         var runningMusic = music;
@@ -178,6 +191,10 @@ public final class VoiceBridgeBot {
 
             // Сохранить балансы надо до разрыва связи: после shutdown начисление уже не идёт,
             // а недописанная минута иначе потерялась бы.
+            if (runningWatcher != null) {
+                runningWatcher.stop();
+            }
+
             if (runningTicker != null) {
                 runningTicker.stop();
             }

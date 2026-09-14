@@ -39,11 +39,12 @@ public final class BotConfig {
     private final MusicCatalog catalog;
     private final OnlineStatus status;
     private final PanelSettings panel;
+    private final PostsSettings posts;
 
     private BotConfig(String token, long guildId, long userId, String httpHost, int httpPort, String httpToken,
                       RankLadder ladder, String botsRole, boolean moderation,
                       boolean music, String lastFmKey, int playlistSize, MusicCatalog catalog,
-                      OnlineStatus status, PanelSettings panel) {
+                      OnlineStatus status, PanelSettings panel, PostsSettings posts) {
         this.token = token;
         this.guildId = guildId;
         this.userId = userId;
@@ -59,6 +60,7 @@ public final class BotConfig {
         this.catalog = catalog;
         this.status = status;
         this.panel = panel;
+        this.posts = posts;
     }
 
     public String getToken() {
@@ -128,6 +130,11 @@ public final class BotConfig {
         return panel;
     }
 
+    /** Слежение за лентой постов сайта. */
+    public PostsSettings getPosts() {
+        return posts;
+    }
+
     /** Сколько треков класть в очередь за одну команду start. */
     public int getPlaylistSize() {
         return playlistSize;
@@ -187,7 +194,44 @@ public final class BotConfig {
                 parsePlaylistSize(props.getProperty("music.playlist", "").trim()),
                 pickCatalog(props),
                 parseStatus(props.getProperty("bot.status", "").trim()),
-                panelSettings(props));
+                panelSettings(props),
+                postsSettings(props));
+    }
+
+    /**
+     * Настройки слежения за лентой сайта.
+     *
+     * <p>Проверять чаще раза в минуту незачем: посты пишет человек, а сайт выкладывает
+     * их сборкой, которая и сама идёт минуты.
+     */
+    private static PostsSettings postsSettings(Properties props) {
+        var minutes = 10;
+        var raw = props.getProperty("posts.minutes", "").trim();
+
+        if (!raw.isEmpty()) {
+            try {
+                minutes = Math.max(1, Math.min(1440, Integer.parseInt(raw)));
+            } catch (NumberFormatException e) {
+                log.error("posts.minutes должен быть числом, а не «{}». Беру 10.", raw);
+            }
+        }
+
+        var channel = 0L;
+        var rawChannel = props.getProperty("posts.channel", "").trim();
+
+        if (!rawChannel.isEmpty()) {
+            try {
+                channel = Long.parseUnsignedLong(rawChannel);
+            } catch (NumberFormatException e) {
+                log.error("posts.channel должен быть числовым ID канала, а не «{}».", rawChannel);
+            }
+        }
+
+        return new PostsSettings(
+                Boolean.parseBoolean(props.getProperty("posts.enabled", "false").trim()),
+                props.getProperty("posts.url", "").trim(),
+                channel,
+                minutes);
     }
 
     /**

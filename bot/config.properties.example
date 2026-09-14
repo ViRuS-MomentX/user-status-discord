@@ -124,3 +124,18 @@ music.season.winter=christmas songs
 music.season.spring=spring hits
 music.season.autumn=autumn chill
 music.season.summer=summer hits
+
+# ---------------------------------------------------------------------------
+# Лента постов сайта
+# ---------------------------------------------------------------------------
+# Бот заглядывает в ленту и объявляет в канале записи, которых там ещё не было.
+posts.enabled=false
+
+# Адрес файла с лентой. Его выкладывает сборка сайта рядом со страницами.
+posts.url=https://virus-momentx.vercel.app/posts.json
+
+# Канал, куда объявлять новые записи.
+posts.channel=
+
+# Как часто заглядывать в ленту, минут (1-1440).
+posts.minutes=10

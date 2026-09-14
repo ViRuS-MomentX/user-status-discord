@@ -100,6 +100,16 @@ public final class PostsWatcher {
     }
 
     private void tick() {
+        try {
+            check();
+        } catch (Exception e) {
+            // Планировщик молча снимает задачу с повтора, если из неё вылетело исключение.
+            // Ловим всё: одна кривая запись не должна навсегда лишить канал новостей.
+            log.error("Сбой при проверке ленты: {}", e.toString());
+        }
+    }
+
+    private void check() {
         List<Post> posts;
 
         try {
@@ -173,10 +183,11 @@ public final class PostsWatcher {
         var card = new EmbedBuilder()
                 .setColor(COLORS.getOrDefault(post.category(), PLAIN_COLOR))
                 .setAuthor("virus / интерактив", feedUrl, feed.site() + "/icons/favicon-32x32.png")
-                .setTitle(post.title().isEmpty() ? "Новая запись" : post.title(), feedUrl);
+                .setTitle(fit(post.title().isEmpty() ? "Новая запись" : post.title(),
+                        MessageEmbed.TITLE_MAX_LENGTH), feedUrl);
 
         if (!post.text().isEmpty()) {
-            card.setDescription(post.text());
+            card.setDescription(fit(post.text(), MessageEmbed.DESCRIPTION_MAX_LENGTH));
         }
 
         if (!post.image().isEmpty()) {
@@ -198,6 +209,16 @@ public final class PostsWatcher {
         }
 
         return card.build();
+    }
+
+    /**
+     * Укорачивает текст до того, что принимает Discord.
+     *
+     * <p>Длинный пост иначе не просто не отправится: карточка откажется собираться
+     * с исключением, и вместе с ней встанет всё слежение за лентой.
+     */
+    private static String fit(String text, int limit) {
+        return text.length() <= limit ? text : text.substring(0, limit - 1) + "…";
     }
 
     /**

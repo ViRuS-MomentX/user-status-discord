@@ -4,7 +4,9 @@ import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
@@ -163,12 +165,27 @@ public final class MusicRequests {
         }
 
         music.getQueue().add(first);
+
+        var rest = songs.subList(index, songs.size());
         reply.accept("Играет: **" + first.getInfo().title + "**\n"
-                + "Догружаю ещё " + (songs.size() - index) + " треков...");
+                + "Догружаю ещё " + rest.size() + " треков...");
+
+        // Поиски запускаем все разом: каждый — поход в сеть на секунду-другую, и по
+        // одному полтора десятка набирались бы полминуты. lavaplayer держит для них
+        // десяток потоков и очередь на тысячи заданий, так что пачка ему по силам.
+        var pending = new ArrayList<CompletableFuture<AudioTrack>>(rest.size());
+
+        for (var song : rest) {
+            pending.add(music.search(song.query()));
+        }
 
         var added = 0;
-        for (var song : songs.subList(index, songs.size())) {
-            var track = music.search(song.query()).join();
+
+        // А вот в очередь кладём строго по порядку списка: плейлист должен звучать
+        // так, как его подобрали, а не так, как повезло с ответами
+        for (var search : pending) {
+            var track = search.join();
+
             if (track != null) {
                 music.getQueue().add(track);
                 added++;

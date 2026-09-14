@@ -89,7 +89,12 @@ public final class MusicService {
      */
     public void connect(Guild guild, AudioChannel channel) {
         var audio = guild.getAudioManager();
-        audio.setSendingHandler(new OpusForwarder(player));
+
+        // Обработчик ставим один раз на всё время работы: он лишь пересылает то, что
+        // выдаёт плеер, и подменять его на каждой команде — только рвать поток звука
+        if (audio.getSendingHandler() == null) {
+            audio.setSendingHandler(new OpusForwarder(player));
+        }
 
         if (audio.getConnectedChannel() == null || audio.getConnectedChannel().getIdLong() != channel.getIdLong()) {
             audio.openAudioConnection(channel);

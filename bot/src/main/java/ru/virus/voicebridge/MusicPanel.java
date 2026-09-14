@@ -90,13 +90,6 @@ public final class MusicPanel extends ListenerAdapter {
     /** Картинка-подсказка на диске: бот прикладывает её сам, хостинг не нужен. */
     private final Path legend;
 
-    /**
-     * Куда Discord положил приложенную подсказку.
-     *
-     * <p>При перерисовке карточку правят на месте, файл заново не отправляют — значит
-     * ссылаться на него надо уже по адресу, а не по имени вложения.
-     */
-    private volatile String legendUrl;
 
     /**
      * Где висит последняя панель. Новая заменяет её, чтобы в голосовом чате не
@@ -159,10 +152,10 @@ public final class MusicPanel extends ListenerAdapter {
             return;
         }
 
-        // Панель могли удалить руками — молчим, на следующей команде выйдет новая
-        channel.editMessageEmbedsById(messageId, buildPanel(shownImage()))
-                .setComponents(buttons())
-                .queue(ok -> { }, error -> { });
+        // Панель могли удалить руками — молчим, на следующей команде выйдет новая.
+        // Правим только кнопки: текста в панели нет, а иконка паузы зависит от того,
+        // играет ли что-то сейчас
+        channel.editMessageComponentsById(messageId, buttons()).queue(ok -> { }, error -> { });
     }
 
     @Override
@@ -187,24 +180,21 @@ public final class MusicPanel extends ListenerAdapter {
         removeOld(channel.getGuild());
 
         var attached = legendUpload();
-        // Пока файл едет вместе с сообщением, ссылаться на него можно только по имени
-        var embed = buildPanel(attached != null ? "attachment://" + LEGEND_NAME : settings.image());
 
-        var action = requester == null
-                ? channel.sendMessageEmbeds(embed)
-                : channel.sendMessage(requester.getAsMention() + " включает музыку").setEmbeds(embed);
+        // Подсказка уходит вложением, а не картинкой внутри карточки: карточки у панели
+        // больше нет, а сообщению нужно хоть какое-то содержимое кроме кнопок
+        var action = attached != null
+                ? channel.sendFiles(attached)
+                : channel.sendMessageEmbeds(fallbackCard());
 
-        if (attached != null) {
-            action = action.setFiles(attached);
+        if (requester != null) {
+            action = action.setContent(requester.getAsMention() + " включает музыку");
         }
 
         action.setComponents(buttons()).queue(message -> {
             jda = message.getJDA();
             lastChannelId = channel.getIdLong();
             lastMessageId = message.getIdLong();
-            legendUrl = message.getAttachments().isEmpty()
-                    ? null
-                    : message.getAttachments().get(0).getUrl();
         }, error -> log.error("Не удалось опубликовать панель: {}", error.getMessage()));
     }
 
@@ -226,10 +216,21 @@ public final class MusicPanel extends ListenerAdapter {
         }
     }
 
-    /** Чем показывать подсказку в уже отправленной карточке. */
-    private String shownImage() {
-        var uploaded = legendUrl;
-        return uploaded != null ? uploaded : settings.image();
+    /**
+     * Чем заменить подсказку, когда файла с ней нет.
+     *
+     * <p>Одни кнопки Discord не примет: в сообщении должно быть хоть что-то ещё.
+     */
+    private MessageEmbed fallbackCard() {
+        var card = new EmbedBuilder().setColor(PANEL_COLOR);
+
+        if (settings.image().isEmpty()) {
+            card.setTitle("🎵 Плеер");
+        } else {
+            card.setImage(settings.image());
+        }
+
+        return card.build();
     }
 
     /**
@@ -292,44 +293,6 @@ public final class MusicPanel extends ListenerAdapter {
      */
     private Button icon(String id, String key, String fallback) {
         return Button.secondary(id, icons.get(key, fallback));
-    }
-
-    /**
-     * Собирает саму карточку плеера.
-     */
-    private MessageEmbed buildPanel(String image) {
-        var queue = requests.getMusic().getQueue();
-        var current = queue.current();
-        var waiting = queue.waiting();
-
-        var embed = new EmbedBuilder()
-                .setColor(PANEL_COLOR)
-                .setTitle("🎵 Плеер");
-
-        if (current == null) {
-            embed.setDescription("Сейчас ничего не играет.");
-        } else {
-            embed.setDescription((queue.isPaused() ? "⏸️ " : "")
-                    + "**" + current.getInfo().title + "**\n" + current.getInfo().author);
-        }
-
-        embed.addField("В очереди", waiting.size() + " треков", true);
-        embed.addField("Громкость", requests.getMusic().getVolume() + "%", true);
-
-        if (!waiting.isEmpty()) {
-            var next = new StringBuilder();
-            // Три строки — столько влезает, не превращая панель в простыню
-            for (var i = 0; i < Math.min(3, waiting.size()); i++) {
-                next.append(i + 1).append(". ").append(waiting.get(i).getInfo().title).append('\n');
-            }
-            embed.addField("Дальше", next.toString(), false);
-        }
-
-        if (image != null && !image.isEmpty()) {
-            embed.setImage(image);
-        }
-
-        return embed.build();
     }
 
     @Override
@@ -519,7 +482,7 @@ public final class MusicPanel extends ListenerAdapter {
      * Перерисовывает панель в том же сообщении.
      */
     private void refresh(InteractionHook hook) {
-        hook.editOriginalEmbeds(buildPanel(shownImage())).setComponents(buttons()).queue(ok -> { },
+        hook.editOriginalComponents(buttons()).queue(ok -> { },
                 error -> log.error("Не удалось обновить панель: {}", error.getMessage()));
     }
 }

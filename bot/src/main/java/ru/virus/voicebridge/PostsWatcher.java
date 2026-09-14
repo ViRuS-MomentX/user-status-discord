@@ -183,7 +183,7 @@ public final class PostsWatcher {
         var card = new EmbedBuilder()
                 .setColor(COLORS.getOrDefault(post.category(), PLAIN_COLOR))
                 .setAuthor("virus / интерактив", feedUrl, feed.site() + "/icons/favicon-32x32.png")
-                .setTitle(fit(post.title().isEmpty() ? "Новая запись" : post.title(),
+                .setTitle(fit(post.hasTitle() ? post.title() : "Новая запись",
                         MessageEmbed.TITLE_MAX_LENGTH), feedUrl);
 
         if (!post.text().isEmpty()) {

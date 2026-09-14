@@ -1,8 +1,10 @@
 package ru.virus.voicebridge;
 
+import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Icon;
+import net.dv8tion.jda.api.entities.emoji.ApplicationEmoji;
 import net.dv8tion.jda.api.entities.emoji.Emoji;
 import net.dv8tion.jda.api.events.guild.GuildReadyEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
@@ -29,10 +31,15 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Иконки кнопок панели: режет один лист 4×4 на шестнадцать эмодзи и заводит их на сервере.
  *
- * <p>Своя картинка на кнопке возможна только через эмодзи сервера — Discord не принимает
- * файл прямо в кнопку. Поэтому бот загружает иконки один раз сам: просить человека
- * нарезать лист и вручную создать шестнадцать эмодзи, а потом переписывать их ID в код,
- * значит превратить смену картинок в отдельную работу.
+ * <p>Своя картинка на кнопке возможна только через эмодзи — Discord не принимает файл
+ * прямо в кнопку. Поэтому бот загружает иконки один раз сам: просить человека нарезать
+ * лист и вручную создать шестнадцать эмодзи, а потом переписывать их ID в код, значит
+ * превратить смену картинок в отдельную работу.
+ *
+ * <p>Иконки живут не на сервере, а у самого приложения. Эмодзи сервера расходуют его
+ * слоты — шестнадцать штук съедают треть обычного запаса, и панель встаёт в очередь
+ * за нужными людям картинками. У приложения запас в две тысячи, он ничей, и прав на
+ * сервере для него не требуется.
  *
  * <p>Пока эмодзи нет, кнопки показывают стандартные символы Unicode — панель работает
  * и без листа.
@@ -99,7 +106,7 @@ public final class PanelIcons extends ListenerAdapter {
      * <p>Входит в отметку рядом с эмодзи: когда обработка меняется, уже загруженные
      * иконки становятся устаревшими, даже если сам лист остался прежним.
      */
-    private static final String PROCESSING = "2";
+    private static final String PROCESSING = "3";
 
     private final long guildId;
     private final Path sheet;
@@ -132,7 +139,33 @@ public final class PanelIcons extends ListenerAdapter {
         }
 
         var guild = event.getGuild();
-        remember(guild);
+
+        // Всё, что дальше, ходит в сеть: и список эмодзи приложения, и каждое создание.
+        // На потоке событий JDA ждать такое нельзя.
+        var worker = new Thread(() -> rebuild(guild), "panel-icons");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    /**
+     * Приводит иконки в соответствие с листом.
+     */
+    private void rebuild(Guild guild) {
+        var jda = guild.getJDA();
+
+        // Прошлые версии бота клали иконки на сервер и занимали его слоты. Вернуть их
+        // надо даже тогда, когда заливать нечего: слоты нужны людям, а не панели.
+        freeGuildSlots(guild);
+
+        List<ApplicationEmoji> mine;
+        try {
+            mine = jda.retrieveApplicationEmojis().complete();
+        } catch (Exception e) {
+            log.error("Не удалось получить эмодзи приложения: {}", e.getMessage());
+            return;
+        }
+
+        remember(mine);
 
         if (!Files.isRegularFile(sheet)) {
             if (icons.isEmpty()) {
@@ -153,43 +186,11 @@ public final class PanelIcons extends ListenerAdapter {
         }
 
         // Отметка не совпала — значит лист поменяли или бот стал обрабатывать его иначе.
-        // Старые эмодзи в этом случае надо заменить, а не оставлять вперемешку с новыми.
+        // Старые иконки в этом случае надо заменить, а не оставлять вперемешку с новыми.
         var stale = !stamp.equals(readMarker());
 
         if (!stale && icons.size() == KEYS.size()) {
             log.info("Иконки панели на месте: {} шт.", icons.size());
-            return;
-        }
-
-        // Заливка идёт в своём потоке: каждое создание — отдельный запрос к Discord,
-        // а на потоке событий JDA ждать их нельзя
-        var worker = new Thread(() -> rebuild(guild, stale, stamp), "panel-icons");
-        worker.setDaemon(true);
-        worker.start();
-    }
-
-    /** Подбирает эмодзи, созданные прошлым запуском: заново их заводить незачем. */
-    private void remember(Guild guild) {
-        for (var key : KEYS) {
-            var found = guild.getEmojisByName(PREFIX + key, false);
-            if (!found.isEmpty()) {
-                icons.put(key, found.get(0));
-            }
-        }
-    }
-
-    /**
-     * Приводит эмодзи сервера в соответствие с листом.
-     *
-     * @param stale выбросить ли то, что загружено сейчас
-     */
-    private void rebuild(Guild guild, boolean stale, String stamp) {
-        var self = guild.getSelfMember();
-
-        if (!self.hasPermission(Permission.CREATE_GUILD_EXPRESSIONS)
-                && !self.hasPermission(Permission.MANAGE_GUILD_EXPRESSIONS)) {
-            log.error("Нет права «Управление выражениями» — не могу создать эмодзи панели. "
-                    + "Выдай его роли бота в настройках сервера и перезапусти.");
             return;
         }
 
@@ -204,21 +205,12 @@ public final class PanelIcons extends ListenerAdapter {
         // Удаляем только после того, как новый лист прочитан: иначе неудачная замена
         // оставила бы панель вообще без иконок
         if (stale) {
-            drop(guild);
-        }
-
-        var free = guild.getMaxEmojis() - guild.getEmojis().size();
-        var missing = missing();
-
-        if (free < missing.size()) {
-            log.error("На сервере свободно {} мест под эмодзи, а нужно {}. "
-                    + "Освободи место или подними уровень буста.", free, missing.size());
-            return;
+            drop(mine);
         }
 
         var made = 0;
 
-        for (var key : missing) {
+        for (var key : missing()) {
             var png = tiles.get(key);
 
             if (png == null) {
@@ -233,7 +225,8 @@ public final class PanelIcons extends ListenerAdapter {
             try {
                 // complete вместо queue: создание эмодзи жёстко ограничено по частоте,
                 // и ждать своей очереди здесь правильнее, чем ловить отказ
-                var emoji = guild.createEmoji(PREFIX + key, Icon.from(png, Icon.IconType.PNG)).complete();
+                var emoji = jda.createApplicationEmoji(PREFIX + key,
+                        Icon.from(png, Icon.IconType.PNG)).complete();
                 icons.put(key, emoji);
                 made++;
             } catch (Exception e) {
@@ -248,28 +241,76 @@ public final class PanelIcons extends ListenerAdapter {
         }
     }
 
+    /** Подбирает иконки, загруженные прошлым запуском: заново их заводить незачем. */
+    private void remember(List<ApplicationEmoji> mine) {
+        for (var emoji : mine) {
+            var key = emoji.getName().startsWith(PREFIX) ? emoji.getName().substring(PREFIX.length()) : null;
+
+            if (key != null && KEYS.contains(key)) {
+                icons.put(key, emoji);
+            }
+        }
+    }
+
     /**
-     * Убирает эмодзи, загруженные прошлым листом.
-     *
-     * <p>Трогаем только свои шестнадцать имён: всё остальное на сервере не наше.
+     * Убирает иконки, загруженные прошлым листом.
      */
-    private void drop(Guild guild) {
+    private void drop(List<ApplicationEmoji> mine) {
         var dropped = 0;
 
-        for (var key : KEYS) {
-            for (var emoji : guild.getEmojisByName(PREFIX + key, false)) {
-                try {
-                    emoji.delete().complete();
-                    dropped++;
-                } catch (Exception e) {
-                    log.error("Не удалось удалить эмодзи «{}»: {}", emoji.getName(), e.getMessage());
-                }
+        for (var emoji : mine) {
+            if (!emoji.getName().startsWith(PREFIX)) {
+                continue;
             }
-            icons.remove(key);
+
+            try {
+                emoji.delete().complete();
+                icons.remove(emoji.getName().substring(PREFIX.length()));
+                dropped++;
+            } catch (Exception e) {
+                log.error("Не удалось удалить эмодзи «{}»: {}", emoji.getName(), e.getMessage());
+            }
         }
 
         if (dropped > 0) {
-            log.info("Лист иконок поменялся: убрано старых эмодзи — {}.", dropped);
+            log.info("Лист иконок поменялся: убрано старых иконок — {}.", dropped);
+        }
+    }
+
+    /**
+     * Возвращает серверу слоты, занятые прошлыми версиями бота.
+     *
+     * <p>Трогаем только свои шестнадцать имён: всё остальное на сервере не наше.
+     */
+    private void freeGuildSlots(Guild guild) {
+        var self = guild.getSelfMember();
+        var freed = 0;
+        var blocked = false;
+
+        for (var key : KEYS) {
+            for (var emoji : guild.getEmojisByName(PREFIX + key, false)) {
+                if (!self.hasPermission(Permission.MANAGE_GUILD_EXPRESSIONS)) {
+                    blocked = true;
+                    continue;
+                }
+
+                try {
+                    emoji.delete().complete();
+                    freed++;
+                } catch (Exception e) {
+                    log.error("Не удалось убрать эмодзи «{}» с сервера: {}", emoji.getName(), e.getMessage());
+                }
+            }
+        }
+
+        if (freed > 0) {
+            log.info("Иконки переехали к приложению: освобождено слотов сервера — {}.", freed);
+        }
+
+        if (blocked) {
+            log.warn("Старые иконки панели лежат в эмодзи сервера и занимают его слоты. "
+                    + "Чтобы бот их убрал, выдай ему право «Управление выражениями» "
+                    + "и перезапусти — либо удали эмодзи vb_* вручную.");
         }
     }
 

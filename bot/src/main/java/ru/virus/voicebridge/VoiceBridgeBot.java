@@ -86,7 +86,8 @@ public final class VoiceBridgeBot {
             // и ярлыком, и из планировщика, и «текущая папка» там каждый раз своя
             panelIcons = new PanelIcons(config.getGuildId(),
                     configPath.toAbsolutePath().resolveSibling(config.getPanel().sheet()));
-            musicPanel = new MusicPanel(config.getGuildId(), musicRequests, config.getPanel(), panelIcons);
+            musicPanel = new MusicPanel(config.getGuildId(), musicRequests, config.getPanel(), panelIcons,
+                    configPath.toAbsolutePath().resolveSibling(config.getPanel().legend()));
             musicCommands = new MusicCommands(config.getGuildId(), musicRequests, musicPanel);
         }
 

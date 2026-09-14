@@ -200,6 +200,7 @@ public final class BotConfig {
     private static PanelSettings panelSettings(Properties props) {
         return new PanelSettings(
                 props.getProperty("music.panel.image", "").trim(),
+                season(props, "music.panel.legend", "panel-legend.png"),
                 season(props, "music.panel.sheet", "emoji-sheet.png"),
                 season(props, "music.season.winter", "christmas songs"),
                 season(props, "music.season.spring", "spring hits"),

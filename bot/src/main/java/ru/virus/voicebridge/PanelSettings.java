@@ -7,8 +7,10 @@ package ru.virus.voicebridge;
  * вкуса: кому-то нужен «christmas», кому-то «новогодние песни».
  *
  * @param image ссылка на картинку-подсказку внутри карточки плеера
+ * @param legend файл с той же подсказкой на диске; бот прикладывает его сам, и ссылка
+ *               тогда не нужна
  * @param sheet файл с листом иконок 4×4, из которого бот заводит эмодзи кнопок
  */
-public record PanelSettings(String image, String sheet,
+public record PanelSettings(String image, String legend, String sheet,
                             String winter, String spring, String autumn, String summer) {
 }

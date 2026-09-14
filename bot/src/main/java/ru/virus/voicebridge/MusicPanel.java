@@ -17,10 +17,13 @@ import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.InteractionHook;
 import net.dv8tion.jda.api.modals.Modal;
+import net.dv8tion.jda.api.utils.FileUpload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.awt.Color;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -76,10 +79,24 @@ public final class MusicPanel extends ListenerAdapter {
      */
     private static final long REFRESH_DELAY_MS = 2000;
 
+    /** Под этим именем подсказка уезжает в Discord и под ним же ищется в карточке. */
+    private static final String LEGEND_NAME = "panel-legend.png";
+
     private final long guildId;
     private final MusicRequests requests;
     private final PanelSettings settings;
     private final PanelIcons icons;
+
+    /** Картинка-подсказка на диске: бот прикладывает её сам, хостинг не нужен. */
+    private final Path legend;
+
+    /**
+     * Куда Discord положил приложенную подсказку.
+     *
+     * <p>При перерисовке карточку правят на месте, файл заново не отправляют — значит
+     * ссылаться на него надо уже по адресу, а не по имени вложения.
+     */
+    private volatile String legendUrl;
 
     /**
      * Где висит последняя панель. Новая заменяет её, чтобы в голосовом чате не
@@ -100,11 +117,13 @@ public final class MusicPanel extends ListenerAdapter {
 
     private final AtomicBoolean waiting = new AtomicBoolean();
 
-    public MusicPanel(long guildId, MusicRequests requests, PanelSettings settings, PanelIcons icons) {
+    public MusicPanel(long guildId, MusicRequests requests, PanelSettings settings, PanelIcons icons,
+                      Path legend) {
         this.guildId = guildId;
         this.requests = requests;
         this.settings = settings;
         this.icons = icons;
+        this.legend = legend;
 
         // Очередь живёт своей жизнью: трек кончается сам, плейлист догружается фоном.
         // Без этого панель показывала бы состояние на момент нажатия кнопки.
@@ -141,7 +160,7 @@ public final class MusicPanel extends ListenerAdapter {
         }
 
         // Панель могли удалить руками — молчим, на следующей команде выйдет новая
-        channel.editMessageEmbedsById(messageId, buildPanel())
+        channel.editMessageEmbedsById(messageId, buildPanel(shownImage()))
                 .setComponents(buttons())
                 .queue(ok -> { }, error -> { });
     }
@@ -167,16 +186,50 @@ public final class MusicPanel extends ListenerAdapter {
     public void post(GuildMessageChannel channel, Member requester) {
         removeOld(channel.getGuild());
 
+        var attached = legendUpload();
+        // Пока файл едет вместе с сообщением, ссылаться на него можно только по имени
+        var embed = buildPanel(attached != null ? "attachment://" + LEGEND_NAME : settings.image());
+
         var action = requester == null
-                ? channel.sendMessageEmbeds(buildPanel())
-                : channel.sendMessage(requester.getAsMention() + " включает музыку")
-                        .setEmbeds(buildPanel());
+                ? channel.sendMessageEmbeds(embed)
+                : channel.sendMessage(requester.getAsMention() + " включает музыку").setEmbeds(embed);
+
+        if (attached != null) {
+            action = action.setFiles(attached);
+        }
 
         action.setComponents(buttons()).queue(message -> {
             jda = message.getJDA();
             lastChannelId = channel.getIdLong();
             lastMessageId = message.getIdLong();
+            legendUrl = message.getAttachments().isEmpty()
+                    ? null
+                    : message.getAttachments().get(0).getUrl();
         }, error -> log.error("Не удалось опубликовать панель: {}", error.getMessage()));
+    }
+
+    /**
+     * Открывает файл подсказки, если он лежит на месте.
+     *
+     * @return <code>null</code>, если файла нет — тогда в ход идёт ссылка из настроек
+     */
+    private FileUpload legendUpload() {
+        if (!Files.isRegularFile(legend)) {
+            return null;
+        }
+
+        try {
+            return FileUpload.fromData(legend, LEGEND_NAME);
+        } catch (Exception e) {
+            log.error("Не удалось приложить подсказку {}: {}", legend.toAbsolutePath(), e.getMessage());
+            return null;
+        }
+    }
+
+    /** Чем показывать подсказку в уже отправленной карточке. */
+    private String shownImage() {
+        var uploaded = legendUrl;
+        return uploaded != null ? uploaded : settings.image();
     }
 
     /**
@@ -244,7 +297,7 @@ public final class MusicPanel extends ListenerAdapter {
     /**
      * Собирает саму карточку плеера.
      */
-    private MessageEmbed buildPanel() {
+    private MessageEmbed buildPanel(String image) {
         var queue = requests.getMusic().getQueue();
         var current = queue.current();
         var waiting = queue.waiting();
@@ -272,8 +325,8 @@ public final class MusicPanel extends ListenerAdapter {
             embed.addField("Дальше", next.toString(), false);
         }
 
-        if (!settings.image().isEmpty()) {
-            embed.setImage(settings.image());
+        if (image != null && !image.isEmpty()) {
+            embed.setImage(image);
         }
 
         return embed.build();
@@ -466,7 +519,7 @@ public final class MusicPanel extends ListenerAdapter {
      * Перерисовывает панель в том же сообщении.
      */
     private void refresh(InteractionHook hook) {
-        hook.editOriginalEmbeds(buildPanel()).setComponents(buttons()).queue(ok -> { },
+        hook.editOriginalEmbeds(buildPanel(shownImage())).setComponents(buttons()).queue(ok -> { },
                 error -> log.error("Не удалось обновить панель: {}", error.getMessage()));
     }
 }

@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -42,7 +43,28 @@ public final class PostsWatcher {
      */
     private static final int MAX_BURST = 5;
 
-    private static final Color POST_COLOR = new Color(0x5865F2);
+    /**
+     * Цвет полосы по разделу записи.
+     *
+     * <p>Раздел есть не у всех постов — тем достаётся спокойный серый.
+     */
+    private static final Map<String, Color> COLORS = Map.of(
+            "personal", new Color(0x1DB954),
+            "game", new Color(0x9B59B6),
+            "ai", new Color(0x00B0F4));
+
+    private static final Color PLAIN_COLOR = new Color(0x4F545C);
+
+    /**
+     * Подписи разделов.
+     *
+     * <p>Те же слова, что на самой странице постов: карточка в Discord должна читаться
+     * как её продолжение, а не как перевод с другого языка.
+     */
+    private static final Map<String, String> TAGS = Map.of(
+            "personal", "личное",
+            "game", "игра",
+            "ai", "нейронки");
 
     private final JDA jda;
     private final long channelId;
@@ -146,23 +168,33 @@ public final class PostsWatcher {
      * Собирает карточку записи.
      */
     private MessageEmbed card(Post post) {
+        var feedUrl = feed.site() + "/posts.html";
+
         var card = new EmbedBuilder()
-                .setColor(POST_COLOR)
-                .setTitle(post.title().isEmpty() ? "Новая запись" : post.title(), feed.site() + "/posts.html")
-                .setDescription(post.text());
+                .setColor(COLORS.getOrDefault(post.category(), PLAIN_COLOR))
+                .setAuthor("virus / интерактив", feedUrl, feed.site() + "/icons/favicon-32x32.png")
+                .setTitle(post.title().isEmpty() ? "Новая запись" : post.title(), feedUrl);
+
+        if (!post.text().isEmpty()) {
+            card.setDescription(post.text());
+        }
 
         if (!post.image().isEmpty()) {
             card.setImage(feed.site() + "/" + encodePath(post.image()));
         }
 
-        var footer = post.when();
+        // Время отдаём моментом, а не строкой: Discord покажет его в часовом поясе
+        // читающего и сам подпишет «сегодня» или «вчера»
+        var published = post.published();
 
-        if (!post.category().isEmpty()) {
-            footer = footer.isEmpty() ? post.category() : footer + " · " + post.category();
+        if (published != null) {
+            card.setTimestamp(published);
         }
 
-        if (!footer.isEmpty()) {
-            card.setFooter(footer);
+        var tag = TAGS.getOrDefault(post.category(), post.category());
+
+        if (!tag.isEmpty()) {
+            card.setFooter("#" + tag);
         }
 
         return card.build();

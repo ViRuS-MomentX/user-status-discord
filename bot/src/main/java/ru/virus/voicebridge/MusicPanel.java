@@ -180,12 +180,11 @@ public final class MusicPanel extends ListenerAdapter {
         removeOld(channel.getGuild());
 
         var attached = legendUpload();
+        var action = channel.sendMessageEmbeds(card(attached != null));
 
-        // Подсказка уходит вложением, а не картинкой внутри карточки: карточки у панели
-        // больше нет, а сообщению нужно хоть какое-то содержимое кроме кнопок
-        var action = attached != null
-                ? channel.sendFiles(attached)
-                : channel.sendMessageEmbeds(fallbackCard());
+        if (attached != null) {
+            action = action.setFiles(attached);
+        }
 
         if (requester != null) {
             action = action.setContent(requester.getAsMention() + " включает музыку");
@@ -217,17 +216,26 @@ public final class MusicPanel extends ListenerAdapter {
     }
 
     /**
-     * Чем заменить подсказку, когда файла с ней нет.
+     * Карточка панели: одна лишь подсказка на зелёной полосе.
      *
-     * <p>Одни кнопки Discord не примет: в сообщении должно быть хоть что-то ещё.
+     * <p>Полоса слева — это цвет карточки, другого способа её нарисовать нет. Ради неё
+     * подсказка и лежит внутри карточки, а не отдельным вложением.
+     *
+     * <p>Перерисовка трогает только кнопки, поэтому ссылка на вложение здесь не портится:
+     * файл остаётся при сообщении, сколько бы раз ни поменялась иконка паузы.
+     *
+     * @param attached приложен ли файл подсказки к этому сообщению
      */
-    private MessageEmbed fallbackCard() {
+    private MessageEmbed card(boolean attached) {
         var card = new EmbedBuilder().setColor(PANEL_COLOR);
 
-        if (settings.image().isEmpty()) {
-            card.setTitle("🎵 Плеер");
-        } else {
+        if (attached) {
+            card.setImage("attachment://" + LEGEND_NAME);
+        } else if (!settings.image().isEmpty()) {
             card.setImage(settings.image());
+        } else {
+            // Пустую карточку Discord не примет, да и смотреть на неё незачем
+            card.setTitle("🎵 Плеер");
         }
 
         return card.build();

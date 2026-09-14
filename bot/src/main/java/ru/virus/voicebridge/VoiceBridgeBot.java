@@ -82,7 +82,7 @@ public final class VoiceBridgeBot {
             music = new MusicService();
             musicRequests = new MusicRequests(music, config.getCatalog(), config.getPlaylistSize());
             musicCommands = new MusicCommands(config.getGuildId(), musicRequests);
-            musicPanel = new MusicPanel(config.getGuildId(), musicRequests);
+            musicPanel = new MusicPanel(config.getGuildId(), musicRequests, config.getPanelImage());
         }
 
         // Роль ботам и ранг каждому участнику раздаёт один обход: список участников

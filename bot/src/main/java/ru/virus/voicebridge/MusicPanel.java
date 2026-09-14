@@ -48,9 +48,13 @@ public final class MusicPanel extends ListenerAdapter {
     private final long guildId;
     private final MusicRequests requests;
 
-    public MusicPanel(long guildId, MusicRequests requests) {
+    /** Картинка-подсказка под карточкой: что означает каждая иконка. Пусто — без неё. */
+    private final String legendUrl;
+
+    public MusicPanel(long guildId, MusicRequests requests, String legendUrl) {
         this.guildId = guildId;
         this.requests = requests;
+        this.legendUrl = legendUrl;
     }
 
     @Override
@@ -70,19 +74,22 @@ public final class MusicPanel extends ListenerAdapter {
     }
 
     /**
-     * Две строки кнопок: сверху управление воспроизведением, снизу громкость и чарт.
+     * Ряд кнопок без подписей — только иконки.
+     *
+     * <p>Все одного стиля: цвет плитки в такой сетке только мешает, различать кнопки
+     * должна сама иконка. Что какая делает, объясняет картинка в карточке.
      */
     private List<ActionRow> buttons() {
         return List.of(
                 ActionRow.of(
-                        Button.primary(SKIP, "Скип").withEmoji(Emoji.fromUnicode("⏭️")),
-                        Button.danger(STOP, "Стоп").withEmoji(Emoji.fromUnicode("⏹️")),
-                        Button.success(ADD, "В очередь").withEmoji(Emoji.fromUnicode("➕"))),
+                        Button.secondary(SKIP, Emoji.fromUnicode("\u23ED\uFE0F")),
+                        Button.secondary(STOP, Emoji.fromUnicode("\uD83D\uDED1")),
+                        Button.secondary(ADD, Emoji.fromUnicode("\u2795")),
+                        Button.secondary(QUIETER, Emoji.fromUnicode("\uD83D\uDD09")),
+                        Button.secondary(LOUDER, Emoji.fromUnicode("\uD83D\uDD0A"))),
                 ActionRow.of(
-                        Button.secondary(QUIETER, "Тише").withEmoji(Emoji.fromUnicode("🔉")),
-                        Button.secondary(LOUDER, "Громче").withEmoji(Emoji.fromUnicode("🔊")),
-                        Button.primary(TRENDING, "Трендовое").withEmoji(Emoji.fromUnicode("🔥")),
-                        Button.secondary(REFRESH, "Обновить").withEmoji(Emoji.fromUnicode("🔄"))));
+                        Button.secondary(TRENDING, Emoji.fromUnicode("\uD83D\uDD25")),
+                        Button.secondary(REFRESH, Emoji.fromUnicode("\uD83D\uDD04"))));
     }
 
     /**
@@ -115,6 +122,10 @@ public final class MusicPanel extends ListenerAdapter {
                 next.append(i + 1).append(". ").append(waiting.get(i).getInfo().title).append('\n');
             }
             embed.addField("Дальше", next.toString(), false);
+        }
+
+        if (!legendUrl.isEmpty()) {
+            embed.setImage(legendUrl);
         }
 
         return embed.setFooter("Кнопки работают у всех, кто сидит в голосовом канале").build();

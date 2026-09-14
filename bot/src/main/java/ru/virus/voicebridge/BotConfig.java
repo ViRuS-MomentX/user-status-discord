@@ -38,11 +38,12 @@ public final class BotConfig {
     private final int playlistSize;
     private final MusicCatalog catalog;
     private final OnlineStatus status;
+    private final String panelImage;
 
     private BotConfig(String token, long guildId, long userId, String httpHost, int httpPort, String httpToken,
                       RankLadder ladder, String botsRole, boolean moderation,
                       boolean music, String lastFmKey, int playlistSize, MusicCatalog catalog,
-                      OnlineStatus status) {
+                      OnlineStatus status, String panelImage) {
         this.token = token;
         this.guildId = guildId;
         this.userId = userId;
@@ -57,6 +58,7 @@ public final class BotConfig {
         this.playlistSize = playlistSize;
         this.catalog = catalog;
         this.status = status;
+        this.panelImage = panelImage;
     }
 
     public String getToken() {
@@ -121,6 +123,11 @@ public final class BotConfig {
         return status;
     }
 
+    /** Ссылка на картинку-подсказку под панелью плеера. Пустая строка — без картинки. */
+    public String getPanelImage() {
+        return panelImage;
+    }
+
     /** Сколько треков класть в очередь за одну команду start. */
     public int getPlaylistSize() {
         return playlistSize;
@@ -179,7 +186,8 @@ public final class BotConfig {
                 pick(props, "music.lastfm.key", "VOICEBRIDGE_LASTFM_KEY"),
                 parsePlaylistSize(props.getProperty("music.playlist", "").trim()),
                 pickCatalog(props),
-                parseStatus(props.getProperty("bot.status", "").trim()));
+                parseStatus(props.getProperty("bot.status", "").trim()),
+                props.getProperty("music.panel.image", "").trim());
     }
 
     /**

@@ -22,6 +22,10 @@ import org.slf4j.LoggerFactory;
 
 import java.awt.Color;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Панель управления плеером: сообщение с кнопками, которое не нужно вызывать заново.
@@ -63,6 +67,15 @@ public final class MusicPanel extends ListenerAdapter {
 
     private static final Color PANEL_COLOR = new Color(0x1DB954);
 
+    /**
+     * Сколько ждать перед перерисовкой панели.
+     *
+     * <p>Пауза не для красоты: пока грузится плейлист, очередь пополняется пятнадцать раз
+     * подряд, и без неё бот пятнадцать раз правил бы одно сообщение — Discord за такое
+     * придерживает запросы.
+     */
+    private static final long REFRESH_DELAY_MS = 2000;
+
     private final long guildId;
     private final MusicRequests requests;
     private final PanelSettings settings;
@@ -75,11 +88,62 @@ public final class MusicPanel extends ListenerAdapter {
     private volatile long lastChannelId = 0;
     private volatile long lastMessageId = 0;
 
+    /** Через что править уже отправленную панель: события плеера приходят без канала. */
+    private volatile net.dv8tion.jda.api.JDA jda;
+
+    private final ScheduledExecutorService refresher =
+            Executors.newSingleThreadScheduledExecutor(task -> {
+                var thread = new Thread(task, "panel-refresh");
+                thread.setDaemon(true);
+                return thread;
+            });
+
+    private final AtomicBoolean waiting = new AtomicBoolean();
+
     public MusicPanel(long guildId, MusicRequests requests, PanelSettings settings, PanelIcons icons) {
         this.guildId = guildId;
         this.requests = requests;
         this.settings = settings;
         this.icons = icons;
+
+        // Очередь живёт своей жизнью: трек кончается сам, плейлист догружается фоном.
+        // Без этого панель показывала бы состояние на момент нажатия кнопки.
+        requests.getMusic().getQueue().setOnChange(this::scheduleRefresh);
+    }
+
+    /**
+     * Просит перерисовать панель, слив частые правки в одну.
+     */
+    private void scheduleRefresh() {
+        if (waiting.compareAndSet(false, true)) {
+            refresher.schedule(() -> {
+                waiting.set(false);
+                redraw();
+            }, REFRESH_DELAY_MS, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    /**
+     * Перерисовывает панель там, где она висит.
+     */
+    private void redraw() {
+        var connection = jda;
+        var messageId = lastMessageId;
+
+        if (connection == null || messageId == 0) {
+            return;
+        }
+
+        var channel = connection.getChannelById(GuildMessageChannel.class, lastChannelId);
+
+        if (channel == null) {
+            return;
+        }
+
+        // Панель могли удалить руками — молчим, на следующей команде выйдет новая
+        channel.editMessageEmbedsById(messageId, buildPanel())
+                .setComponents(buttons())
+                .queue(ok -> { }, error -> { });
     }
 
     @Override
@@ -109,6 +173,7 @@ public final class MusicPanel extends ListenerAdapter {
                         .setEmbeds(buildPanel());
 
         action.setComponents(buttons()).queue(message -> {
+            jda = message.getJDA();
             lastChannelId = channel.getIdLong();
             lastMessageId = message.getIdLong();
         }, error -> log.error("Не удалось опубликовать панель: {}", error.getMessage()));

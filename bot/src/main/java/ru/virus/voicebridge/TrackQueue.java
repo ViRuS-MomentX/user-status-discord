@@ -40,8 +40,28 @@ public final class TrackQueue extends AudioEventAdapter {
      */
     private int requests = 0;
 
+    /**
+     * Кого дёрнуть, когда очередь изменилась.
+     *
+     * <p>Нужно панели: она рисует состояние очереди, а меняется оно не только от нажатий
+     * на её кнопки — трек кончается сам, плейлист догружается фоном.
+     */
+    private volatile Runnable onChange;
+
     public TrackQueue(AudioPlayer player) {
         this.player = player;
+    }
+
+    public void setOnChange(Runnable onChange) {
+        this.onChange = onChange;
+    }
+
+    private void changed() {
+        var listener = onChange;
+
+        if (listener != null) {
+            listener.run();
+        }
     }
 
     /**
@@ -53,6 +73,8 @@ public final class TrackQueue extends AudioEventAdapter {
         if (!player.startTrack(track, true)) {
             queue.addLast(track);
         }
+
+        changed();
     }
 
     /**
@@ -66,6 +88,7 @@ public final class TrackQueue extends AudioEventAdapter {
 
         queue.add(Math.min(requests, queue.size()), track);
         requests++;
+        changed();
     }
 
     /**
@@ -81,6 +104,7 @@ public final class TrackQueue extends AudioEventAdapter {
         }
 
         player.startTrack(track, false);
+        changed();
     }
 
     /**
@@ -104,6 +128,7 @@ public final class TrackQueue extends AudioEventAdapter {
         }
 
         player.startTrack(earlier.makeClone(), false);
+        changed();
         return true;
     }
 
@@ -120,6 +145,7 @@ public final class TrackQueue extends AudioEventAdapter {
     public boolean togglePause() {
         var paused = !player.isPaused();
         player.setPaused(paused);
+        changed();
         return paused;
     }
 
@@ -138,6 +164,7 @@ public final class TrackQueue extends AudioEventAdapter {
     public synchronized void clearQueue() {
         queue.clear();
         requests = 0;
+        changed();
     }
 
     /**
@@ -149,6 +176,7 @@ public final class TrackQueue extends AudioEventAdapter {
         requests = 0;
         player.setPaused(false);
         player.stopTrack();
+        changed();
     }
 
     private void remember(AudioTrack track) {
@@ -162,6 +190,13 @@ public final class TrackQueue extends AudioEventAdapter {
         if (history.size() > HISTORY_LIMIT) {
             history.pollFirst();
         }
+    }
+
+    @Override
+    public void onTrackStart(AudioPlayer player, AudioTrack track) {
+        // Трек мог начаться и сам, без чьего-либо нажатия: так узнаём об этом все,
+        // кто показывает очередь
+        changed();
     }
 
     @Override

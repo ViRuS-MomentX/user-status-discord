@@ -7,6 +7,10 @@ import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import net.dv8tion.jda.api.OnlineStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.Properties;
 
 /**
@@ -17,6 +21,8 @@ import java.util.Properties;
  * при запуске из планировщика задач.
  */
 public final class BotConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(BotConfig.class);
 
     private final String token;
     private final long guildId;
@@ -31,10 +37,12 @@ public final class BotConfig {
     private final String lastFmKey;
     private final int playlistSize;
     private final MusicCatalog catalog;
+    private final OnlineStatus status;
 
     private BotConfig(String token, long guildId, long userId, String httpHost, int httpPort, String httpToken,
                       RankLadder ladder, String botsRole, boolean moderation,
-                      boolean music, String lastFmKey, int playlistSize, MusicCatalog catalog) {
+                      boolean music, String lastFmKey, int playlistSize, MusicCatalog catalog,
+                      OnlineStatus status) {
         this.token = token;
         this.guildId = guildId;
         this.userId = userId;
@@ -48,6 +56,7 @@ public final class BotConfig {
         this.lastFmKey = lastFmKey;
         this.playlistSize = playlistSize;
         this.catalog = catalog;
+        this.status = status;
     }
 
     public String getToken() {
@@ -107,6 +116,11 @@ public final class BotConfig {
         return catalog;
     }
 
+    /** Каким бот показывается в списке участников. */
+    public OnlineStatus getStatus() {
+        return status;
+    }
+
     /** Сколько треков класть в очередь за одну команду start. */
     public int getPlaylistSize() {
         return playlistSize;
@@ -164,7 +178,27 @@ public final class BotConfig {
                 Boolean.parseBoolean(props.getProperty("music.enabled", "false").trim()),
                 pick(props, "music.lastfm.key", "VOICEBRIDGE_LASTFM_KEY"),
                 parsePlaylistSize(props.getProperty("music.playlist", "").trim()),
-                pickCatalog(props));
+                pickCatalog(props),
+                parseStatus(props.getProperty("bot.status", "").trim()));
+    }
+
+    /**
+     * Разбирает статус бота. Неизвестное значение не повод падать — берём «не беспокоить».
+     */
+    private static OnlineStatus parseStatus(String raw) {
+        if (raw.isEmpty()) {
+            return OnlineStatus.DO_NOT_DISTURB;
+        }
+
+        var status = OnlineStatus.fromKey(raw.toLowerCase());
+
+        if (status == OnlineStatus.UNKNOWN) {
+            log.error("Неизвестный bot.status «{}». Беру dnd. "
+                    + "Допустимые: online, idle, dnd, invisible.", raw);
+            return OnlineStatus.DO_NOT_DISTURB;
+        }
+
+        return status;
     }
 
     /**

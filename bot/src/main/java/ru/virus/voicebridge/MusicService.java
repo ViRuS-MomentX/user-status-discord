@@ -117,6 +117,8 @@ public final class MusicService {
      * не по чему.
      *
      * @return найденный трек или <code>null</code>, если ничего не нашлось
+     * @throws AudioUnavailableException приходит через сам CompletableFuture, если
+     *                                   до источника не достучаться
      */
     public CompletableFuture<AudioTrack> search(String query) {
         var result = new CompletableFuture<AudioTrack>();
@@ -140,8 +142,10 @@ public final class MusicService {
 
             @Override
             public void loadFailed(FriendlyException exception) {
+                // Не путаем с «не нашлось»: там виновата песня, а здесь связь, и звать
+                // дальше по списку бессмысленно — каждая попытка стоит ещё полминуты
                 log.error("Поиск «{}» не удался: {}", query, exception.getMessage());
-                result.complete(null);
+                result.completeExceptionally(new AudioUnavailableException(exception.getMessage()));
             }
         });
 

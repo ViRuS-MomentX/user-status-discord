@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
@@ -22,6 +23,18 @@ import java.util.function.Supplier;
 public final class MusicRequests {
 
     private static final Logger log = LoggerFactory.getLogger(MusicRequests.class);
+
+    /**
+     * Сколько песен подряд пробуем, прежде чем признать, что включить нечего.
+     *
+     * <p>Перебирать весь список нельзя: каждая ненайденная песня — это поход в сеть,
+     * и на пятнадцати человек успевает решить, что бот сломался.
+     */
+    private static final int FIRST_TRACK_ATTEMPTS = 3;
+
+    private static final String SOURCE_DOWN =
+            "SoundCloud не отвечает — включить нечего. Проверь, открывается ли soundcloud.com "
+                    + "в браузере: чаще всего его режет провайдер или VPN.";
 
     private final MusicService music;
     private final MusicCatalog catalog;
@@ -144,12 +157,18 @@ public final class MusicRequests {
      */
     private void enqueue(List<Song> songs, boolean asNext, String what, Consumer<String> reply) {
         // Идём по списку, пока что-нибудь не найдётся: одна ненайденная песня не повод
-        // отменять весь запрос, дальше лежит ещё четырнадцать
+        // отменять весь запрос. Но и весь список перебирать нельзя — человек ждёт
         AudioTrack first = null;
         var index = 0;
+        var attempts = Math.min(songs.size(), FIRST_TRACK_ATTEMPTS);
 
-        while (index < songs.size() && first == null) {
-            first = music.search(songs.get(index).query()).join();
+        while (index < attempts && first == null) {
+            try {
+                first = music.search(songs.get(index).query()).join();
+            } catch (CompletionException e) {
+                reply.accept(SOURCE_DOWN);
+                return;
+            }
             index++;
         }
 
@@ -180,11 +199,21 @@ public final class MusicRequests {
         }
 
         var added = 0;
+        var lost = 0;
 
         // А вот в очередь кладём строго по порядку списка: плейлист должен звучать
         // так, как его подобрали, а не так, как повезло с ответами
         for (var search : pending) {
-            var track = search.join();
+            AudioTrack track;
+
+            try {
+                track = search.join();
+            } catch (CompletionException e) {
+                // Связь оборвалась посреди подборки: остальное досчитываем, но молчать
+                // об этом не станем — очередь выйдет короче обещанной
+                lost++;
+                continue;
+            }
 
             if (track != null) {
                 music.getQueue().add(track);
@@ -192,7 +221,10 @@ public final class MusicRequests {
             }
         }
 
-        reply.accept("В очереди треков: " + added + ".");
+        reply.accept(lost == 0
+                ? "В очереди треков: " + added + "."
+                : "В очереди треков: " + added + ". Не догрузилось: " + lost
+                        + " — SoundCloud отвечает через раз.");
     }
 
     public void shutdown() {

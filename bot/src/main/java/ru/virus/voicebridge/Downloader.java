@@ -153,8 +153,15 @@ public final class Downloader {
         }
 
         // Часть роликов YouTube отдаёт только вошедшим: «Video unavailable» снаружи и
-        // обычная страница у того, кто залогинен. Куки браузера снимают это различие
-        if (!settings.cookies().isBlank()) {
+        // обычная страница у того, кто залогинен.
+        //
+        // Файл с куками идёт первым: читать их прямо из браузера получается не всегда —
+        // тот держит базу открытой, а свежий Chrome на Windows ещё и шифрует её так,
+        // что снаружи не разобрать.
+        if (!settings.cookieFile().isBlank()) {
+            command.add("--cookies");
+            command.add(settings.cookieFile());
+        } else if (!settings.cookies().isBlank()) {
             command.add("--cookies-from-browser");
             command.add(settings.cookies());
         }
@@ -227,6 +234,14 @@ public final class Downloader {
      */
     private static String hint(String error) {
         var lower = error.toLowerCase(java.util.Locale.ROOT);
+
+        // Про куки проверяем первым: такая ошибка часто ещё и упоминает вход,
+        // и общий совет про куки увёл бы в сторону от настоящей причины
+        if (lower.contains("cookie")) {
+            return "\nДо кук браузера не добраться: он держит их базу, а свежий Chrome "
+                    + "на Windows ещё и шифрует её. Надёжнее выгрузить куки в файл "
+                    + "и указать его в music.library.cookiefile — либо взять Firefox.";
+        }
 
         if (lower.contains("video unavailable") || lower.contains("not available in your country")
                 || lower.contains("blocked it in your country") || lower.contains("geo")) {

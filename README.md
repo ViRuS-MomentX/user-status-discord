@@ -369,8 +369,24 @@ ccMixter, Internet Archive.
 | Что пишет | Что делать |
 |---|---|
 | `Video unavailable`, `not available in your country` | блокировка по стране — включить VPN и бросить ссылку заново |
-| `Sign in to confirm`, `not a bot` | YouTube требует вход — `music.library.cookies=chrome` (браузер при этом закрыть) |
+| `Sign in to confirm`, `not a bot` | YouTube требует вход — нужны куки, см. ниже |
+| `Could not copy ... cookie database` | до кук браузера не добраться — нужен файл с куками, см. ниже |
 | `Unable to extract`, `nsig`, `format` | yt-dlp устарел — `yt-dlp.exe -U` |
+
+**Куки.** Часть роликов YouTube отдаёт только вошедшим. Взять куки можно двумя
+способами, и они не равноценны:
+
+```properties
+music.library.cookiefile=cookies.txt   # надёжно
+music.library.cookies=firefox          # проще, но работает не всегда
+```
+
+Чтение прямо из браузера ломается легко: тот держит свою базу кук открытой, а
+Chrome начиная со 127-й версии на Windows ещё и шифрует её так, что снаружи не
+разобрать — закрытие браузера тут не поможет. Firefox таким не страдает.
+
+Файл с куками работает всегда. Выгружается расширением вроде «Get cookies.txt
+LOCALLY», кладётся рядом с ботом. Если задан файл, браузер не смотрится вовсе.
 
 Настройка `music.library.args` передаёт качалке любые свои ключи через пробел —
 например `--proxy socks5://127.0.0.1:1080`. Это способ починиться на месте,

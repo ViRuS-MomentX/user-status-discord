@@ -163,6 +163,12 @@ music.library.ytdlp=yt-dlp
 # Где лежит ffmpeg — им yt-dlp вытаскивает звук. Пусто — искать в PATH.
 music.library.ffmpeg=
 
+# Файл с куками в формате Netscape. Надёжнее, чем читать их прямо из браузера:
+# тот держит свою базу открытой, а свежий Chrome на Windows ещё и шифрует её.
+# Выгружается расширением вроде «Get cookies.txt LOCALLY». Если задан, берётся
+# он, а music.library.cookies не смотрится.
+music.library.cookiefile=
+
 # Откуда брать куки браузера: chrome, firefox, edge, opera, brave.
 # Часть роликов YouTube отдаёт только вошедшим — снаружи «Video unavailable»,
 # а у залогиненного обычная страница. Браузер при этом должен быть закрыт.

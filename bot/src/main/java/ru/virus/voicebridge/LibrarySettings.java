@@ -12,11 +12,13 @@ import java.util.Locale;
  * @param ffmpeg где лежит ffmpeg; пусто — искать в PATH
  * @param hosts площадки, ссылки на которые принимаем
  * @param cookies браузер, откуда брать куки: YouTube многое отдаёт только вошедшим
+ * @param cookieFile файл с куками; надёжнее браузера и старше его по приоритету
  * @param extraArgs что ещё передать качалке — прокси, формат, обходные ключи
  */
 public record LibrarySettings(boolean enabled, String folder, long channel, String ytdlp,
                               String ffmpeg, int maxMinutes, int maxMegabytes, int waitMinutes,
-                              List<String> hosts, String cookies, List<String> extraArgs) {
+                              List<String> hosts, String cookies, String cookieFile,
+                              List<String> extraArgs) {
 
     /** Можно ли играть из фонотеки: для этого канал не нужен, хватает папки. */
     public boolean isUsable() {

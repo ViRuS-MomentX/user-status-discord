@@ -237,6 +237,7 @@ public final class BotConfig {
                 bounded(props, "music.library.waitminutes", 5, 1, 60),
                 List.copyOf(hosts),
                 props.getProperty("music.library.cookies", "").trim(),
+                props.getProperty("music.library.cookiefile", "").trim(),
                 words(props.getProperty("music.library.args", "")));
     }
 

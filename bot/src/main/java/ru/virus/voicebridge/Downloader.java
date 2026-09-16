@@ -152,6 +152,17 @@ public final class Downloader {
             command.add(settings.ffmpeg());
         }
 
+        // Часть роликов YouTube отдаёт только вошедшим: «Video unavailable» снаружи и
+        // обычная страница у того, кто залогинен. Куки браузера снимают это различие
+        if (!settings.cookies().isBlank()) {
+            command.add("--cookies-from-browser");
+            command.add(settings.cookies());
+        }
+
+        // Площадки ломаются чаще, чем выходят сборки бота. Свои ключи — способ
+        // починиться на месте, не дожидаясь новой версии
+        command.addAll(settings.extraArgs());
+
         command.add("--");
         command.add(url);
 
@@ -192,8 +203,7 @@ public final class Downloader {
             var line = output.get(i);
 
             if (line.startsWith("ERROR:")) {
-                var text = line.substring("ERROR:".length()).trim();
-                return text.length() > 300 ? text.substring(0, 300) + "…" : text;
+                return shorten(line.substring("ERROR:".length()).trim()) + hint(line);
             }
         }
 
@@ -201,9 +211,40 @@ public final class Downloader {
             return "yt-dlp промолчал";
         }
 
-        // Фильтр по длине отсекает строку вида «трек пропущен по условию»
         var last = output.get(output.size() - 1);
-        return last.length() > 300 ? last.substring(0, 300) + "…" : last;
+        return shorten(last) + hint(last);
+    }
+
+    private static String shorten(String text) {
+        return text.length() > 300 ? text.substring(0, 300) + "…" : text;
+    }
+
+    /**
+     * Добавляет к отказу совет, если по нему понятно, чем лечится.
+     *
+     * <p>Текст от yt-dlp написан для того, кто сидит в консоли. В чате его читает
+     * человек, которому нужно знать не что случилось, а что теперь делать.
+     */
+    private static String hint(String error) {
+        var lower = error.toLowerCase(java.util.Locale.ROOT);
+
+        if (lower.contains("video unavailable") || lower.contains("not available in your country")
+                || lower.contains("blocked it in your country") || lower.contains("geo")) {
+            return "\nПохоже на блокировку по стране. Включи VPN и брось ссылку заново.";
+        }
+
+        if (lower.contains("sign in") || lower.contains("not a bot") || lower.contains("login")
+                || lower.contains("age")) {
+            return "\nYouTube требует вход. Впиши в настройки music.library.cookies=chrome "
+                    + "(или firefox, edge) и перезапусти бота.";
+        }
+
+        if (lower.contains("nsig") || lower.contains("player") || lower.contains("format")
+                || lower.contains("unable to extract")) {
+            return "\nПохоже, yt-dlp устарел. Обнови его: yt-dlp.exe -U";
+        }
+
+        return "";
     }
 
     /** Скачать не вышло. Текст рассчитан на то, что его увидят в чате. */

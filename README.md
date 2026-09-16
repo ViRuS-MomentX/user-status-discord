@@ -363,6 +363,19 @@ music.library.ytdlp=yt-dlp.exe
 те площадки, где музыку раздают законно — Bandcamp, Jamendo, Free Music Archive,
 ccMixter, Internet Archive.
 
+**Когда не качается.** Текст от yt-dlp бот показывает в канале как есть, но к
+частым отказам добавляет совет:
+
+| Что пишет | Что делать |
+|---|---|
+| `Video unavailable`, `not available in your country` | блокировка по стране — включить VPN и бросить ссылку заново |
+| `Sign in to confirm`, `not a bot` | YouTube требует вход — `music.library.cookies=chrome` (браузер при этом закрыть) |
+| `Unable to extract`, `nsig`, `format` | yt-dlp устарел — `yt-dlp.exe -U` |
+
+Настройка `music.library.args` передаёт качалке любые свои ключи через пробел —
+например `--proxy socks5://127.0.0.1:1080`. Это способ починиться на месте,
+когда площадка сломалась, не дожидаясь новой сборки бота.
+
 Рамки на скачиваемое задаются настройками: не длиннее `music.library.minutes`,
 не тяжелее `music.library.megabytes`, не дольше `music.library.waitminutes` на
 одну закачку. Иначе однажды кто-нибудь зальёт восьмичасовой стрим дождя.

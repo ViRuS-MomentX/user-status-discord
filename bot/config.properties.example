@@ -163,6 +163,17 @@ music.library.ytdlp=yt-dlp
 # Где лежит ffmpeg — им yt-dlp вытаскивает звук. Пусто — искать в PATH.
 music.library.ffmpeg=
 
+# Откуда брать куки браузера: chrome, firefox, edge, opera, brave.
+# Часть роликов YouTube отдаёт только вошедшим — снаружи «Video unavailable»,
+# а у залогиненного обычная страница. Браузер при этом должен быть закрыт.
+# Пусто — без кук.
+music.library.cookies=
+
+# Что ещё передать yt-dlp, через пробел. Способ починиться на месте, когда
+# площадка сломалась, не дожидаясь новой сборки бота. Например:
+# music.library.args=--proxy socks5://127.0.0.1:1080
+music.library.args=
+
 # Рамки на скачиваемое: минуты, мегабайты и сколько ждать одну закачку.
 music.library.minutes=15
 music.library.megabytes=30

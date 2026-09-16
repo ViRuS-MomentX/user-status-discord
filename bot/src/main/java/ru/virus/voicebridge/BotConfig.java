@@ -235,7 +235,15 @@ public final class BotConfig {
                 bounded(props, "music.library.minutes", 15, 1, 180),
                 bounded(props, "music.library.megabytes", 30, 1, 500),
                 bounded(props, "music.library.waitminutes", 5, 1, 60),
-                List.copyOf(hosts));
+                List.copyOf(hosts),
+                props.getProperty("music.library.cookies", "").trim(),
+                words(props.getProperty("music.library.args", "")));
+    }
+
+    /** Разбивает строку настройки на отдельные слова-аргументы. */
+    private static List<String> words(String raw) {
+        var trimmed = raw.trim();
+        return trimmed.isEmpty() ? List.of() : List.of(trimmed.split("\\s+"));
     }
 
     /** Числовой ID из настроек. Ноль означает «не задано». */

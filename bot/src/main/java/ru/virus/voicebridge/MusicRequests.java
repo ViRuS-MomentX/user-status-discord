@@ -40,6 +40,9 @@ public final class MusicRequests {
     private final MusicCatalog catalog;
     private final int playlistSize;
 
+    /** Своя фонотека. <code>null</code>, если она выключена. */
+    private final MusicLibrary library;
+
     /**
      * Поиск ходит в сеть и занимает секунды. В потоке событий JDA это делать нельзя:
      * он один на всего бота, и пока ждёт ответа, стоят и остальные команды.
@@ -50,10 +53,16 @@ public final class MusicRequests {
         return thread;
     });
 
-    public MusicRequests(MusicService music, MusicCatalog catalog, int playlistSize) {
+    public MusicRequests(MusicService music, MusicCatalog catalog, int playlistSize,
+                         MusicLibrary library) {
         this.music = music;
         this.catalog = catalog;
         this.playlistSize = playlistSize;
+        this.library = library;
+    }
+
+    public MusicLibrary getLibrary() {
+        return library;
     }
 
     public MusicService getMusic() {
@@ -77,6 +86,12 @@ public final class MusicRequests {
                 // прослушивания хоронит очередь под чужим плейлистом.
                 var busy = music.getQueue().current() != null;
 
+                // Своё — вперёд чужого: файл на диске играет всегда и сразу, а площадка
+                // может лежать, тормозить или не знать нужной песни
+                if (fromLibrary(query, busy, reply)) {
+                    return;
+                }
+
                 List<Song> songs;
 
                 try {
@@ -98,6 +113,55 @@ public final class MusicRequests {
                 reply.accept("Что-то пошло не так при сборке плейлиста.");
             }
         });
+    }
+
+    /**
+     * Пробует набрать плейлист из своей фонотеки.
+     *
+     * @return <code>false</code>, если фонотека выключена или ничего не нашлось —
+     *         тогда дальше работает обычный поиск по площадке
+     */
+    private boolean fromLibrary(String query, boolean busy, Consumer<String> reply) {
+        if (library == null || library.size() == 0) {
+            return false;
+        }
+
+        var found = library.playlistFor(query, busy ? 1 : playlistSize);
+
+        if (found.isEmpty()) {
+            return false;
+        }
+
+        var first = music.load(library.fileOf(found.get(0))).join();
+
+        if (first == null) {
+            // Опись есть, а файл не читается: пусть запрос уйдёт на площадку, чем
+            // человек останется вообще ни с чем
+            return false;
+        }
+
+        if (busy) {
+            music.getQueue().addRequest(first);
+            reply.accept("Следующим будет: **" + found.get(0).label() + "** (из фонотеки)");
+            return true;
+        }
+
+        music.getQueue().add(first);
+
+        var added = 1;
+
+        for (var track : found.subList(1, found.size())) {
+            var loaded = music.load(library.fileOf(track)).join();
+
+            if (loaded != null) {
+                music.getQueue().add(loaded);
+                added++;
+            }
+        }
+
+        reply.accept("Играет: **" + found.get(0).label() + "**\nИз фонотеки, треков в очереди: "
+                + added + ".");
+        return true;
     }
 
     /** Ставит в очередь чарт популярного. */

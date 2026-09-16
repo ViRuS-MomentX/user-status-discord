@@ -5,6 +5,7 @@ import com.sedmelluq.discord.lavaplayer.player.AudioLoadResultHandler;
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayer;
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayerManager;
 import com.sedmelluq.discord.lavaplayer.player.DefaultAudioPlayerManager;
+import com.sedmelluq.discord.lavaplayer.source.local.LocalAudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.source.soundcloud.SoundCloudAudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
 import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
@@ -51,6 +52,8 @@ public final class MusicService {
                 .build());
 
         manager.registerSourceManager(SoundCloudAudioSourceManager.createDefault());
+        // Своя фонотека: файлы с диска играют всегда, чем бы ни болел интернет
+        manager.registerSourceManager(new LocalAudioSourceManager());
 
         player = manager.createPlayer();
         queue = new TrackQueue(player);
@@ -120,6 +123,41 @@ public final class MusicService {
      * @throws AudioUnavailableException приходит через сам CompletableFuture, если
      *                                   до источника не достучаться
      */
+    /**
+     * Открывает файл с диска.
+     *
+     * <p>Отдельно от поиска: здесь нечего искать и не с чем ошибаться — либо файл
+     * читается, либо нет.
+     */
+    public CompletableFuture<AudioTrack> load(java.nio.file.Path file) {
+        var result = new CompletableFuture<AudioTrack>();
+
+        manager.loadItem(file.toAbsolutePath().toString(), new AudioLoadResultHandler() {
+            @Override
+            public void trackLoaded(AudioTrack track) {
+                result.complete(track);
+            }
+
+            @Override
+            public void playlistLoaded(AudioPlaylist playlist) {
+                result.complete(playlist.getTracks().isEmpty() ? null : playlist.getTracks().get(0));
+            }
+
+            @Override
+            public void noMatches() {
+                result.complete(null);
+            }
+
+            @Override
+            public void loadFailed(FriendlyException exception) {
+                log.error("Файл «{}» не открылся: {}", file.getFileName(), exception.getMessage());
+                result.complete(null);
+            }
+        });
+
+        return result;
+    }
+
     public CompletableFuture<AudioTrack> search(String query) {
         var result = new CompletableFuture<AudioTrack>();
 

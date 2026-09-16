@@ -78,10 +78,36 @@ public final class VoiceBridgeBot {
         MusicCommands musicCommands = null;
         MusicPanel musicPanel = null;
         PanelIcons panelIcons = null;
+        LibraryChannel libraryChannel = null;
 
         if (config.isMusicEnabled()) {
             music = new MusicService();
-            musicRequests = new MusicRequests(music, config.getCatalog(), config.getPlaylistSize());
+
+            MusicLibrary library = null;
+            var librarySettings = config.getLibrary();
+
+            if (librarySettings.isUsable()) {
+                library = new MusicLibrary(
+                        configPath.toAbsolutePath().resolveSibling(librarySettings.folder()));
+                library.load();
+
+                if (librarySettings.acceptsLinks()) {
+                    var downloader = new Downloader(librarySettings, library.getFolder());
+
+                    if (downloader.isReady()) {
+                        libraryChannel = new LibraryChannel(config.getGuildId(), librarySettings,
+                                library, downloader);
+                        log.info("Приём ссылок на музыку включён: канал {}.", librarySettings.channel());
+                    } else {
+                        log.error("Не нашёлся {} — приём ссылок выключен. Скачай его с "
+                                + "https://github.com/yt-dlp/yt-dlp/releases и положи рядом с ботом "
+                                + "или укажи путь в music.library.ytdlp.", librarySettings.ytdlp());
+                    }
+                }
+            }
+
+            musicRequests = new MusicRequests(music, config.getCatalog(), config.getPlaylistSize(),
+                    library);
             // Лист иконок ищем рядом с настройками, а не в текущей папке: бота запускают
             // и ярлыком, и из планировщика, и «текущая папка» там каждый раз своя
             panelIcons = new PanelIcons(config.getGuildId(),
@@ -132,7 +158,7 @@ public final class VoiceBridgeBot {
                     .addEventListeners(tracker);
 
             for (var listener : new Object[] { commands, moderation, memberRoles,
-                    panelIcons, musicCommands, musicPanel }) {
+                    panelIcons, musicCommands, musicPanel, libraryChannel }) {
                 if (listener != null) {
                     builder.addEventListeners(listener);
                 }
@@ -179,6 +205,7 @@ public final class VoiceBridgeBot {
             log.error("Слежение за лентой включено, но не задан posts.url или posts.channel.");
         }
 
+        var runningLibrary = libraryChannel;
         var runningWatcher = postsWatcher;
         var runningTicker = ticker;
         var runningStore = store;
@@ -191,6 +218,10 @@ public final class VoiceBridgeBot {
 
             // Сохранить балансы надо до разрыва связи: после shutdown начисление уже не идёт,
             // а недописанная минута иначе потерялась бы.
+            if (runningLibrary != null) {
+                runningLibrary.shutdown();
+            }
+
             if (runningWatcher != null) {
                 runningWatcher.stop();
             }

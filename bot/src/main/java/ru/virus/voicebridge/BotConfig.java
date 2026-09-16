@@ -11,6 +11,7 @@ import net.dv8tion.jda.api.OnlineStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.List;
 import java.util.Properties;
 
 /**
@@ -40,11 +41,13 @@ public final class BotConfig {
     private final OnlineStatus status;
     private final PanelSettings panel;
     private final PostsSettings posts;
+    private final LibrarySettings library;
 
     private BotConfig(String token, long guildId, long userId, String httpHost, int httpPort, String httpToken,
                       RankLadder ladder, String botsRole, boolean moderation,
                       boolean music, String lastFmKey, int playlistSize, MusicCatalog catalog,
-                      OnlineStatus status, PanelSettings panel, PostsSettings posts) {
+                      OnlineStatus status, PanelSettings panel, PostsSettings posts,
+                      LibrarySettings library) {
         this.token = token;
         this.guildId = guildId;
         this.userId = userId;
@@ -61,6 +64,7 @@ public final class BotConfig {
         this.status = status;
         this.panel = panel;
         this.posts = posts;
+        this.library = library;
     }
 
     public String getToken() {
@@ -135,6 +139,11 @@ public final class BotConfig {
         return posts;
     }
 
+    /** Своя фонотека: где лежит и чем наполняется. */
+    public LibrarySettings getLibrary() {
+        return library;
+    }
+
     /** Сколько треков класть в очередь за одну команду start. */
     public int getPlaylistSize() {
         return playlistSize;
@@ -195,7 +204,70 @@ public final class BotConfig {
                 pickCatalog(props),
                 parseStatus(props.getProperty("bot.status", "").trim()),
                 panelSettings(props),
-                postsSettings(props));
+                postsSettings(props),
+                librarySettings(props));
+    }
+
+    /** Площадки, ссылки на которые принимаются по умолчанию. */
+    private static final String DEFAULT_HOSTS = "youtube.com,youtu.be,soundcloud.com,"
+            + "bandcamp.com,music.yandex.ru,vk.com,vkvideo.ru,archive.org,jamendo.com,"
+            + "freemusicarchive.org,ccmixter.org";
+
+    /**
+     * Настройки своей фонотеки.
+     */
+    private static LibrarySettings librarySettings(Properties props) {
+        var hosts = new java.util.ArrayList<String>();
+
+        for (var host : props.getProperty("music.library.hosts", DEFAULT_HOSTS).split(",")) {
+            var trimmed = host.trim().toLowerCase();
+            if (!trimmed.isEmpty()) {
+                hosts.add(trimmed);
+            }
+        }
+
+        return new LibrarySettings(
+                Boolean.parseBoolean(props.getProperty("music.library.enabled", "false").trim()),
+                season(props, "music.library.folder", "library"),
+                number(props, "music.library.channel", 0),
+                season(props, "music.library.ytdlp", "yt-dlp"),
+                props.getProperty("music.library.ffmpeg", "").trim(),
+                bounded(props, "music.library.minutes", 15, 1, 180),
+                bounded(props, "music.library.megabytes", 30, 1, 500),
+                bounded(props, "music.library.waitminutes", 5, 1, 60),
+                List.copyOf(hosts));
+    }
+
+    /** Числовой ID из настроек. Ноль означает «не задано». */
+    private static long number(Properties props, String key, long fallback) {
+        var raw = props.getProperty(key, "").trim();
+
+        if (raw.isEmpty()) {
+            return fallback;
+        }
+
+        try {
+            return Long.parseUnsignedLong(raw);
+        } catch (NumberFormatException e) {
+            log.error("{} должен быть числовым ID, а не «{}».", key, raw);
+            return fallback;
+        }
+    }
+
+    /** Число в разумных пределах: за ними настройка делает только хуже. */
+    private static int bounded(Properties props, String key, int fallback, int min, int max) {
+        var raw = props.getProperty(key, "").trim();
+
+        if (raw.isEmpty()) {
+            return fallback;
+        }
+
+        try {
+            return Math.max(min, Math.min(max, Integer.parseInt(raw)));
+        } catch (NumberFormatException e) {
+            log.error("{} должен быть числом, а не «{}». Беру {}.", key, raw, fallback);
+            return fallback;
+        }
     }
 
     /**

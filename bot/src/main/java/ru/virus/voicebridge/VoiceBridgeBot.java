@@ -136,18 +136,28 @@ public final class VoiceBridgeBot {
         Telegram telegram = null;
 
         if (config.getBridge().isUsable()) {
-            telegram = new Telegram(config.getBridge().token());
+            telegram = new Telegram(config.getBridge().token(), config.getBridge().proxy());
 
             try {
-                // Заодно проверяем токен: молчащий мост хуже отсутствующего, а узнать
-                // о неверном токене лучше сразу, а не при первом сообщении
+                // Здороваемся сразу: про неверный токен лучше узнать при запуске,
+                // а не при первом сообщении, которое тихо не дойдёт
                 log.info("Мост с Telegram: бот @{}, группа {}.",
                         telegram.whoAmI(), config.getBridge().chat());
-
-                toTelegram = new DiscordToTelegram(config.getGuildId(), config.getBridge(), telegram);
-            } catch (IOException e) {
-                log.error("Telegram не принял токен: {}. Мост выключен.", e.getMessage());
+            } catch (Telegram.RejectedException e) {
+                // Telegram ответил и развернул нас: тут ждать нечего, лечит человек
+                log.error("Telegram отказал: {}. Проверь bridge.telegram.token. Мост выключен.",
+                        e.getMessage());
                 telegram = null;
+            } catch (IOException e) {
+                // А это связь. Мост оставляем: он сам пробует снова, и к тому времени,
+                // как кто-то напишет, дорога может открыться
+                log.warn("Telegram сейчас не отвечает: {}. Мост поднят, буду пробовать дальше. "
+                        + "Если так и останется — до api.telegram.org не достучаться "
+                        + "(провайдер, VPN), помогает bridge.telegram.proxy.", e.getMessage());
+            }
+
+            if (telegram != null) {
+                toTelegram = new DiscordToTelegram(config.getGuildId(), config.getBridge(), telegram);
             }
         } else if (config.getBridge().enabled()) {
             log.error("Мост включён, но не задан bridge.channel, bridge.telegram.token "

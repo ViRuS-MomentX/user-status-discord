@@ -226,7 +226,8 @@ public final class BotConfig {
                 pick(props, "bridge.telegram.token", "VOICEBRIDGE_TELEGRAM_TOKEN"),
                 props.getProperty("bridge.telegram.chat", "").trim(),
                 Boolean.parseBoolean(props.getProperty("bridge.files", "true").trim()),
-                bounded(props, "bridge.maxmegabytes", 25, 1, 50));
+                bounded(props, "bridge.maxmegabytes", 25, 1, 50),
+                props.getProperty("bridge.telegram.proxy", "").trim());
     }
 
     /** Площадки, ссылки на которые принимаются по умолчанию. */

@@ -226,3 +226,8 @@ bridge.files=true
 
 # Предел на один файл, МБ. У самого Telegram потолок 50.
 bridge.maxmegabytes=25
+
+# HTTP-прокси вида «хост:порт», если до api.telegram.org не достучаться
+# напрямую. Пусто — идти как есть. Нужен только для Telegram, остальное
+# бот берёт обычным путём.
+bridge.telegram.proxy=

@@ -34,15 +34,37 @@ public final class Telegram {
     /** Сколько Telegram держит соединение, ожидая новых сообщений. */
     private static final int POLL_SECONDS = 25;
 
-    private final HttpClient http = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(15))
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .build();
-
+    private final HttpClient http;
     private final String token;
 
     public Telegram(String token) {
+        this(token, "");
+    }
+
+    /**
+     * @param proxy «хост:порт» HTTP-прокси; пустая строка — идти напрямую
+     */
+    public Telegram(String token, String proxy) {
         this.token = token;
+
+        var builder = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(15))
+                .followRedirects(HttpClient.Redirect.NORMAL);
+
+        if (!proxy.isBlank()) {
+            var at = proxy.lastIndexOf(':');
+
+            if (at > 0) {
+                builder.proxy(java.net.ProxySelector.of(new java.net.InetSocketAddress(
+                        proxy.substring(0, at).trim(),
+                        Integer.parseInt(proxy.substring(at + 1).trim()))));
+            } else {
+                log.error("bridge.telegram.proxy должен быть «хост:порт», а не «{}». "
+                        + "Иду напрямую.", proxy);
+            }
+        }
+
+        this.http = builder.build();
     }
 
     /** Проверяет токен и заодно узнаёт имя бота. */
@@ -267,10 +289,22 @@ public final class Telegram {
         }
 
         if (!answer.getBoolean("ok", false)) {
-            throw new IOException(method + ": " + answer.getString("description", "отказ без объяснений"));
+            // Отдельный вид: до Telegram мы дошли, и это он нас развернул. Отличать
+            // важно — неверный токен лечится человеком, а обрыв связи проходит сам
+            throw new RejectedException(method + ": "
+                    + answer.getString("description", "отказ без объяснений"));
         }
 
         return answer;
+    }
+
+    /** Telegram ответил и отказал: дело в запросе или в токене, а не в связи. */
+    public static final class RejectedException extends IOException {
+        private static final long serialVersionUID = 1L;
+
+        public RejectedException(String message) {
+            super(message);
+        }
     }
 
     /** Экранирует то, что в HTML значит не то, что написано. */

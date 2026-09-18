@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -79,8 +80,15 @@ public final class Downloader {
 
         Process process;
 
+        var builder = new ProcessBuilder(command).redirectErrorStream(true);
+
+        // yt-dlp написан на Python, а тот пишет в трубу кодировкой системы — на русской
+        // Windows это cp1251, и ошибка доходит до чата кракозябрами. Просим UTF-8 у
+        // самого Python: перекодировать на своей стороне было бы гаданием
+        builder.environment().put("PYTHONIOENCODING", "utf-8");
+
         try {
-            process = new ProcessBuilder(command).redirectErrorStream(true).start();
+            process = builder.start();
         } catch (IOException e) {
             throw new DownloadException("не запустить " + settings.ytdlp() + ": " + e.getMessage());
         }
@@ -227,36 +235,66 @@ public final class Downloader {
     }
 
     /**
+     * Приметы, по которым видно, чем лечится отказ.
+     *
+     * <p>Приметы нарочно длинные. Короткая подстрока ловит лишнее: «age» находится
+     * внутри «page», и ошибка «Unable to download API page» получала совет про вход
+     * в аккаунт, к которому не имела отношения.
+     */
+    private static final List<Advice> ADVICE = List.of(
+            new Advice(
+                    List.of("cookie"),
+                    "До кук браузера не добраться: он держит их базу, а свежий Chrome "
+                            + "на Windows ещё и шифрует её. Надёжнее выгрузить куки в файл "
+                            + "и указать его в music.library.cookiefile — либо взять Firefox."),
+            new Advice(
+                    List.of("failed to establish a new connection", "connection refused",
+                            "winerror 10061", "socks", "proxy", "connection reset",
+                            "timed out", "unreachable"),
+                    "Связи нет. Если в music.library.args прописан --proxy — убери его или "
+                            + "запусти сам прокси; если включён VPN — проверь, что он работает."),
+            new Advice(
+                    List.of("video unavailable", "available in your country",
+                            "blocked it in your country", "geo-restricted", "geo restriction",
+                            "not available from your location"),
+                    "Похоже на блокировку по стране. Включи VPN и брось ссылку заново."),
+            new Advice(
+                    List.of("sign in to confirm", "not a bot", "confirm your age",
+                            "age-restricted", "login required", "private video",
+                            "members-only", "join this channel"),
+                    "YouTube требует вход. Дай боту куки: music.library.cookiefile=cookies.txt "
+                            + "или music.library.cookies=firefox."),
+            new Advice(
+                    List.of("unable to extract", "nsig", "player response",
+                            "requested format is not available"),
+                    "Похоже, yt-dlp устарел. Обнови его: yt-dlp.exe -U"));
+
+    /** Примета и что по ней советовать. */
+    private record Advice(List<String> marks, String text) {
+
+        boolean matches(String error) {
+            for (var mark : marks) {
+                if (error.contains(mark)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    /**
      * Добавляет к отказу совет, если по нему понятно, чем лечится.
      *
      * <p>Текст от yt-dlp написан для того, кто сидит в консоли. В чате его читает
      * человек, которому нужно знать не что случилось, а что теперь делать.
      */
     private static String hint(String error) {
-        var lower = error.toLowerCase(java.util.Locale.ROOT);
+        var lower = error.toLowerCase(Locale.ROOT);
 
-        // Про куки проверяем первым: такая ошибка часто ещё и упоминает вход,
-        // и общий совет про куки увёл бы в сторону от настоящей причины
-        if (lower.contains("cookie")) {
-            return "\nДо кук браузера не добраться: он держит их базу, а свежий Chrome "
-                    + "на Windows ещё и шифрует её. Надёжнее выгрузить куки в файл "
-                    + "и указать его в music.library.cookiefile — либо взять Firefox.";
-        }
-
-        if (lower.contains("video unavailable") || lower.contains("not available in your country")
-                || lower.contains("blocked it in your country") || lower.contains("geo")) {
-            return "\nПохоже на блокировку по стране. Включи VPN и брось ссылку заново.";
-        }
-
-        if (lower.contains("sign in") || lower.contains("not a bot") || lower.contains("login")
-                || lower.contains("age")) {
-            return "\nYouTube требует вход. Впиши в настройки music.library.cookies=chrome "
-                    + "(или firefox, edge) и перезапусти бота.";
-        }
-
-        if (lower.contains("nsig") || lower.contains("player") || lower.contains("format")
-                || lower.contains("unable to extract")) {
-            return "\nПохоже, yt-dlp устарел. Обнови его: yt-dlp.exe -U";
+        for (var advice : ADVICE) {
+            if (advice.matches(lower)) {
+                return "\n" + advice.text();
+            }
         }
 
         return "";

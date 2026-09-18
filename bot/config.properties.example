@@ -193,6 +193,8 @@ music.library.client=
 music.library.args=
 
 # Рамки на скачиваемое: минуты, мегабайты и сколько ждать одну закачку.
+# Качается только звуковая дорожка, так что мегабайты считаются по ней:
+# трёхминутная песня весит около трёх-пяти МБ.
 music.library.minutes=15
 music.library.megabytes=30
 music.library.waitminutes=5

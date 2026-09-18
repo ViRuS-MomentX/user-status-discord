@@ -141,9 +141,14 @@ public final class Downloader {
         var command = new ArrayList<String>(List.of(
                 settings.ytdlp(),
                 "--no-playlist",
+                // Берём сразу звуковую дорожку, а не ролик целиком: качать видео,
+                // чтобы выбросить картинку, значит тратить чужой трафик впустую —
+                // и упираться в предел по размеру там, где звук весит впятеро меньше
+                "--format", "bestaudio/best",
                 "--extract-audio",
-                "--audio-format", "opus",
-                "--audio-quality", "0",
+                // «best» вместо своего формата: у YouTube звук и так лежит в opus,
+                // и перегонять его во второй раз незачем — только время и качество
+                "--audio-format", "best",
                 // Лучше отказать заранее, чем скачать восьмичасовой стрим дождя
                 "--match-filter", "duration<?" + (settings.maxMinutes() * 60),
                 "--max-filesize", settings.maxMegabytes() + "M",
@@ -280,8 +285,12 @@ public final class Downloader {
                             + "настройки music.library.client=tv (или android, ios, mweb) и "
                             + "перезапусти бота. Если не поможет — обнови качалку: yt-dlp.exe -U"),
             new Advice(
-                    List.of("unable to extract", "nsig", "player response",
-                            "requested format is not available"),
+                    List.of("requested format is not available", "no video formats found"),
+                    "У этого клиента YouTube нет подходящей дорожки. Попробуй другой: "
+                            + "music.library.client=android (или ios, mweb, tv). Если перебрал "
+                            + "все — обнови качалку: yt-dlp.exe -U"),
+            new Advice(
+                    List.of("unable to extract", "nsig", "player response"),
                     "Похоже, yt-dlp устарел. Обнови его: yt-dlp.exe -U"));
 
     /** Примета и что по ней советовать. */

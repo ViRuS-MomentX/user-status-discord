@@ -84,7 +84,10 @@ public final class VoiceBridgeBot {
             music = new MusicService();
 
             MusicLibrary library = null;
-            var librarySettings = config.getLibrary();
+            // Пути достраиваем от файла настроек: бота запускают и ярлыком, и из
+            // планировщика, и «текущая папка» там каждый раз своя
+            var librarySettings = config.getLibrary()
+                    .resolvedAgainst(configPath.toAbsolutePath().getParent());
 
             if (librarySettings.isUsable()) {
                 library = new MusicLibrary(

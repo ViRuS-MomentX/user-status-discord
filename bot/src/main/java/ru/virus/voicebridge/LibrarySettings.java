@@ -21,6 +21,32 @@ public record LibrarySettings(boolean enabled, String folder, long channel, Stri
                               List<String> hosts, String cookies, String cookieFile,
                               String client, List<String> extraArgs) {
 
+    /**
+     * Достраивает пути до файлов, положенных рядом с настройками.
+     *
+     * <p>Всё остальное в боте ищется рядом с config.properties, а имя программы Windows
+     * разбирает по своим правилам — по системным путям, а не по папке бота. Человек же,
+     * написав «yt-dlp.exe», имеет в виду тот файл, который сам туда положил. Поэтому
+     * сначала смотрим рядом с настройками, и только если там пусто — отдаём имя системе.
+     *
+     * @param base папка с файлом настроек
+     */
+    public LibrarySettings resolvedAgainst(java.nio.file.Path base) {
+        return new LibrarySettings(enabled, folder, channel,
+                nearby(base, ytdlp), nearby(base, ffmpeg),
+                maxMinutes, maxMegabytes, waitMinutes, hosts,
+                cookies, nearby(base, cookieFile), client, extraArgs);
+    }
+
+    private static String nearby(java.nio.file.Path base, String name) {
+        if (name.isBlank()) {
+            return name;
+        }
+
+        var candidate = base.resolve(name);
+        return java.nio.file.Files.isRegularFile(candidate) ? candidate.toString() : name;
+    }
+
     /** Можно ли играть из фонотеки: для этого канал не нужен, хватает папки. */
     public boolean isUsable() {
         return enabled && !folder.isBlank();

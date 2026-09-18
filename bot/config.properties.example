@@ -156,8 +156,10 @@ music.library.folder=library
 music.library.channel=
 
 # Чем качать. Возьми yt-dlp с https://github.com/yt-dlp/yt-dlp/releases
-# (yt-dlp.exe для Windows) и положи рядом с ботом либо укажи полный путь.
-# Обновлять его надо самому: площадки меняют защиту чаще, чем выходит бот.
+# (yt-dlp.exe для Windows) и положи рядом с этим config.properties.
+# Файл ищется сначала здесь, и только если его тут нет — по системным путям.
+# То же самое с music.library.ffmpeg и music.library.cookiefile.
+# Обновлять качалку надо самому: площадки меняют защиту чаще, чем выходит бот.
 music.library.ytdlp=yt-dlp
 
 # Где лежит ffmpeg — им yt-dlp вытаскивает звук. Пусто — искать в PATH.

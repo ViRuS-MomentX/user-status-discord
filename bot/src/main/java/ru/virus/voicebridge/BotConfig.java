@@ -238,6 +238,7 @@ public final class BotConfig {
                 List.copyOf(hosts),
                 props.getProperty("music.library.cookies", "").trim(),
                 props.getProperty("music.library.cookiefile", "").trim(),
+                props.getProperty("music.library.client", "").trim(),
                 words(props.getProperty("music.library.args", "")));
     }
 

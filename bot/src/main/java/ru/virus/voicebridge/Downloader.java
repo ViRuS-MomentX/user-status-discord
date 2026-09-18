@@ -174,6 +174,15 @@ public final class Downloader {
             command.add(settings.cookies());
         }
 
+        // YouTube отвечает по-разному в зависимости от того, каким приложением к нему
+        // пришли: то, что закрыто для браузера, открыто для телевизора или телефона.
+        // Отдельная настройка, а не общие ключи: подбирать клиент приходится руками,
+        // и делать это должно быть просто
+        if (!settings.client().isBlank()) {
+            command.add("--extractor-args");
+            command.add("youtube:player_client=" + settings.client());
+        }
+
         // Площадки ломаются чаще, чем выходят сборки бота. Свои ключи — способ
         // починиться на месте, не дожидаясь новой версии
         command.addAll(settings.extraArgs());
@@ -264,6 +273,12 @@ public final class Downloader {
                             "members-only", "join this channel"),
                     "YouTube требует вход. Дай боту куки: music.library.cookiefile=cookies.txt "
                             + "или music.library.cookies=firefox."),
+            new Advice(
+                    List.of("page needs to be reloaded", "please try again later",
+                            "failed to extract any player response", "throttled"),
+                    "YouTube не пустил того клиента, которым представился yt-dlp. Впиши в "
+                            + "настройки music.library.client=tv (или android, ios, mweb) и "
+                            + "перезапусти бота. Если не поможет — обнови качалку: yt-dlp.exe -U"),
             new Advice(
                     List.of("unable to extract", "nsig", "player response",
                             "requested format is not available"),

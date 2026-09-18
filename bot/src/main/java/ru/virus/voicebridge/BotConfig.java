@@ -42,12 +42,13 @@ public final class BotConfig {
     private final PanelSettings panel;
     private final PostsSettings posts;
     private final LibrarySettings library;
+    private final BridgeSettings bridge;
 
     private BotConfig(String token, long guildId, long userId, String httpHost, int httpPort, String httpToken,
                       RankLadder ladder, String botsRole, boolean moderation,
                       boolean music, String lastFmKey, int playlistSize, MusicCatalog catalog,
                       OnlineStatus status, PanelSettings panel, PostsSettings posts,
-                      LibrarySettings library) {
+                      LibrarySettings library, BridgeSettings bridge) {
         this.token = token;
         this.guildId = guildId;
         this.userId = userId;
@@ -65,6 +66,7 @@ public final class BotConfig {
         this.panel = panel;
         this.posts = posts;
         this.library = library;
+        this.bridge = bridge;
     }
 
     public String getToken() {
@@ -144,6 +146,11 @@ public final class BotConfig {
         return library;
     }
 
+    /** Мост между каналом Discord и группой Telegram. */
+    public BridgeSettings getBridge() {
+        return bridge;
+    }
+
     /** Сколько треков класть в очередь за одну команду start. */
     public int getPlaylistSize() {
         return playlistSize;
@@ -205,7 +212,21 @@ public final class BotConfig {
                 parseStatus(props.getProperty("bot.status", "").trim()),
                 panelSettings(props),
                 postsSettings(props),
-                librarySettings(props));
+                librarySettings(props),
+                bridgeSettings(props));
+    }
+
+    /**
+     * Настройки моста с Telegram.
+     */
+    private static BridgeSettings bridgeSettings(Properties props) {
+        return new BridgeSettings(
+                Boolean.parseBoolean(props.getProperty("bridge.enabled", "false").trim()),
+                number(props, "bridge.channel", 0),
+                pick(props, "bridge.telegram.token", "VOICEBRIDGE_TELEGRAM_TOKEN"),
+                props.getProperty("bridge.telegram.chat", "").trim(),
+                Boolean.parseBoolean(props.getProperty("bridge.files", "true").trim()),
+                bounded(props, "bridge.maxmegabytes", 25, 1, 50));
     }
 
     /** Площадки, ссылки на которые принимаются по умолчанию. */

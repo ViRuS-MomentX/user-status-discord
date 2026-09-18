@@ -203,3 +203,26 @@ music.library.waitminutes=5
 # иначе в канал можно бросить ссылку куда угодно, и бот честно потащит файл
 # любого размера с незнакомого сервера.
 music.library.hosts=youtube.com,youtu.be,soundcloud.com,bandcamp.com,music.yandex.ru,vk.com,vkvideo.ru,archive.org,jamendo.com,freemusicarchive.org,ccmixter.org
+
+# ---------------------------------------------------------------------------
+# Мост с Telegram
+# ---------------------------------------------------------------------------
+# Сообщения ходят между каналом Discord и группой Telegram в обе стороны.
+bridge.enabled=false
+
+# Канал Discord, который связываем с группой.
+bridge.channel=
+
+# Токен телеграм-бота от @BotFather. Держи его как пароль: у кого токен,
+# тот пишет в группу от имени бота. Можно задать переменной окружения
+# VOICEBRIDGE_TELEGRAM_TOKEN, тогда в файле его не будет вовсе.
+bridge.telegram.token=
+
+# Куда писать: @имя публичной группы или её числовой ID для закрытой.
+bridge.telegram.chat=@defenseBrawl
+
+# Переносить ли картинки и файлы. false — только текст.
+bridge.files=true
+
+# Предел на один файл, МБ. У самого Telegram потолок 50.
+bridge.maxmegabytes=25

@@ -59,7 +59,8 @@ public final class VoiceBridgeBot {
 
         // Текстовые команды читают содержимое сообщений — это привилегированный интент.
         // Запрашиваем его только если хоть что-то из команд включено.
-        if (ladder.isEnabled() || config.isModerationEnabled() || config.isMusicEnabled()) {
+        if (ladder.isEnabled() || config.isModerationEnabled() || config.isMusicEnabled()
+                || config.getBridge().isUsable()) {
             intents.add(GatewayIntent.GUILD_MESSAGES);
             intents.add(GatewayIntent.MESSAGE_CONTENT);
         }
@@ -131,6 +132,28 @@ public final class VoiceBridgeBot {
             memberRoles = roleKeeper;
         }
 
+        DiscordToTelegram toTelegram = null;
+        Telegram telegram = null;
+
+        if (config.getBridge().isUsable()) {
+            telegram = new Telegram(config.getBridge().token());
+
+            try {
+                // Заодно проверяем токен: молчащий мост хуже отсутствующего, а узнать
+                // о неверном токене лучше сразу, а не при первом сообщении
+                log.info("Мост с Telegram: бот @{}, группа {}.",
+                        telegram.whoAmI(), config.getBridge().chat());
+
+                toTelegram = new DiscordToTelegram(config.getGuildId(), config.getBridge(), telegram);
+            } catch (IOException e) {
+                log.error("Telegram не принял токен: {}. Мост выключен.", e.getMessage());
+                telegram = null;
+            }
+        } else if (config.getBridge().enabled()) {
+            log.error("Мост включён, но не задан bridge.channel, bridge.telegram.token "
+                    + "или bridge.telegram.chat.");
+        }
+
         HttpBridge bridge;
         try {
             bridge = new HttpBridge(tracker, config.getHttpHost(), config.getHttpPort(), config.getHttpToken());
@@ -161,7 +184,7 @@ public final class VoiceBridgeBot {
                     .addEventListeners(tracker);
 
             for (var listener : new Object[] { commands, moderation, memberRoles,
-                    panelIcons, musicCommands, musicPanel, libraryChannel }) {
+                    panelIcons, musicCommands, musicPanel, libraryChannel, toTelegram }) {
                 if (listener != null) {
                     builder.addEventListeners(listener);
                 }
@@ -196,6 +219,13 @@ public final class VoiceBridgeBot {
             ticker.start();
         }
 
+        TelegramToDiscord fromTelegram = null;
+
+        if (telegram != null) {
+            fromTelegram = new TelegramToDiscord(jda, config.getBridge(), telegram);
+            fromTelegram.start();
+        }
+
         PostsWatcher postsWatcher = null;
 
         if (config.getPosts().isUsable()) {
@@ -208,6 +238,8 @@ public final class VoiceBridgeBot {
             log.error("Слежение за лентой включено, но не задан posts.url или posts.channel.");
         }
 
+        var runningToTelegram = toTelegram;
+        var runningFromTelegram = fromTelegram;
         var runningLibrary = libraryChannel;
         var runningWatcher = postsWatcher;
         var runningTicker = ticker;
@@ -221,6 +253,14 @@ public final class VoiceBridgeBot {
 
             // Сохранить балансы надо до разрыва связи: после shutdown начисление уже не идёт,
             // а недописанная минута иначе потерялась бы.
+            if (runningToTelegram != null) {
+                runningToTelegram.shutdown();
+            }
+
+            if (runningFromTelegram != null) {
+                runningFromTelegram.stop();
+            }
+
             if (runningLibrary != null) {
                 runningLibrary.shutdown();
             }

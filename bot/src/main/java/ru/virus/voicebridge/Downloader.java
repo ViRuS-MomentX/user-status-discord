@@ -124,6 +124,12 @@ public final class Downloader {
         }
 
         if (process.exitValue() != 0 || meta == null) {
+            // В чат уходит одна строка — та, по которой человеку понятно, что делать.
+            // Но разбираться по ней потом невозможно, поэтому весь разговор с качалкой
+            // остаётся в консоли: там место есть
+            log.error("Качалка отказала на {}. Её вывод целиком:", url);
+            output.forEach(line -> log.error("  {}", line));
+
             throw new DownloadException(reason(output));
         }
 

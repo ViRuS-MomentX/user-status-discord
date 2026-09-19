@@ -399,8 +399,9 @@ public final class Telegram {
         try {
             answer = DataObject.fromJson(response.body());
         } catch (Exception e) {
-            throw new IOException(method + ": Telegram ответил не по-человечески ("
-                    + response.statusCode() + ")");
+            // Не-JSON означает, что отвечал не Telegram, а кто-то по дороге: прокси,
+            // страница провайдера, шлюз. Код ответа тут говорит больше тела
+            throw new IOException(method + ": " + explain(response.statusCode()));
         }
 
         if (!answer.getBoolean("ok", false)) {
@@ -411,6 +412,25 @@ public final class Telegram {
         }
 
         return answer;
+    }
+
+    /**
+     * Объясняет код ответа от того, кто перехватил запрос по дороге.
+     *
+     * <p>Без этого всё сваливалось в «ответил не по-человечески», и человек шёл
+     * проверять блокировки там, где прокси всего лишь просил пароль.
+     */
+    private static String explain(int status) {
+        return switch (status) {
+            case 407 -> "прокси требует логин и пароль. Впиши их в bridge.telegram.proxy "
+                    + "как логин:пароль@хост:порт";
+            case 403 -> "прокси или провайдер не пустил запрос (403). Проверь, что прокси "
+                    + "разрешает api.telegram.org";
+            case 502, 503, 504 -> "прокси не дотянулся до Telegram (" + status
+                    + "). Похоже, у него самого нет туда дороги";
+            default -> "по дороге ответил не Telegram, а кто-то ещё (" + status + "). "
+                    + "Обычно это прокси или страница провайдера";
+        };
     }
 
     /** Telegram ответил и отказал: дело в запросе или в токене, а не в связи. */

@@ -4,6 +4,7 @@ import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import club.minnced.discord.jdave.interop.JDaveSessionFactory;
 import net.dv8tion.jda.api.audio.AudioModuleConfig;
+import net.dv8tion.jda.api.exceptions.ErrorResponseException;
 import net.dv8tion.jda.api.exceptions.InvalidTokenException;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import net.dv8tion.jda.api.utils.MemberCachePolicy;
@@ -241,6 +242,16 @@ public final class VoiceBridgeBot {
             bridge.stop();
             System.exit(4);
             return;
+        } catch (ErrorResponseException e) {
+            // Сюда приходит и обрыв сети: JDA заворачивает её в свой тип с кодом -1.
+            // Стек в сто строк тут ничего не объясняет, а пугает, поэтому говорим словами
+            log.error("Discord не отозвался: {}. Обычно это блокировка или VPN с zapret'ом "
+                    + "на пути — проверь командой "
+                    + "curl.exe -s -o NUL -w \"%{http_code}\" https://discord.com/api/v10/gateway, "
+                    + "должно быть 200.", reason(e));
+            bridge.stop();
+            System.exit(5);
+            return;
         }
 
         VoiceCoinTicker ticker = null;
@@ -332,5 +343,29 @@ public final class VoiceBridgeBot {
     }
 
     private VoiceBridgeBot() {
+    }
+
+    /**
+     * Короткая причина вместо стека.
+     *
+     * <p>Берём самое глубокое внятное объяснение: у JDA в конце цепочки лежит
+     * ContextException — метка места вызова без текста, и она бы вытеснила
+     * настоящую причину вроде «Read timed out».
+     */
+    static String reason(Throwable trouble) {
+        var depth = 0;
+        var said = "";
+
+        // Цепочку ограничиваем: причины могут ссылаться друг на друга по кругу,
+        // и тогда обход без счётчика не кончится никогда
+        for (var step = trouble; step != null && depth < 20; step = step.getCause(), depth++) {
+            var message = step.getMessage();
+
+            if (message != null && !message.isBlank()) {
+                said = message;
+            }
+        }
+
+        return said.isEmpty() ? trouble.getClass().getSimpleName() : said;
     }
 }

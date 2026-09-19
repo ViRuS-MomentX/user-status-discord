@@ -52,19 +52,80 @@ public final class Telegram {
                 .followRedirects(HttpClient.Redirect.NORMAL);
 
         if (!proxy.isBlank()) {
-            var at = proxy.lastIndexOf(':');
-
-            if (at > 0) {
-                builder.proxy(java.net.ProxySelector.of(new java.net.InetSocketAddress(
-                        proxy.substring(0, at).trim(),
-                        Integer.parseInt(proxy.substring(at + 1).trim()))));
-            } else {
-                log.error("bridge.telegram.proxy должен быть «хост:порт», а не «{}». "
-                        + "Иду напрямую.", proxy);
-            }
+            apply(builder, proxy.trim());
         }
 
         this.http = builder.build();
+    }
+
+    /**
+     * Настраивает выход через прокси.
+     *
+     * <p>Строка вида «хост:порт» или «логин:пароль@хост:порт»: у платных прокси вход
+     * почти всегда по паролю, и без него настройка была бы бесполезной ровно там,
+     * где она нужнее всего.
+     */
+    private static void apply(HttpClient.Builder builder, String proxy) {
+        var address = proxy;
+        String user = null;
+        String password = null;
+
+        var at = proxy.lastIndexOf('@');
+
+        if (at > 0) {
+            var credentials = proxy.substring(0, at);
+            address = proxy.substring(at + 1);
+
+            var colon = credentials.indexOf(':');
+
+            if (colon > 0) {
+                user = credentials.substring(0, colon);
+                password = credentials.substring(colon + 1);
+            }
+        }
+
+        var colon = address.lastIndexOf(':');
+
+        if (colon <= 0) {
+            log.error("bridge.telegram.proxy должен быть «хост:порт» или "
+                    + "«логин:пароль@хост:порт», а не «{}». Иду напрямую.", proxy);
+            return;
+        }
+
+        int port;
+
+        try {
+            port = Integer.parseInt(address.substring(colon + 1).trim());
+        } catch (NumberFormatException e) {
+            log.error("В bridge.telegram.proxy порт должен быть числом: «{}». Иду напрямую.", proxy);
+            return;
+        }
+
+        builder.proxy(java.net.ProxySelector.of(
+                new java.net.InetSocketAddress(address.substring(0, colon).trim(), port)));
+
+        if (user == null) {
+            log.info("Telegram через прокси {}.", address);
+            return;
+        }
+
+        // Java по умолчанию не даёт слать пароль прокси при защищённом соединении.
+        // Запрет разумный для чужих сетей, но здесь прокси выбрал сам хозяин бота
+        System.setProperty("jdk.http.auth.tunneling.disabledSchemes", "");
+
+        var login = user;
+        var secret = password == null ? "" : password;
+
+        builder.authenticator(new java.net.Authenticator() {
+            @Override
+            protected java.net.PasswordAuthentication getPasswordAuthentication() {
+                return getRequestorType() == RequestorType.PROXY
+                        ? new java.net.PasswordAuthentication(login, secret.toCharArray())
+                        : null;
+            }
+        });
+
+        log.info("Telegram через прокси {} под именем {}.", address, login);
     }
 
     /** Проверяет токен и заодно узнаёт имя бота. */

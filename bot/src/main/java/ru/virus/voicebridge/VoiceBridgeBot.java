@@ -199,8 +199,12 @@ public final class VoiceBridgeBot {
             bridge = new HttpBridge(tracker, config.getHttpHost(), config.getHttpPort(), config.getHttpToken());
             bridge.start();
         } catch (BindException e) {
-            log.error("Порт {} уже занят. Укажи в config.properties другой http.port "
-                    + "и тот же адрес в настройках CustomRP.", config.getHttpPort());
+            // Порт занимает почти всегда прошлая копия бота, забытая в другом окне.
+            // Про неё и говорим первой: смена порта тут лечит следствие, а не причину
+            log.error("Порт {} уже занят — скорее всего, бот уже запущен в другом окне. "
+                    + "Закрой ту копию и запусти заново. Если порт держит чужая программа, "
+                    + "укажи в config.properties другой http.port и тот же адрес "
+                    + "в настройках CustomRP.", config.getHttpPort());
             System.exit(3);
             return;
         } catch (IOException e) {

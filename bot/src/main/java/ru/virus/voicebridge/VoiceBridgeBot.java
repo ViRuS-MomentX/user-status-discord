@@ -136,7 +136,27 @@ public final class VoiceBridgeBot {
         Telegram telegram = null;
 
         if (config.getBridge().isUsable()) {
-            telegram = new Telegram(config.getBridge().token(), config.getBridge().proxy());
+            var settings = config.getBridge();
+
+            // К своему серверу ходят по localhost, и прокси там только мешает: он
+            // завернул бы в себя и обращения к собственной машине
+            var proxy = settings.hasOwnApi() ? "" : settings.proxy();
+
+            if (settings.hasOwnApi()) {
+                log.info("Telegram через свой сервер Bot API: {}", settings.api());
+
+                if (!settings.proxy().isBlank()) {
+                    log.info("Прокси при своём сервере не нужен — не использую его.");
+                }
+
+                if (settings.avatars() && !settings.webhook().isBlank()) {
+                    log.warn("Аватарки из Telegram при своём сервере не подставить: "
+                            + "Discord ходит за картинкой сам, а до твоего компьютера "
+                            + "он не дотянется. Ники останутся, аватарки — нет.");
+                }
+            }
+
+            telegram = new Telegram(settings.token(), proxy, settings.api());
 
             try {
                 // Здороваемся сразу: про неверный токен лучше узнать при запуске,

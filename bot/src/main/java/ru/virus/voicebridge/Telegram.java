@@ -29,7 +29,7 @@ public final class Telegram {
 
     private static final Logger log = LoggerFactory.getLogger(Telegram.class);
 
-    private static final String API = "https://api.telegram.org/bot";
+    private static final String OFFICIAL = "https://api.telegram.org";
 
     /** Сколько Telegram держит соединение, ожидая новых сообщений. */
     private static final int POLL_SECONDS = 25;
@@ -37,15 +37,25 @@ public final class Telegram {
     private final HttpClient http;
     private final String token;
 
+    /** Куда стучаться: официальный сервер или свой. */
+    private final String api;
+
     public Telegram(String token) {
-        this(token, "");
+        this(token, "", "");
     }
 
     /**
      * @param proxy «хост:порт» HTTP-прокси; пустая строка — идти напрямую
+     * @param api адрес своего сервера Bot API; пустая строка — официальный
      */
-    public Telegram(String token, String proxy) {
+    public Telegram(String token, String proxy, String api) {
         this.token = token;
+
+        // Свой сервер снимает вопрос доступности вовсе: он говорит с Telegram по
+        // MTProto, а к нему самому бот ходит по localhost
+        var trimmed = api.trim();
+        this.api = trimmed.isBlank() ? OFFICIAL
+                : (trimmed.endsWith("/") ? trimmed.substring(0, trimmed.length() - 1) : trimmed);
 
         var builder = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(15))
@@ -273,8 +283,19 @@ public final class Telegram {
         return fileId.isEmpty() ? "" : fileUrl(fileId);
     }
 
-    /** Прямая ссылка на файл Telegram. */
+    /**
+     * Прямая ссылка на файл Telegram.
+     *
+     * <p>Свой сервер Bot API в отдельном режиме отдаёт не ссылку, а путь к файлу у себя
+     * на диске. Такое ссылкой не сделать — это видно вызывающему по возвращённому пути.
+     */
     public String fileUrl(String fileId) throws IOException {
+        var path = filePath(fileId);
+
+        return isOnDisk(path) ? path : api + "/file/bot" + token + "/" + path;
+    }
+
+    private String filePath(String fileId) throws IOException {
         var path = call("getFile", Map.of("file_id", fileId))
                 .getObject("result").getString("file_path", "");
 
@@ -282,12 +303,29 @@ public final class Telegram {
             throw new IOException("Telegram не сказал, где лежит файл");
         }
 
-        return "https://api.telegram.org/file/bot" + token + "/" + path;
+        return path;
+    }
+
+    /** Путь на диске, а не имя внутри хранилища Telegram. */
+    static boolean isOnDisk(String path) {
+        return path.startsWith("/") || path.matches("^[A-Za-z]:[\\\\/].*");
     }
 
     /** Скачивает вложение по его идентификатору. */
     public byte[] download(String fileId, int maxBytes) throws IOException {
-        return fetch(fileUrl(fileId), maxBytes);
+        var path = filePath(fileId);
+
+        if (isOnDisk(path)) {
+            var file = java.nio.file.Path.of(path);
+
+            if (java.nio.file.Files.size(file) > maxBytes) {
+                throw new IOException("файл больше " + (maxBytes / 1024 / 1024) + " МБ");
+            }
+
+            return java.nio.file.Files.readAllBytes(file);
+        }
+
+        return fetch(api + "/file/bot" + token + "/" + path, maxBytes);
     }
 
     /**
@@ -345,7 +383,7 @@ public final class Telegram {
                     .append(URLEncoder.encode(value, StandardCharsets.UTF_8));
         });
 
-        var request = HttpRequest.newBuilder(URI.create(API + token + "/" + method))
+        var request = HttpRequest.newBuilder(URI.create(api + "/bot" + token + "/" + method))
                 .timeout(timeout)
                 .header("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
                 .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
@@ -375,7 +413,7 @@ public final class Telegram {
         body.writeBytes(data);
         body.writeBytes(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
 
-        var request = HttpRequest.newBuilder(URI.create(API + token + "/" + method))
+        var request = HttpRequest.newBuilder(URI.create(api + "/bot" + token + "/" + method))
                 .timeout(Duration.ofMinutes(5))
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body.toByteArray()))

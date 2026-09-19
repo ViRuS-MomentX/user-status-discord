@@ -401,7 +401,8 @@ public final class Telegram {
         } catch (Exception e) {
             // Не-JSON означает, что отвечал не Telegram, а кто-то по дороге: прокси,
             // страница провайдера, шлюз. Код ответа тут говорит больше тела
-            throw new IOException(method + ": " + explain(response.statusCode()));
+            throw new IOException(method + ": " + explain(response.statusCode())
+                    + said(response.body()));
         }
 
         if (!answer.getBoolean("ok", false)) {
@@ -412,6 +413,23 @@ public final class Telegram {
         }
 
         return answer;
+    }
+
+    /**
+     * Добавляет то, что сказал перехвативший запрос.
+     *
+     * <p>Свой текст у прокси бывает единственной уликой: «invalid credentials» и
+     * «IP not whitelisted» лечатся по-разному, а код ответа у них один.
+     */
+    private static String said(String body) {
+        var text = body == null ? "" : body.replaceAll("<[^>]*>", " ")
+                .replaceAll("\\s+", " ").trim();
+
+        if (text.isEmpty()) {
+            return "";
+        }
+
+        return ". Сказано: " + (text.length() > 200 ? text.substring(0, 200) + "…" : text);
     }
 
     /**

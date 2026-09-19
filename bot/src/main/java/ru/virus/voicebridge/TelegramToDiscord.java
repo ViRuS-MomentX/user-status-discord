@@ -150,7 +150,14 @@ public final class TelegramToDiscord {
         }
     }
 
-    /** Аватарка человека, спрошенная один раз за всё время работы. */
+    /**
+     * Аватарка человека, спрошенная один раз за всё время работы.
+     *
+     * <p>Запоминаем только то, что действительно ответил Telegram, — в том числе
+     * «фотографии нет», это честный ответ. А вот обрыв связи в кэш не кладём:
+     * иначе одна неудачная минута оставляла бы человека без аватарки навсегда,
+     * до перезапуска бота.
+     */
     private String avatarOf(TelegramMessage message) {
         // Discord забирает картинку сам, поэтому ссылка должна быть видна из интернета.
         // Сервер на localhost этому условию не отвечает, а вот свой в интернете — да
@@ -158,14 +165,29 @@ public final class TelegramToDiscord {
             return "";
         }
 
-        return avatars.computeIfAbsent(message.authorId(), id -> {
-            try {
-                return telegram.avatar(id);
-            } catch (Exception e) {
-                log.warn("Аватарка {} не нашлась: {}", message.author(), e.getMessage());
-                return "";
-            }
-        });
+        var known = avatars.get(message.authorId());
+
+        if (known != null) {
+            return known;
+        }
+
+        String found;
+
+        try {
+            found = telegram.avatar(message.authorId());
+        } catch (Exception e) {
+            log.warn("Аватарка {} не нашлась: {}. Спрошу снова со следующим сообщением.",
+                    message.author(), e.getMessage());
+            return "";
+        }
+
+        avatars.put(message.authorId(), found);
+
+        if (found.isEmpty()) {
+            log.info("У {} нет аватарки в Telegram — сообщения пойдут без неё.", message.author());
+        }
+
+        return found;
     }
 
     private void byBot(TelegramMessage message, byte[] file, String failure) {

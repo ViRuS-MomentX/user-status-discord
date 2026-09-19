@@ -153,8 +153,8 @@ public final class TelegramToDiscord {
     /** Аватарка человека, спрошенная один раз за всё время работы. */
     private String avatarOf(TelegramMessage message) {
         // Discord забирает картинку сам, поэтому ссылка должна быть видна из интернета.
-        // Свой сервер Bot API раздаёт файлы с localhost — туда Discord не дотянется
-        if (!settings.avatars() || settings.hasOwnApi() || message.authorId() == 0) {
+        // Сервер на localhost этому условию не отвечает, а вот свой в интернете — да
+        if (!settings.avatars() || settings.isLocalApi() || message.authorId() == 0) {
             return "";
         }
 

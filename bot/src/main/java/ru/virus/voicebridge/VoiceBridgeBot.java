@@ -140,19 +140,19 @@ public final class VoiceBridgeBot {
 
             // К своему серверу ходят по localhost, и прокси там только мешает: он
             // завернул бы в себя и обращения к собственной машине
-            var proxy = settings.hasOwnApi() ? "" : settings.proxy();
+            var proxy = settings.isLocalApi() ? "" : settings.proxy();
 
             if (settings.hasOwnApi()) {
                 log.info("Telegram через свой сервер Bot API: {}", settings.api());
 
-                if (!settings.proxy().isBlank()) {
-                    log.info("Прокси при своём сервере не нужен — не использую его.");
+                if (settings.isLocalApi() && !settings.proxy().isBlank()) {
+                    log.info("Прокси до своей же машины не нужен — не использую его.");
                 }
 
-                if (settings.avatars() && !settings.webhook().isBlank()) {
-                    log.warn("Аватарки из Telegram при своём сервере не подставить: "
-                            + "Discord ходит за картинкой сам, а до твоего компьютера "
-                            + "он не дотянется. Ники останутся, аватарки — нет.");
+                if (settings.isLocalApi() && settings.avatars() && !settings.webhook().isBlank()) {
+                    log.warn("Аватарки из Telegram при сервере на этой же машине не "
+                            + "подставить: Discord ходит за картинкой сам, а до твоего "
+                            + "компьютера он не дотянется. Ники останутся, аватарки — нет.");
                 }
             }
 

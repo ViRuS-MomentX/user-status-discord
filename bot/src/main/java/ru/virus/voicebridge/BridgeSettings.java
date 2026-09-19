@@ -23,6 +23,40 @@ public record BridgeSettings(boolean enabled, long channel, String token, String
         return !api.isBlank();
     }
 
+    /**
+     * Живёт ли свой сервер на этой же машине или в домашней сети.
+     *
+     * <p>Разница видна не боту, а Discord: за аватаркой он ходит сам, и до локального
+     * адреса ему не дотянуться. А до чужого сервера в интернете — вполне, поэтому
+     * запрет должен касаться только своих адресов, а не любого своего сервера.
+     */
+    public boolean isLocalApi() {
+        if (api.isBlank()) {
+            return false;
+        }
+
+        String host;
+
+        try {
+            host = java.net.URI.create(api).getHost();
+        } catch (IllegalArgumentException e) {
+            return true;
+        }
+
+        if (host == null) {
+            return true;
+        }
+
+        // Адрес IPv6 приходит в квадратных скобках — они часть записи, а не имени
+        var lower = host.toLowerCase(java.util.Locale.ROOT)
+                .replace("[", "").replace("]", "");
+
+        return lower.equals("localhost") || lower.equals("0:0:0:0:0:0:0:1") || lower.equals("::1") || lower.endsWith(".local")
+                || lower.startsWith("127.") || lower.startsWith("10.")
+                || lower.startsWith("192.168.")
+                || lower.matches("^172\\.(1[6-9]|2[0-9]|3[01])\\..*");
+    }
+
     public boolean isUsable() {
         return enabled && channel != 0 && !token.isBlank() && !chat.isBlank();
     }

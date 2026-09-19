@@ -34,7 +34,15 @@ public final class Telegram {
     /** Сколько Telegram держит соединение, ожидая новых сообщений. */
     private static final int POLL_SECONDS = 25;
 
-    private final HttpClient http;
+    /**
+     * Меняется на новый после обрыва, поэтому не final.
+     *
+     * <p>Java оставляет порванное соединение в пуле, и следующий запрос уходит
+     * в ту же дыру. Для долгого опроса это смертельно: поток встаёт навсегда.
+     */
+    private volatile HttpClient http;
+
+    private final String proxy;
     private final String token;
 
     /** Куда стучаться: официальный сервер или свой. */
@@ -57,15 +65,41 @@ public final class Telegram {
         this.api = trimmed.isBlank() ? OFFICIAL
                 : (trimmed.endsWith("/") ? trimmed.substring(0, trimmed.length() - 1) : trimmed);
 
+        this.proxy = proxy.trim();
+        this.http = build();
+    }
+
+    /**
+     * Собирает клиента.
+     *
+     * <p>Просим именно HTTP/1.1. По HTTP/2 Java сводит все запросы к одному хосту
+     * в одно соединение, и долгий опрос делит его с отправкой сообщений: рвётся
+     * соединение — обе половины моста падают разом, что и было видно в логе по
+     * парам записей с одинаковым временем. На HTTP/1.1 каждый запрос получает
+     * своё соединение, и обрыв опроса не мешает боту отвечать.
+     */
+    private HttpClient build() {
         var builder = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofSeconds(15))
                 .followRedirects(HttpClient.Redirect.NORMAL);
 
         if (!proxy.isBlank()) {
-            apply(builder, proxy.trim());
+            apply(builder, proxy);
         }
 
-        this.http = builder.build();
+        return builder.build();
+    }
+
+    /**
+     * Заменяет клиента после обрыва — вместе с ним уходит и пул порванных
+     * соединений. Меняем, только если сломался тот самый, которым ходили:
+     * иначе два потока, упавшие разом, пересоздадут клиента дважды.
+     */
+    private synchronized void renew(HttpClient broken) {
+        if (http == broken) {
+            http = build();
+        }
     }
 
     /**
@@ -337,8 +371,10 @@ public final class Telegram {
                 .GET()
                 .build();
 
+        var client = http;
+
         try {
-            var response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            var response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
 
             if (response.statusCode() != 200) {
                 throw new IOException("ответ " + response.statusCode());
@@ -363,6 +399,9 @@ public final class Telegram {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("чтение прервано");
+        } catch (IOException e) {
+            renew(client);
+            throw e;
         }
     }
 
@@ -424,12 +463,16 @@ public final class Telegram {
 
     private DataObject answer(HttpRequest request, String method) throws IOException {
         HttpResponse<String> response;
+        var client = http;
 
         try {
-            response = http.send(request, HttpResponse.BodyHandlers.ofString());
+            response = client.send(request, HttpResponse.BodyHandlers.ofString());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("запрос прерван");
+        } catch (IOException e) {
+            renew(client);
+            throw e;
         }
 
         DataObject answer;

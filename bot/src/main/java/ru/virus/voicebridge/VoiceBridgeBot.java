@@ -156,6 +156,16 @@ public final class VoiceBridgeBot {
                         + "(провайдер, VPN), помогает bridge.telegram.proxy.", e.getMessage());
             }
 
+            var webhook = config.getBridge().webhook();
+
+            if (!webhook.isBlank() && !DiscordWebhook.looksRight(webhook)) {
+                log.error("bridge.discord.webhook не похож на ссылку вебхука Discord. "
+                        + "Она начинается с https://discord.com/api/webhooks/ и берётся в "
+                        + "настройках канала: Интеграции → Вебхуки → Копировать ссылку.");
+            } else if (!webhook.isBlank()) {
+                log.info("Сообщения из Telegram пойдут через вебхук: с ником и аватаркой.");
+            }
+
             if (telegram != null) {
                 toTelegram = new DiscordToTelegram(config.getGuildId(), config.getBridge(), telegram);
             }

@@ -227,7 +227,9 @@ public final class BotConfig {
                 props.getProperty("bridge.telegram.chat", "").trim(),
                 Boolean.parseBoolean(props.getProperty("bridge.files", "true").trim()),
                 bounded(props, "bridge.maxmegabytes", 25, 1, 50),
-                props.getProperty("bridge.telegram.proxy", "").trim());
+                props.getProperty("bridge.telegram.proxy", "").trim(),
+                pick(props, "bridge.discord.webhook", "VOICEBRIDGE_DISCORD_WEBHOOK"),
+                Boolean.parseBoolean(props.getProperty("bridge.avatars", "true").trim()));
     }
 
     /** Площадки, ссылки на которые принимаются по умолчанию. */

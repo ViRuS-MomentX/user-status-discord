@@ -9,9 +9,13 @@ package ru.virus.voicebridge;
  * @param files переносить ли картинки и файлы, а не только текст
  * @param maxMegabytes предел на один файл; у Telegram свой в 50 МБ
  * @param proxy «хост:порт» HTTP-прокси, если до Telegram не достучаться напрямую
+ * @param webhook ссылка вебхука Discord: с ней сообщения из Telegram выходят под
+ *                именем и аватаркой написавшего, а не от имени бота
+ * @param avatars подставлять ли аватарки из Telegram
  */
 public record BridgeSettings(boolean enabled, long channel, String token, String chat,
-                             boolean files, int maxMegabytes, String proxy) {
+                             boolean files, int maxMegabytes, String proxy,
+                             String webhook, boolean avatars) {
 
     public boolean isUsable() {
         return enabled && channel != 0 && !token.isBlank() && !chat.isBlank();

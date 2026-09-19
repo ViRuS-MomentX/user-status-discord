@@ -84,7 +84,31 @@ public final class Telegram {
                 "chat_id", chat,
                 "parse_mode", "HTML",
                 "disable_web_page_preview", "true",
-                "text", "<b>" + escape(author) + "</b>\n" + escape(text)));
+                "text", card(author, text)));
+    }
+
+    /**
+     * Оформляет сообщение из Discord.
+     *
+     * <p>Имя жирным, сказанное моноширинным. Моноширинный шрифт здесь не украшение:
+     * он сразу отделяет пришедшее с той стороны от того, что пишут в самой группе,
+     * и заодно не даёт чужой разметке разъехаться по сообщению.
+     *
+     * <p>Многострочное уходит блоком, однострочное — строкой: блок ради одной фразы
+     * занимал бы пол-экрана.
+     */
+    static String card(String author, String text) {
+        var head = "<b>" + escape(author) + "</b> <i>· Discord</i>";
+
+        if (text.isBlank()) {
+            return head;
+        }
+
+        var body = escape(text);
+
+        return head + "\n" + (text.contains("\n")
+                ? "<pre>" + body + "</pre>"
+                : "<code>" + body + "</code>");
     }
 
     /**
@@ -100,8 +124,7 @@ public final class Telegram {
         var fields = new LinkedHashMap<String, String>();
         fields.put("chat_id", chat);
         fields.put("parse_mode", "HTML");
-        fields.put("caption", "<b>" + escape(author) + "</b>"
-                + (text.isBlank() ? "" : "\n" + escape(text)));
+        fields.put("caption", card(author, text));
 
         upload(method, fields, field, fileName, data);
     }
@@ -163,8 +186,34 @@ public final class Telegram {
         return last;
     }
 
-    /** Скачивает вложение по его идентификатору. */
-    public byte[] download(String fileId, int maxBytes) throws IOException {
+    /**
+     * Ищет аватарку человека.
+     *
+     * @return ссылка на картинку или пустая строка, если аватарки нет
+     */
+    public String avatar(long userId) throws IOException {
+        var photos = call("getUserProfilePhotos", Map.of(
+                "user_id", String.valueOf(userId),
+                "limit", "1")).getObject("result").getArray("photos");
+
+        if (photos.isEmpty()) {
+            return "";
+        }
+
+        var sizes = photos.getArray(0);
+
+        if (sizes.isEmpty()) {
+            return "";
+        }
+
+        // Последний размер — самый крупный; Discord всё равно ужмёт его под кружок
+        var fileId = sizes.getObject(sizes.length() - 1).getString("file_id", "");
+
+        return fileId.isEmpty() ? "" : fileUrl(fileId);
+    }
+
+    /** Прямая ссылка на файл Telegram. */
+    public String fileUrl(String fileId) throws IOException {
         var path = call("getFile", Map.of("file_id", fileId))
                 .getObject("result").getString("file_path", "");
 
@@ -172,7 +221,12 @@ public final class Telegram {
             throw new IOException("Telegram не сказал, где лежит файл");
         }
 
-        return fetch("https://api.telegram.org/file/bot" + token + "/" + path, maxBytes);
+        return "https://api.telegram.org/file/bot" + token + "/" + path;
+    }
+
+    /** Скачивает вложение по его идентификатору. */
+    public byte[] download(String fileId, int maxBytes) throws IOException {
+        return fetch(fileUrl(fileId), maxBytes);
     }
 
     /**

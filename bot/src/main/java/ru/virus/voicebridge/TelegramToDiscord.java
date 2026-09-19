@@ -7,6 +7,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Вторая половина моста: из группы Telegram в канал Discord.
@@ -24,6 +26,15 @@ public final class TelegramToDiscord {
     private final JDA jda;
     private final BridgeSettings settings;
     private final Telegram telegram;
+    private final DiscordWebhook webhook;
+
+    /**
+     * Найденные аватарки.
+     *
+     * <p>Спрашивать их у Telegram на каждое сообщение — два лишних запроса подряд,
+     * а меняют аватарку раз в полгода.
+     */
+    private final Map<Long, String> avatars = new ConcurrentHashMap<>();
 
     private volatile boolean running = true;
     private Thread worker;
@@ -32,6 +43,7 @@ public final class TelegramToDiscord {
         this.jda = jda;
         this.settings = settings;
         this.telegram = telegram;
+        this.webhook = settings.webhook().isBlank() ? null : new DiscordWebhook(settings.webhook());
     }
 
     public void start() {
@@ -95,6 +107,66 @@ public final class TelegramToDiscord {
     }
 
     private void deliver(TelegramMessage message) {
+        byte[] file = null;
+        String failure = null;
+
+        if (settings.files() && !message.fileId().isBlank()) {
+            try {
+                file = telegram.download(message.fileId(), settings.maxMegabytes() * 1024 * 1024);
+            } catch (Exception e) {
+                log.error("Вложение из Telegram не забралось: {}", e.getMessage());
+                failure = e.getMessage();
+            }
+        }
+
+        if (webhook != null) {
+            byWebhook(message, file, failure);
+            return;
+        }
+
+        byBot(message, file, failure);
+    }
+
+    /**
+     * Пишет от имени написавшего: его ник и его аватарка.
+     *
+     * <p>К имени добавлена пометка источника. Вебхук позволяет назваться кем угодно,
+     * и без неё писавший в Telegram мог бы выдать себя за участника сервера.
+     */
+    private void byWebhook(TelegramMessage message, byte[] file, String failure) {
+        var text = message.text();
+
+        if (failure != null) {
+            text = (text.isBlank() ? "" : text + "\n") + "*(вложение не перенеслось: "
+                    + failure + ")*";
+        }
+
+        try {
+            webhook.send(message.author() + " · Telegram", avatarOf(message), text,
+                    message.fileName(), file);
+        } catch (Exception e) {
+            log.error("Вебхук не принял сообщение: {}. Пишу от имени бота.", e.getMessage());
+            byBot(message, file, failure);
+        }
+    }
+
+    /** Аватарка человека, спрошенная один раз за всё время работы. */
+    private String avatarOf(TelegramMessage message) {
+        if (!settings.avatars() || message.authorId() == 0) {
+            return "";
+        }
+
+        return avatars.computeIfAbsent(message.authorId(), id -> {
+            try {
+                return telegram.avatar(id);
+            } catch (Exception e) {
+                log.warn("Аватарка {} не нашлась: {}", message.author(), e.getMessage());
+                return "";
+            }
+        });
+    }
+
+    private void byBot(TelegramMessage message, byte[] file, String failure) {
         var channel = jda.getChannelById(GuildMessageChannel.class, settings.channel());
 
         if (channel == null) {
@@ -103,20 +175,13 @@ public final class TelegramToDiscord {
         }
 
         var text = "**" + message.author() + "**"
-                + (message.text().isBlank() ? "" : "\n" + message.text());
+                + (message.text().isBlank() ? "" : "\n" + message.text())
+                + (failure == null ? "" : "\n*(вложение не перенеслось: " + failure + ")*");
 
         var action = channel.sendMessage(text);
 
-        if (settings.files() && !message.fileId().isBlank()) {
-            try {
-                var data = telegram.download(message.fileId(),
-                        settings.maxMegabytes() * 1024 * 1024);
-                action = action.setFiles(FileUpload.fromData(data, message.fileName()));
-            } catch (Exception e) {
-                log.error("Вложение из Telegram не забралось: {}", e.getMessage());
-                action = channel.sendMessage(text + "\n*(вложение не перенеслось: "
-                        + e.getMessage() + ")*");
-            }
+        if (file != null) {
+            action = action.setFiles(FileUpload.fromData(file, message.fileName()));
         }
 
         // Упоминания обезвреживаем: иначе написавший в Telegram сможет дёрнуть @everyone

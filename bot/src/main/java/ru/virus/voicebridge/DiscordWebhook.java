@@ -116,6 +116,34 @@ public final class DiscordWebhook {
         return clean.length() > NAME_LIMIT ? clean.substring(0, NAME_LIMIT) : clean;
     }
 
+    /**
+     * Номер вебхука из его ссылки; 0, если ссылки нет или она не та.
+     *
+     * <p>Нужен, чтобы отличить свои же сообщения от чужих: под этим номером
+     * Discord показывает всё, что бот принёс из Telegram, и отправлять это
+     * обратно нельзя — получился бы бесконечный круг.
+     */
+    public static long idOf(String url) {
+        if (!looksRight(url)) {
+            return 0;
+        }
+
+        // .../webhooks/<номер>/<ключ>
+        var parts = url.split("/");
+
+        for (var i = 0; i < parts.length - 1; i++) {
+            if (parts[i].equalsIgnoreCase("webhooks")) {
+                try {
+                    return Long.parseLong(parts[i + 1]);
+                } catch (NumberFormatException wrong) {
+                    return 0;
+                }
+            }
+        }
+
+        return 0;
+    }
+
     /** Похоже ли это на ссылку вебхука Discord. */
     public static boolean looksRight(String url) {
         var lower = url.toLowerCase(Locale.ROOT);

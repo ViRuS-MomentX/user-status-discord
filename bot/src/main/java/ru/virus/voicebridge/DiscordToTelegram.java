@@ -17,9 +17,15 @@ public final class DiscordToTelegram extends ListenerAdapter {
 
     private static final Logger log = LoggerFactory.getLogger(DiscordToTelegram.class);
 
+    /** Сколько текста берём из эмбедов бота: длиннее Telegram всё равно обрежет. */
+    private static final int EMBED_LIMIT = 3000;
+
     private final long guildId;
     private final BridgeSettings settings;
     private final Telegram telegram;
+
+    /** Под этим номером в канале появляется всё, что мы сами принесли из Telegram. */
+    private final long ownWebhook;
 
     /**
      * Отправка идёт отдельным потоком: она ходит в сеть, а на потоке событий JDA ждать
@@ -35,29 +41,41 @@ public final class DiscordToTelegram extends ListenerAdapter {
         this.guildId = guildId;
         this.settings = settings;
         this.telegram = telegram;
+        this.ownWebhook = DiscordWebhook.idOf(settings.webhook());
     }
 
     @Override
     public void onMessageReceived(MessageReceivedEvent event) {
-        // Своё же сообщение, принесённое с той стороны, обратно не отправляем:
-        // иначе две половины моста будут пересылать друг другу одно и то же без конца
-        if (event.getAuthor().isBot() || !event.isFromGuild()
-                || event.getGuild().getIdLong() != guildId
+        if (!event.isFromGuild() || event.getGuild().getIdLong() != guildId
                 || event.getChannel().getIdLong() != settings.channel()) {
             return;
         }
 
+        // Своё же сообщение, принесённое с той стороны, обратно не отправляем: иначе две
+        // половины моста будут пересылать друг другу одно и то же без конца. Отсекаем
+        // ровно два источника — свой вебхук и самого себя, — а не всех ботов подряд:
+        // чужие боты в канале говорят по делу, и их слова должны доходить до Telegram
+        var author = event.getAuthor();
+
+        if (author.getIdLong() == event.getJDA().getSelfUser().getIdLong()
+                || (ownWebhook != 0 && author.getIdLong() == ownWebhook)) {
+            return;
+        }
+
         var message = event.getMessage();
-        var author = event.getMember() == null
-                ? event.getAuthor().getEffectiveName()
+        var name = event.getMember() == null
+                ? author.getEffectiveName()
                 : event.getMember().getEffectiveName();
 
-        worker.submit(() -> forward(message, author));
+        // Ботов помечаем: в Telegram иначе не отличить живого человека от Ириса
+        var shown = author.isBot() || event.isWebhookMessage() ? "🤖 " + name : name;
+
+        worker.submit(() -> forward(message, shown));
     }
 
     private void forward(Message message, String author) {
         try {
-            var text = message.getContentDisplay();
+            var text = textOf(message);
             var attachments = message.getAttachments();
 
             if (!settings.files() || attachments.isEmpty()) {
@@ -91,6 +109,68 @@ public final class DiscordToTelegram extends ListenerAdapter {
         } catch (Exception e) {
             log.error("Не удалось передать сообщение в Telegram: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Что пересказать в Telegram.
+     *
+     * <p>Боты вроде Ириса обычно пишут не текстом, а карточкой: сама строка
+     * сообщения пуста, а всё содержимое лежит в эмбеде. Без разбора эмбедов
+     * такие сообщения доходили бы пустыми, то есть не доходили вовсе.
+     */
+    private static String textOf(Message message) {
+        var said = message.getContentDisplay();
+
+        if (!said.isBlank() || message.getEmbeds().isEmpty()) {
+            return said;
+        }
+
+        var retold = new StringBuilder();
+
+        for (var embed : message.getEmbeds()) {
+            add(retold, embed.getTitle());
+            add(retold, embed.getDescription());
+
+            for (var field : embed.getFields()) {
+                var name = visible(field.getName());
+                var value = visible(field.getValue());
+
+                if (!name.isEmpty() && !value.isEmpty()) {
+                    add(retold, name + ": " + value);
+                } else {
+                    add(retold, name + value);
+                }
+            }
+
+            if (retold.length() > EMBED_LIMIT) {
+                break;
+            }
+        }
+
+        return retold.toString().trim();
+    }
+
+    /**
+     * Убирает пустоту, которая только притворяется текстом.
+     *
+     * <p>Поле эмбеда без заголовка Discord не принимает, поэтому боты ставят
+     * туда невидимый символ. Без очистки он дошёл бы до Telegram двоеточием,
+     * перед которым ничего нет.
+     */
+    private static String visible(String text) {
+        return text == null ? "" : text.replaceAll("[\u200B-\u200F\uFEFF]", "").trim();
+    }
+
+    private static void add(StringBuilder text, String line) {
+        if (line == null || line.isBlank()) {
+            return;
+        }
+
+        if (!text.isEmpty()) {
+            text.append('\n');
+        }
+
+        text.append(line.trim());
     }
 
     /** Картинку Telegram показывает прямо в ленте, остальное кладёт вложением. */

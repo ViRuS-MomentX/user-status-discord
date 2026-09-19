@@ -34,6 +34,18 @@ public final class Telegram {
     /** Сколько Telegram держит соединение, ожидая новых сообщений. */
     private static final int POLL_SECONDS = 25;
 
+    /** Предел Telegram на текст сообщения. */
+    private static final int TEXT_LIMIT = 4096;
+
+    /** Предел Telegram на подпись к файлу — он вчетверо строже. */
+    private static final int CAPTION_LIMIT = 1024;
+
+    /** Предел на имя автора: длиннее не бывает, а место в подписи дорого. */
+    private static final int NAME_LIMIT = 64;
+
+    /** Хвост заголовка, который тоже занимает место в пределе. */
+    private static final String SIGNATURE = " · Discord";
+
     /**
      * Меняется на новый после обрыва, поэтому не final.
      *
@@ -203,17 +215,38 @@ public final class Telegram {
      * занимал бы пол-экрана.
      */
     static String card(String author, String text) {
-        var head = "<b>" + escape(author) + "</b> <i>· Discord</i>";
+        return card(author, text, TEXT_LIMIT);
+    }
+
+    /**
+     * Одевает сообщение из Discord для Telegram.
+     *
+     * <p>Тело — цитатой, а не моноширинным блоком, как было раньше. Внутри
+     * {@code <code>} и {@code <pre>} Telegram ничего не разбирает: написанное
+     * там {@code @имя} остаётся простым текстом. В цитате же упоминание
+     * превращается в настоящее, и человека из группы действительно позовут —
+     * при том что цитата выглядит не хуже моноширинного блока.
+     *
+     * @param limit предел Telegram на итоговый текст: 4096 для сообщения,
+     *              1024 для подписи к файлу
+     */
+    static String card(String author, String text, int limit) {
+        var name = cut(author, NAME_LIMIT);
+        var head = "<b>" + escape(name) + "</b> <i>· Discord</i>";
 
         if (text.isBlank()) {
             return head;
         }
 
-        var body = escape(text);
+        // Считаем по видимому тексту: разметка в предел Telegram не входит
+        var room = limit - name.length() - SIGNATURE.length() - 1;
 
-        return head + "\n" + (text.contains("\n")
-                ? "<pre>" + body + "</pre>"
-                : "<code>" + body + "</code>");
+        return room < 1 ? head : head + "\n<blockquote>" + escape(cut(text, room)) + "</blockquote>";
+    }
+
+    /** Обрезает по границе предела, оставляя многоточие вместо отрезанного. */
+    private static String cut(String text, int limit) {
+        return text.length() <= limit ? text : text.substring(0, Math.max(0, limit - 1)) + "…";
     }
 
     /**
@@ -229,7 +262,7 @@ public final class Telegram {
         var fields = new LinkedHashMap<String, String>();
         fields.put("chat_id", chat);
         fields.put("parse_mode", "HTML");
-        fields.put("caption", card(author, text));
+        fields.put("caption", card(author, text, CAPTION_LIMIT));
 
         upload(method, fields, field, fileName, data);
     }

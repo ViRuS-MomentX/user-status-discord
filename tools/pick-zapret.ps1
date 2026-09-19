@@ -14,8 +14,10 @@ param(
     # Папка сборки zapret-discord-youtube. Пусто — найдём сами
     [string] $Root = "",
 
-    # Сколько ждать, пока профиль поднимется, прежде чем проверять
-    [int] $WarmupSeconds = 6,
+    # Сколько ждать, пока профиль поднимется, прежде чем проверять.
+    # Профиль перед запуском winws ходит на GitHub за проверкой версии,
+    # поэтому пауза нужна с запасом
+    [int] $WarmupSeconds = 12,
 
     # Сколько ждать ответа Discord
     [int] $TimeoutSeconds = 8
@@ -131,6 +133,8 @@ $order = Get-ProfileOrder $all
 Write-Host "Профилей к перебору: $($order.Count). Каждый проверяю примерно $($WarmupSeconds + 2) секунд."
 Write-Host ""
 
+$stillborn = 0
+
 foreach ($name in $order) {
     Write-Host ("  {0,-38}" -f $name) -NoNewline
 
@@ -140,6 +144,20 @@ foreach ($name in $order) {
         -WorkingDirectory $Root -WindowStyle Minimized -PassThru
 
     Start-Sleep -Seconds $WarmupSeconds
+
+    # Живой ли перехват. Без этой проверки «не помогло» и «не запустилось»
+    # выглядят одинаково, а это совершенно разные поломки: первое про
+    # провайдера, второе про драйвер WinDivert
+    if (-not (Get-Process winws -ErrorAction SilentlyContinue)) {
+        Write-Host " НЕ ЗАПУСТИЛСЯ" -ForegroundColor Yellow
+        $stillborn++
+
+        if (-not $started.HasExited) {
+            Stop-Process -Id $started.Id -Force -ErrorAction SilentlyContinue
+        }
+
+        continue
+    }
 
     if (Test-Discord) {
         Write-Host " работает!" -ForegroundColor Green
@@ -164,6 +182,19 @@ foreach ($name in $order) {
 }
 
 Write-Host ""
-Write-Host "Ни один профиль не помог." -ForegroundColor Red
-Write-Host "Так бывает, когда провайдер режет не по SNI, а по адресам. Остаётся VPN."
+
+if ($stillborn -eq $order.Count) {
+    Write-Host "Ни один профиль даже не запустился." -ForegroundColor Red
+    Write-Host "Дело не в провайдере, а в драйвере WinDivert: имя службы занимает"
+    Write-Host "другая программа (ProxyBridge, GoodbyeDPI и подобные) либо его не"
+    Write-Host "пускает «Целостность памяти» Windows. Проверь: sc.exe qc WinDivert"
+    exit 3
+}
+
+if ($stillborn -gt 0) {
+    Write-Host "Не запустились: $stillborn из $($order.Count). Их проверка ничего не значит." -ForegroundColor Yellow
+}
+
+Write-Host "Ни один из запустившихся профилей не помог." -ForegroundColor Red
+Write-Host "Остаётся VPN — либо ждать обновления списков обхода в сборке."
 exit 1

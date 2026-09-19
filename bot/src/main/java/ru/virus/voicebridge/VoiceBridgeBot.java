@@ -235,22 +235,12 @@ public final class VoiceBridgeBot {
                 }
             }
 
-            jda = builder.build();
+            jda = connect(builder, bridge);
         } catch (InvalidTokenException e) {
             log.error("Discord не принял токен. Проверь bot.token — возможно, он был сброшен "
                     + "в настройках приложения.");
             bridge.stop();
             System.exit(4);
-            return;
-        } catch (ErrorResponseException e) {
-            // Сюда приходит и обрыв сети: JDA заворачивает её в свой тип с кодом -1.
-            // Стек в сто строк тут ничего не объясняет, а пугает, поэтому говорим словами
-            log.error("Discord не отозвался: {}. Обычно это блокировка или VPN с zapret'ом "
-                    + "на пути — проверь командой "
-                    + "curl.exe -s -o NUL -w \"%{http_code}\" https://discord.com/api/v10/gateway, "
-                    + "должно быть 200.", reason(e));
-            bridge.stop();
-            System.exit(5);
             return;
         }
 
@@ -343,6 +333,47 @@ public final class VoiceBridgeBot {
     }
 
     private VoiceBridgeBot() {
+    }
+
+    /** Сколько ждать между попытками войти в Discord, в секундах. */
+    private static final int[] RETRY_SECONDS = { 15, 15, 30, 30, 60, 60, 60 };
+
+    /**
+     * Входит в Discord, переживая недоступность сети.
+     *
+     * <p>При запуске вместе с Windows бот почти всегда опережает то, что даёт ему
+     * доступ наружу: служба обхода блокировок или VPN поднимаются позже. Выходить
+     * с ошибкой в такой момент означает не запуститься вовсе, поэтому ждём —
+     * суммарно около четырёх с половиной минут, этого хватает с запасом.
+     */
+    private static JDA connect(JDABuilder builder, HttpBridge bridge) {
+        for (var attempt = 0; ; attempt++) {
+            try {
+                return builder.build();
+            } catch (ErrorResponseException e) {
+                // Сюда приходит и обрыв сети: JDA заворачивает её в свой тип с кодом -1.
+                // Стек в сто строк тут ничего не объясняет, а пугает, поэтому говорим словами
+                if (attempt >= RETRY_SECONDS.length) {
+                    log.error("Discord так и не отозвался: {}. Обычно это блокировка или VPN "
+                            + "с zapret'ом на пути — проверь командой "
+                            + "curl.exe -s -o NUL -w \"%{http_code}\" "
+                            + "https://discord.com/api/v10/gateway, должно быть 200.", reason(e));
+                    bridge.stop();
+                    System.exit(5);
+                }
+
+                var wait = RETRY_SECONDS[attempt];
+                log.warn("Discord не отозвался: {}. Пробую снова через {} с.", reason(e), wait);
+
+                try {
+                    Thread.sleep(wait * 1000L);
+                } catch (InterruptedException stopped) {
+                    Thread.currentThread().interrupt();
+                    bridge.stop();
+                    System.exit(5);
+                }
+            }
+        }
     }
 
     /**

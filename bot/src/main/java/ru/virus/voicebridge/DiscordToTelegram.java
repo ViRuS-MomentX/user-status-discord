@@ -1,5 +1,7 @@
 package ru.virus.voicebridge;
 
+import net.dv8tion.jda.api.components.textdisplay.TextDisplay;
+import net.dv8tion.jda.api.components.utils.ComponentIterator;
 import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
@@ -78,6 +80,15 @@ public final class DiscordToTelegram extends ListenerAdapter {
             var text = textOf(message);
             var attachments = message.getAttachments();
 
+            // Пустое сообщение молча пропадало, и со стороны это выглядело как
+            // «бот не пересылает сообщения». Говорим, чего именно не нашли
+            if (text.isBlank() && attachments.isEmpty()) {
+                log.warn("От {} нечего пересказать: карточек {}, частей {}. "
+                                + "Похоже, этот вид сообщений разобрать нечем.",
+                        author, message.getEmbeds().size(), message.getComponents().size());
+                return;
+            }
+
             if (!settings.files() || attachments.isEmpty()) {
                 if (!text.isBlank()) {
                     telegram.sendMessage(settings.chat(), author, text);
@@ -121,7 +132,10 @@ public final class DiscordToTelegram extends ListenerAdapter {
     private static String textOf(Message message) {
         var said = message.getContentDisplay();
 
-        if (!said.isBlank() || message.getEmbeds().isEmpty()) {
+        // Раньше здесь стояло ещё и «нет карточек — возвращаем как есть», из-за
+        // чего сообщения, у которых текст лежит в составных частях, уходили
+        // пустыми: до разбора частей дело просто не доходило
+        if (!said.isBlank()) {
             return said;
         }
 
@@ -145,6 +159,15 @@ public final class DiscordToTelegram extends ListenerAdapter {
             if (retold.length() > EMBED_LIMIT) {
                 break;
             }
+        }
+
+        // Новые боты всё чаще пишут не текстом и не карточкой, а набором
+        // составных частей. Обходим их дерево и собираем то, что в нём написано
+        if (retold.length() < EMBED_LIMIT) {
+            ComponentIterator.createStream(message.getComponents())
+                    .filter(TextDisplay.class::isInstance)
+                    .map(part -> ((TextDisplay) part).getContent())
+                    .forEach(written -> add(retold, written));
         }
 
         return retold.toString().trim();

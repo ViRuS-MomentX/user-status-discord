@@ -83,7 +83,7 @@ public final class VoiceBridgeBot {
         LibraryChannel libraryChannel = null;
 
         if (config.isMusicEnabled()) {
-            music = new MusicService();
+            music = new MusicService(config.isSoundCloudEnabled());
 
             MusicLibrary library = null;
             // Пути достраиваем от файла настроек: бота запускают и ярлыком, и из

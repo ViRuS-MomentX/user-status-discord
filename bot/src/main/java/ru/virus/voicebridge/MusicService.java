@@ -38,7 +38,27 @@ public final class MusicService {
     /** Сколько ждать данных после соединения. */
     private static final int SOCKET_TIMEOUT_MS = 30_000;
 
+    /** Есть ли куда идти за незнакомой песней, кроме своей фонотеки. */
+    private final boolean searchable;
+
     public MusicService() {
+        this(true);
+    }
+
+    /** Умеет ли бот искать песни где-то, кроме своей фонотеки. */
+    public boolean isSearchable() {
+        return searchable;
+    }
+
+    /**
+     * @param soundcloud искать ли треки на SoundCloud. Там, где до него не
+     *                   достучаться, каждый поиск стоит минуты ожидания впустую,
+     *                   и честнее сразу сказать, что песни нет
+     */
+    public MusicService(boolean soundcloud) {
+        this.searchable = soundcloud;
+
+
         // Просим сразу Opus: именно его ждёт Discord, и лишнего перекодирования не будет
         manager.getConfiguration().setOutputFormat(StandardAudioDataFormats.DISCORD_OPUS);
 
@@ -51,7 +71,10 @@ public final class MusicService {
                 .setSocketTimeout(SOCKET_TIMEOUT_MS)
                 .build());
 
-        manager.registerSourceManager(SoundCloudAudioSourceManager.createDefault());
+        if (soundcloud) {
+            manager.registerSourceManager(SoundCloudAudioSourceManager.createDefault());
+        }
+
         // Своя фонотека: файлы с диска играют всегда, чем бы ни болел интернет
         manager.registerSourceManager(new LocalAudioSourceManager());
 

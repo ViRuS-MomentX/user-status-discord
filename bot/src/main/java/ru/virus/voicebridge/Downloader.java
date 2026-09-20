@@ -87,6 +87,11 @@ public final class Downloader {
         // самого Python: перекодировать на своей стороне было бы гаданием
         builder.environment().put("PYTHONIOENCODING", "utf-8");
 
+        // Одного PYTHONIOENCODING собранному в exe Python иногда мало: он решает,
+        // чем кодировать вывод, ещё на старте, и кириллица в названиях приезжает
+        // вопросительными знаками. Режим UTF-8 включается раньше и решает это
+        builder.environment().put("PYTHONUTF8", "1");
+
         try {
             process = builder.start();
         } catch (IOException e) {

@@ -35,6 +35,7 @@ public final class BotConfig {
     private final String botsRole;
     private final boolean moderation;
     private final boolean music;
+    private final boolean soundcloud;
     private final String lastFmKey;
     private final int playlistSize;
     private final MusicCatalog catalog;
@@ -46,7 +47,8 @@ public final class BotConfig {
 
     private BotConfig(String token, long guildId, long userId, String httpHost, int httpPort, String httpToken,
                       RankLadder ladder, String botsRole, boolean moderation,
-                      boolean music, String lastFmKey, int playlistSize, MusicCatalog catalog,
+                      boolean music, boolean soundcloud, String lastFmKey,
+                      int playlistSize, MusicCatalog catalog,
                       OnlineStatus status, PanelSettings panel, PostsSettings posts,
                       LibrarySettings library, BridgeSettings bridge) {
         this.token = token;
@@ -59,6 +61,7 @@ public final class BotConfig {
         this.botsRole = botsRole;
         this.moderation = moderation;
         this.music = music;
+        this.soundcloud = soundcloud;
         this.lastFmKey = lastFmKey;
         this.playlistSize = playlistSize;
         this.catalog = catalog;
@@ -112,6 +115,16 @@ public final class BotConfig {
     /** Включены ли музыкальные команды. */
     public boolean isMusicEnabled() {
         return music;
+    }
+
+    /**
+     * Искать ли незнакомые песни на SoundCloud.
+     *
+     * <p>Там, где до него не достучаться, каждый поиск стоит минуты ожидания
+     * впустую, и честнее сразу ответить, что песни нет в фонотеке.
+     */
+    public boolean isSoundCloudEnabled() {
+        return soundcloud;
     }
 
     /** Ключ Last.fm для подбора плейлиста. */
@@ -206,6 +219,7 @@ public final class BotConfig {
                 props.getProperty("bots.role", "").trim(),
                 Boolean.parseBoolean(props.getProperty("moderation.enabled", "false").trim()),
                 Boolean.parseBoolean(props.getProperty("music.enabled", "false").trim()),
+                Boolean.parseBoolean(props.getProperty("music.soundcloud", "true").trim()),
                 pick(props, "music.lastfm.key", "VOICEBRIDGE_LASTFM_KEY"),
                 parsePlaylistSize(props.getProperty("music.playlist", "").trim()),
                 pickCatalog(props),

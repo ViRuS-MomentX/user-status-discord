@@ -172,9 +172,20 @@ public final class VoiceBridgeBot {
             } catch (IOException e) {
                 // А это связь. Мост оставляем: он сам пробует снова, и к тому времени,
                 // как кто-то напишет, дорога может открыться
-                log.warn("Telegram сейчас не отвечает: {}. Мост поднят, буду пробовать дальше. "
-                        + "Если так и останется — до api.telegram.org не достучаться "
-                        + "(провайдер, VPN), помогает bridge.telegram.proxy.", e.getMessage());
+                // Совет должен указывать на ту дорогу, которой бот идёт на самом деле:
+                // при своём сервере Bot API упоминать api.telegram.org и прокси
+                // бессмысленно, они в этой цепочке не участвуют
+                if (settings.hasOwnApi()) {
+                    log.warn("Telegram сейчас не отвечает: {}. Мост поднят, буду пробовать "
+                            + "дальше. Если так и останется — не открывается {}; "
+                            + "проверь его, открыв {}/check.",
+                            e.getMessage(), settings.api(), settings.api());
+                } else {
+                    log.warn("Telegram сейчас не отвечает: {}. Мост поднят, буду пробовать "
+                            + "дальше. Если так и останется — до api.telegram.org не "
+                            + "достучаться (провайдер, VPN), помогает bridge.telegram.proxy "
+                            + "или свой сервер в bridge.telegram.api.", e.getMessage());
+                }
             }
 
             var webhook = config.getBridge().webhook();

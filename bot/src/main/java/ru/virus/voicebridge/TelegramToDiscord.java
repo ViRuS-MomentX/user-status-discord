@@ -23,6 +23,9 @@ public final class TelegramToDiscord {
     /** Сколько ждать после сбоя, прежде чем пробовать снова. */
     private static final long RETRY_PAUSE_MS = 15_000;
 
+    /** Паузы между попытками доставить одно сообщение, в миллисекундах. */
+    private static final long[] SEND_RETRY_MS = { 5_000, 15_000 };
+
     private final JDA jda;
     private final BridgeSettings settings;
     private final Telegram telegram;
@@ -119,12 +122,40 @@ public final class TelegramToDiscord {
             }
         }
 
-        if (webhook != null) {
-            byWebhook(message, file, failure);
-            return;
+        // Повторяем, пока не уйдёт. Обрыв до Discord длится обычно секунды, и без
+        // повтора каждое такое мгновение выедало бы из переписки по сообщению —
+        // о потере знал бы только лог. Ждём на этом же потоке, чтобы сообщения
+        // дошли в том порядке, в каком их написали
+        for (var attempt = 0; running; attempt++) {
+            if (post(message, file, failure)) {
+                return;
+            }
+
+            if (attempt >= SEND_RETRY_MS.length) {
+                log.error("Сообщение от {} так и не ушло в Discord — потеряно.",
+                        message.author());
+                return;
+            }
+
+            var pause = SEND_RETRY_MS[attempt];
+            log.warn("Повторю отправку через {} с.", pause / 1000);
+
+            try {
+                Thread.sleep(pause);
+            } catch (InterruptedException stopped) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
+    /** Одна попытка: сначала вебхуком, а если он молчит — от имени бота. */
+    private boolean post(TelegramMessage message, byte[] file, String failure) {
+        if (webhook != null && byWebhook(message, file, failure)) {
+            return true;
         }
 
-        byBot(message, file, failure);
+        return byBot(message, file, failure);
     }
 
     /**
@@ -133,7 +164,7 @@ public final class TelegramToDiscord {
      * <p>К имени добавлена пометка источника. Вебхук позволяет назваться кем угодно,
      * и без неё писавший в Telegram мог бы выдать себя за участника сервера.
      */
-    private void byWebhook(TelegramMessage message, byte[] file, String failure) {
+    private boolean byWebhook(TelegramMessage message, byte[] file, String failure) {
         var text = message.text();
 
         if (failure != null) {
@@ -144,9 +175,10 @@ public final class TelegramToDiscord {
         try {
             webhook.send(message.author() + " · Telegram", avatarOf(message), text,
                     message.fileName(), file);
+            return true;
         } catch (Exception e) {
             log.error("Вебхук не принял сообщение: {}. Пишу от имени бота.", e.getMessage());
-            byBot(message, file, failure);
+            return false;
         }
     }
 
@@ -190,12 +222,12 @@ public final class TelegramToDiscord {
         return found;
     }
 
-    private void byBot(TelegramMessage message, byte[] file, String failure) {
+    private boolean byBot(TelegramMessage message, byte[] file, String failure) {
         var channel = jda.getChannelById(GuildMessageChannel.class, settings.channel());
 
         if (channel == null) {
             log.error("Канал {} не найден — сообщению из Telegram некуда деться.", settings.channel());
-            return;
+            return false;
         }
 
         var text = "**" + message.author() + "**"
@@ -210,7 +242,30 @@ public final class TelegramToDiscord {
 
         // Упоминания обезвреживаем: иначе написавший в Telegram сможет дёрнуть @everyone
         // на сервере, куда его даже не приглашали
-        action.setAllowedMentions(List.of()).queue(ok -> { },
-                error -> log.error("Не удалось написать в Discord: {}", error.getMessage()));
+        try {
+            // Ждём ответа, а не отправляем вслепую: без этого о неудаче узнавал бы
+            // только лог, и повторять было бы нечего
+            action.setAllowedMentions(List.of()).submit().join();
+            return true;
+        } catch (Exception e) {
+            log.error("Не удалось написать в Discord: {}", reason(e));
+            return false;
+        }
+    }
+
+    /** Внятная строка из цепочки причин: у JDA снаружи лежит пустая обёртка. */
+    private static String reason(Throwable trouble) {
+        var depth = 0;
+        var said = "";
+
+        for (var step = trouble; step != null && depth < 20; step = step.getCause(), depth++) {
+            var message = step.getMessage();
+
+            if (message != null && !message.isBlank()) {
+                said = message;
+            }
+        }
+
+        return said.isEmpty() ? trouble.getClass().getSimpleName() : said;
     }
 }

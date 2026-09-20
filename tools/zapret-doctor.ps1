@@ -60,6 +60,13 @@ if ($service) {
     foreach ($one in $service) {
         if ($one.Status -eq "Running") {
             Good "Служба «$($one.Name)»: работает."
+        } elseif ($winws) {
+            # Запускать службу поверх работающего winws нельзя: два перехвата
+            # на одном драйвере мешают друг другу, и связь начинает пропадать
+            # то и дело. Сначала надо решить, кто из них остаётся
+            Warn "Служба «$($one.Name)» стоит, но winws уже запущен вручную."
+            Note "Не поднимай службу поверх: два перехвата спорят за драйвер."
+            $problems += "Реши, кто перехватывает: либо погаси ручной winws (Get-Process winws | Stop-Process -Force) и подними службу, либо оставь ручной и службу не трогай."
         } else {
             Warn "Служба «$($one.Name)»: $($one.Status)."
             $problems += "Служба $($one.Name) не работает: Start-Service $($one.Name)"
@@ -68,6 +75,24 @@ if ($service) {
 } else {
     Warn "Службы zapret нет — после перезагрузки профиль придётся запускать руками."
     Note "Поставить службой: service.bat из папки zapret, от администратора."
+}
+
+if ($winws -and $winws.Count -gt 1) {
+    Bad "Копий winws сразу $($winws.Count) — они спорят за драйвер."
+    $problems += "Оставь один перехват: Get-Process winws | Stop-Process -Force, затем подними что-то одно."
+}
+
+# Какой профиль поднимает служба, видно по строке её запуска: в ней лежат все
+# ключи winws. Имя .bat туда не попадает — служба хранит уже развёрнутые ключи,
+# — поэтому показываем начало строки, по нему профиль узнаётся на глаз.
+# sc.exe на такой длине отказывает с ошибкой 1734, спрашиваем через CIM
+if ($service) {
+    $line = (Get-CimInstance Win32_Service -Filter "Name='zapret'" -ErrorAction SilentlyContinue).PathName
+
+    if ($line) {
+        $shown = if ($line.Length -gt 200) { $line.Substring(0, 200) + "..." } else { $line }
+        Note "Служба запускается так: $shown"
+    }
 }
 
 Write-Host ""

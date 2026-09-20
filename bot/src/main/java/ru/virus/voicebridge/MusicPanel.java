@@ -7,6 +7,7 @@ import net.dv8tion.jda.api.components.label.Label;
 import net.dv8tion.jda.api.components.textinput.TextInput;
 import net.dv8tion.jda.api.components.textinput.TextInputStyle;
 import net.dv8tion.jda.api.entities.Guild;
+import net.dv8tion.jda.api.exceptions.ErrorResponseException;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.MessageEmbed;
 import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
@@ -39,6 +40,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class MusicPanel extends ListenerAdapter {
 
     private static final Logger log = LoggerFactory.getLogger(MusicPanel.class);
+
+    /** Код Discord для «нажатие уже недействительно»: подтвердить его не успели. */
+    private static final int UNKNOWN_INTERACTION = 10062;
 
     // Первый ряд: управление воспроизведением
     private static final String QUIETER = "music:quieter";
@@ -327,7 +331,7 @@ public final class MusicPanel extends ListenerAdapter {
 
         // Остальные правят панель на месте. deferEdit подтверждает нажатие сразу:
         // у Discord на это три секунды, а работа может занять больше.
-        event.deferEdit().queue();
+        event.deferEdit().queue(ok -> { }, failure -> missed(failure, "нажатие"));
         var hook = event.getHook();
 
         switch (id) {
@@ -355,9 +359,30 @@ public final class MusicPanel extends ListenerAdapter {
         }
     }
 
+    /**
+     * Объясняет словами, что нажатие не успели подтвердить.
+     *
+     * <p>У Discord на подтверждение три секунды, и медленная сеть иногда в них не
+     * укладывается — особенно на первом обращении, пока соединение только
+     * устанавливается. Ничего страшного при этом не происходит: нажатие просто
+     * пропадает. А вот стек на сорок строк в логе выглядит как поломка бота,
+     * хотя бот тут ни при чём.
+     */
+    private static void missed(Throwable failure, String what) {
+        if (failure instanceof ErrorResponseException refusal
+                && refusal.getErrorCode() == UNKNOWN_INTERACTION) {
+            log.warn("Discord не принял {}: не уложились в три секунды. Обычно это медленная "
+                    + "сеть — нажми ещё раз.", what);
+            return;
+        }
+
+        log.error("Не удалось обработать {}: {}", what, failure.getMessage());
+    }
+
     private void openModal(ButtonInteractionEvent event, Member member, String id) {
         if (member.getVoiceState() == null || member.getVoiceState().getChannel() == null) {
-            event.reply("Сначала зайди в голосовой канал.").setEphemeral(true).queue();
+            event.reply("Сначала зайди в голосовой канал.").setEphemeral(true)
+                    .queue(ok -> { }, failure -> missed(failure, "нажатие"));
             return;
         }
 

@@ -30,6 +30,7 @@ public final class TelegramToDiscord {
     private final BridgeSettings settings;
     private final Telegram telegram;
     private final DiscordWebhook webhook;
+    private final BridgeLinks links;
 
     /**
      * Найденные аватарки.
@@ -43,9 +44,15 @@ public final class TelegramToDiscord {
     private Thread worker;
 
     public TelegramToDiscord(JDA jda, BridgeSettings settings, Telegram telegram) {
+        this(jda, settings, telegram, new BridgeLinks());
+    }
+
+    public TelegramToDiscord(JDA jda, BridgeSettings settings, Telegram telegram,
+                             BridgeLinks links) {
         this.jda = jda;
         this.settings = settings;
         this.telegram = telegram;
+        this.links = links;
         this.webhook = settings.webhook().isBlank() ? null : new DiscordWebhook(settings.webhook());
     }
 
@@ -165,7 +172,7 @@ public final class TelegramToDiscord {
      * и без неё писавший в Telegram мог бы выдать себя за участника сервера.
      */
     private boolean byWebhook(TelegramMessage message, byte[] file, String failure) {
-        var text = message.text();
+        var text = quoted(message) + message.text();
 
         if (failure != null) {
             text = (text.isBlank() ? "" : text + "\n") + "*(вложение не перенеслось: "
@@ -173,8 +180,9 @@ public final class TelegramToDiscord {
         }
 
         try {
-            webhook.send(message.author() + " · Telegram", avatarOf(message), text,
-                    message.fileName(), file);
+            links.remember(message.messageId(),
+                    webhook.send(message.author() + " · Telegram", avatarOf(message), text,
+                            message.fileName(), file));
             return true;
         } catch (Exception e) {
             log.error("Вебхук не принял сообщение: {}. Пишу от имени бота.", e.getMessage());
@@ -222,6 +230,31 @@ public final class TelegramToDiscord {
         return found;
     }
 
+    /**
+     * Строка-отсылка к тому, на что отвечают.
+     *
+     * <p>Вебхуки Discord отвечать не умеют — в их запросе попросту нет поля для
+     * этого. Поэтому обозначаем ответ цитатой со ссылкой: она кликается и уводит
+     * к исходному сообщению, что почти так же удобно, как настоящая стрелка.
+     */
+    private String quoted(TelegramMessage message) {
+        var answered = links.discordFor(message.replyToId());
+
+        if (answered == 0) {
+            return "";
+        }
+
+        var channel = jda == null ? null : jda.getChannelById(GuildMessageChannel.class,
+                settings.channel());
+
+        if (channel == null) {
+            return "";
+        }
+
+        return "> ↩ [в ответ на это](https://discord.com/channels/"
+                + channel.getGuild().getId() + "/" + channel.getId() + "/" + answered + ")\n";
+    }
+
     private boolean byBot(TelegramMessage message, byte[] file, String failure) {
         var channel = jda.getChannelById(GuildMessageChannel.class, settings.channel());
 
@@ -240,12 +273,21 @@ public final class TelegramToDiscord {
             action = action.setFiles(FileUpload.fromData(file, message.fileName()));
         }
 
+        // От своего имени бот отвечать умеет, в отличие от вебхука, — и здесь ответ
+        // получается настоящим
+        var answered = links.discordFor(message.replyToId());
+
+        if (answered != 0) {
+            action = action.setMessageReference(answered).failOnInvalidReply(false);
+        }
+
         // Упоминания обезвреживаем: иначе написавший в Telegram сможет дёрнуть @everyone
         // на сервере, куда его даже не приглашали
         try {
             // Ждём ответа, а не отправляем вслепую: без этого о неудаче узнавал бы
             // только лог, и повторять было бы нечего
-            action.setAllowedMentions(List.of()).submit().join();
+            var sent = action.setAllowedMentions(List.of()).submit().join();
+            links.remember(message.messageId(), sent.getIdLong());
             return true;
         } catch (Exception e) {
             log.error("Не удалось написать в Discord: {}", reason(e));

@@ -135,6 +135,7 @@ public final class VoiceBridgeBot {
 
         DiscordToTelegram toTelegram = null;
         Telegram telegram = null;
+        BridgeLinks bridgeLinks = null;
 
         if (config.getBridge().isUsable()) {
             var settings = config.getBridge();
@@ -199,7 +200,10 @@ public final class VoiceBridgeBot {
             }
 
             if (telegram != null) {
-                toTelegram = new DiscordToTelegram(config.getGuildId(), config.getBridge(), telegram);
+                // Общая на обе половины: ответы ищут пары именно в ней
+                bridgeLinks = new BridgeLinks();
+                toTelegram = new DiscordToTelegram(config.getGuildId(), config.getBridge(),
+                        telegram, bridgeLinks);
             }
         } else if (config.getBridge().enabled()) {
             log.error("Мост включён, но не задан bridge.channel, bridge.telegram.token "
@@ -278,7 +282,7 @@ public final class VoiceBridgeBot {
         TelegramToDiscord fromTelegram = null;
 
         if (telegram != null) {
-            fromTelegram = new TelegramToDiscord(jda, config.getBridge(), telegram);
+            fromTelegram = new TelegramToDiscord(jda, config.getBridge(), telegram, bridgeLinks);
             fromTelegram.start();
         }
 

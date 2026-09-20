@@ -196,12 +196,38 @@ public final class Telegram {
      * <p>Разметка HTML, поэтому написанное человеком экранируется: иначе угловая скобка
      * в чужом сообщении оборвала бы отправку, а то и подменила оформление.
      */
-    public void sendMessage(String chat, String author, String text) throws IOException {
-        call("sendMessage", Map.of(
-                "chat_id", chat,
-                "parse_mode", "HTML",
-                "disable_web_page_preview", "true",
-                "text", card(author, text)));
+    public long sendMessage(String chat, String author, String text) throws IOException {
+        return sendMessage(chat, author, text, 0);
+    }
+
+    /**
+     * @param replyTo номер сообщения, на которое отвечаем; 0 — обычная реплика
+     * @return номер отправленного сообщения, чтобы ответы могли найти его потом
+     */
+    public long sendMessage(String chat, String author, String text, long replyTo)
+            throws IOException {
+        var parameters = new LinkedHashMap<String, String>();
+        parameters.put("chat_id", chat);
+        parameters.put("parse_mode", "HTML");
+        parameters.put("disable_web_page_preview", "true");
+        parameters.put("text", card(author, text));
+
+        if (replyTo != 0) {
+            // Если та реплика к этому времени удалена, Telegram отказал бы в отправке
+            // целиком. Просим отправить всё равно — связь с ответом не настолько
+            // важна, чтобы из-за неё терять само сообщение
+            parameters.put("reply_to_message_id", String.valueOf(replyTo));
+            parameters.put("allow_sending_without_reply", "true");
+        }
+
+        return sentId(call("sendMessage", parameters));
+    }
+
+    /** Номер сообщения из ответа Telegram; 0, если его там нет. */
+    private static long sentId(DataObject answer) {
+        return answer.hasKey("result") && answer.getObject("result").hasKey("message_id")
+                ? answer.getObject("result").getLong("message_id", 0)
+                : 0;
     }
 
     /**
@@ -254,8 +280,13 @@ public final class Telegram {
      *
      * @param photo отправить как картинку, а не как вложение
      */
-    public void sendFile(String chat, String author, String text, String fileName,
+    public long sendFile(String chat, String author, String text, String fileName,
                          byte[] data, boolean photo) throws IOException {
+        return sendFile(chat, author, text, fileName, data, photo, 0);
+    }
+
+    public long sendFile(String chat, String author, String text, String fileName,
+                         byte[] data, boolean photo, long replyTo) throws IOException {
         var method = photo ? "sendPhoto" : "sendDocument";
         var field = photo ? "photo" : "document";
 
@@ -264,7 +295,12 @@ public final class Telegram {
         fields.put("parse_mode", "HTML");
         fields.put("caption", card(author, text, CAPTION_LIMIT));
 
-        upload(method, fields, field, fileName, data);
+        if (replyTo != 0) {
+            fields.put("reply_to_message_id", String.valueOf(replyTo));
+            fields.put("allow_sending_without_reply", "true");
+        }
+
+        return sentId(upload(method, fields, field, fileName, data));
     }
 
     /**
@@ -467,8 +503,8 @@ public final class Telegram {
     /**
      * Отправляет файл. Telegram принимает его только многочастной формой.
      */
-    private void upload(String method, Map<String, String> fields, String fileField,
-                        String fileName, byte[] data) throws IOException {
+    private DataObject upload(String method, Map<String, String> fields, String fileField,
+                              String fileName, byte[] data) throws IOException {
         var boundary = "vb" + System.nanoTime();
         var body = new ByteArrayOutputStream();
 
@@ -491,7 +527,7 @@ public final class Telegram {
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body.toByteArray()))
                 .build();
 
-        answer(request, method);
+        return answer(request, method);
     }
 
     private DataObject answer(HttpRequest request, String method) throws IOException {

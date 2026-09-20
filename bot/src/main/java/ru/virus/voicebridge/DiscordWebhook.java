@@ -45,7 +45,7 @@ public final class DiscordWebhook {
      * @param avatar ссылка на аватарку; пустая строка — аватарка самого вебхука
      * @param file содержимое вложения; <code>null</code>, если его нет
      */
-    public void send(String name, String avatar, String text, String fileName, byte[] file)
+    public long send(String name, String avatar, String text, String fileName, byte[] file)
             throws IOException {
         var payload = DataObject.empty()
                 .put("username", name(name))
@@ -60,8 +60,8 @@ public final class DiscordWebhook {
         }
 
         if (file == null) {
-            post(payload.toString().getBytes(StandardCharsets.UTF_8), "application/json");
-            return;
+            return sentId(post(payload.toString().getBytes(StandardCharsets.UTF_8),
+                    "application/json"));
         }
 
         var boundary = "vb" + System.nanoTime();
@@ -77,11 +77,29 @@ public final class DiscordWebhook {
         body.writeBytes(file);
         body.writeBytes(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
 
-        post(body.toByteArray(), "multipart/form-data; boundary=" + boundary);
+        return sentId(post(body.toByteArray(), "multipart/form-data; boundary=" + boundary));
     }
 
-    private void post(byte[] body, String contentType) throws IOException {
-        var request = HttpRequest.newBuilder(URI.create(url))
+    /** Номер созданного сообщения из ответа Discord; 0, если разобрать не вышло. */
+    private static long sentId(String answer) {
+        try {
+            return Long.parseLong(DataObject.fromJson(answer).getString("id", "0"));
+        } catch (Exception silent) {
+            // Номер нужен только ответам. Не разобрали — просто не свяжем эту пару
+            return 0;
+        }
+    }
+
+    /**
+     * Отправляет и возвращает ответ Discord.
+     *
+     * <p>К ссылке добавлен {@code wait=true}: без него Discord отвечает пустотой,
+     * не дожидаясь создания сообщения, и узнать его номер неоткуда — а без номера
+     * ответы с той стороны не к чему привязать.
+     */
+    private String post(byte[] body, String contentType) throws IOException {
+        var waiting = url.contains("?") ? url + "&wait=true" : url + "?wait=true";
+        var request = HttpRequest.newBuilder(URI.create(waiting))
                 .timeout(Duration.ofMinutes(2))
                 .header("Content-Type", contentType)
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
@@ -94,6 +112,8 @@ public final class DiscordWebhook {
                 throw new IOException("вебхук ответил " + response.statusCode() + ": "
                         + response.body());
             }
+
+            return response.body();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("отправка прервана");

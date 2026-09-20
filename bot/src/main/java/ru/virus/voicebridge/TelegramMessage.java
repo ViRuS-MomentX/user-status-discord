@@ -6,6 +6,8 @@ import net.dv8tion.jda.api.utils.data.DataObject;
  * Сообщение из Telegram, приведённое к тому, что нужно мосту.
  *
  * @param updateId номер обновления; по нему Telegram понимает, что мы его забрали
+ * @param messageId номер самого сообщения; по нему ответы находят его на той стороне
+ * @param replyToId на какое сообщение отвечают; 0 — это не ответ
  * @param chat откуда пришло
  * @param authorId номер автора в Telegram; по нему берётся аватарка
  * @param author кого показать в Discord
@@ -13,8 +15,9 @@ import net.dv8tion.jda.api.utils.data.DataObject;
  * @param fileId чем забрать вложение; пустая строка, если его нет
  * @param fromBot прислал ли это бот — такое пересылать нельзя, иначе мост зациклится
  */
-public record TelegramMessage(long updateId, String chat, long authorId, String author,
-                              String text, String fileId, String fileName, boolean fromBot) {
+public record TelegramMessage(long updateId, long messageId, long replyToId, String chat,
+                              long authorId, String author, String text, String fileId,
+                              String fileName, boolean fromBot) {
 
     /**
      * Разбирает одно обновление.
@@ -30,6 +33,12 @@ public record TelegramMessage(long updateId, String chat, long authorId, String 
 
         var message = update.getObject("message");
         var chat = message.hasKey("chat") ? message.getObject("chat").getLong("id", 0) : 0;
+        var messageId = message.getLong("message_id", 0);
+
+        // На что отвечают. Свои же пересланные сообщения бот узнаёт по этому номеру
+        var replyToId = message.hasKey("reply_to_message")
+                ? message.getObject("reply_to_message").getLong("message_id", 0)
+                : 0;
 
         var author = "Кто-то";
         var authorId = 0L;
@@ -87,7 +96,7 @@ public record TelegramMessage(long updateId, String chat, long authorId, String 
             return null;
         }
 
-        return new TelegramMessage(updateId, String.valueOf(chat), authorId, author, text,
-                fileId, fileName, fromBot);
+        return new TelegramMessage(updateId, messageId, replyToId, String.valueOf(chat),
+                authorId, author, text, fileId, fileName, fromBot);
     }
 }

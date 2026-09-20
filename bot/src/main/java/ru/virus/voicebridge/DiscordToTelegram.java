@@ -25,6 +25,7 @@ public final class DiscordToTelegram extends ListenerAdapter {
     private final long guildId;
     private final BridgeSettings settings;
     private final Telegram telegram;
+    private final BridgeLinks links;
 
     /** Под этим номером в канале появляется всё, что мы сами принесли из Telegram. */
     private final long ownWebhook;
@@ -39,10 +40,12 @@ public final class DiscordToTelegram extends ListenerAdapter {
         return thread;
     });
 
-    public DiscordToTelegram(long guildId, BridgeSettings settings, Telegram telegram) {
+    public DiscordToTelegram(long guildId, BridgeSettings settings, Telegram telegram,
+                             BridgeLinks links) {
         this.guildId = guildId;
         this.settings = settings;
         this.telegram = telegram;
+        this.links = links;
         this.ownWebhook = DiscordWebhook.idOf(settings.webhook());
     }
 
@@ -80,6 +83,12 @@ public final class DiscordToTelegram extends ListenerAdapter {
             var text = textOf(message);
             var attachments = message.getAttachments();
 
+            // На что отвечают. Если это ответ на сообщение, принесённое из Telegram,
+            // мы знаем его тамошний номер — и ответ дойдёт туда ответом, а не
+            // отдельной репликой непонятно к чему
+            var reference = message.getMessageReference();
+            var replyTo = reference == null ? 0 : links.telegramFor(reference.getMessageIdLong());
+
             // Пустое сообщение молча пропадало, и со стороны это выглядело как
             // «бот не пересылает сообщения». Говорим, чего именно не нашли
             if (text.isBlank() && attachments.isEmpty()) {
@@ -91,7 +100,8 @@ public final class DiscordToTelegram extends ListenerAdapter {
 
             if (!settings.files() || attachments.isEmpty()) {
                 if (!text.isBlank()) {
-                    telegram.sendMessage(settings.chat(), author, text);
+                    links.remember(telegram.sendMessage(settings.chat(), author, text, replyTo),
+                            message.getIdLong());
                 }
                 return;
             }
@@ -102,19 +112,32 @@ public final class DiscordToTelegram extends ListenerAdapter {
                 var limit = settings.maxMegabytes() * 1024 * 1024;
 
                 if (attachment.getSize() > limit) {
-                    telegram.sendMessage(settings.chat(), author,
+                    var said = telegram.sendMessage(settings.chat(), author,
                             (first && !text.isBlank() ? text + "\n" : "")
                                     + "[файл «" + attachment.getFileName() + "» больше "
-                                    + settings.maxMegabytes() + " МБ, не переношу]");
+                                    + settings.maxMegabytes() + " МБ, не переношу]",
+                            first ? replyTo : 0);
+
+                    if (first) {
+                        links.remember(said, message.getIdLong());
+                    }
+
                     first = false;
                     continue;
                 }
 
                 var data = telegram.fetch(attachment.getUrl(), limit);
 
-                // Подпись вешаем на первый файл: у остальных она была бы повтором
-                telegram.sendFile(settings.chat(), author, first ? text : "",
-                        attachment.getFileName(), data, isPicture(attachment.getFileName()));
+                // Подпись и связь с ответом вешаем на первый файл: у остальных они
+                // были бы повтором
+                var sent = telegram.sendFile(settings.chat(), author, first ? text : "",
+                        attachment.getFileName(), data, isPicture(attachment.getFileName()),
+                        first ? replyTo : 0);
+
+                if (first) {
+                    links.remember(sent, message.getIdLong());
+                }
+
                 first = false;
             }
         } catch (Exception e) {

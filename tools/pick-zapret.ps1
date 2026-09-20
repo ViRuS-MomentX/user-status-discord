@@ -1,12 +1,12 @@
-﻿# Подбирает рабочий профиль zapret для Discord.
+﻿# Подбирает профиль zapret, при котором открывается весь Discord.
 #
-# В сборке Flowseal два десятка профилей: они отличаются способом обмана
-# фильтрации, и у разных провайдеров срабатывают разные. Перебирать их руками,
-# проверяя после каждого доступность Discord, — полчаса однообразной работы,
-# поэтому скрипт делает это сам и оставляет включённым тот, что сработал.
+# Проверять один адрес недостаточно: профили обходят фильтрацию по-разному, и
+# бывает, что API уже доступен, а склад картинок и сервер обновлений — ещё нет.
+# Снаружи это выглядит как работающий бот при сером экране в приложении.
+# Поэтому каждый профиль проверяется по всем адресам, которыми пользуется
+# Discord, и побеждает тот, что открывает их все.
 #
-# Запускать от имени администратора: zapret перехватывает пакеты драйвером,
-# без прав это не работает.
+# Запускать от имени администратора: zapret перехватывает пакеты драйвером.
 #
 #   powershell -ExecutionPolicy Bypass -File pick-zapret.ps1
 
@@ -19,14 +19,29 @@ param(
     # поэтому пауза нужна с запасом
     [int] $WarmupSeconds = 12,
 
-    # Сколько ждать ответа Discord
-    [int] $TimeoutSeconds = 8
+    # Сколько ждать ответа от каждого адреса
+    [int] $TimeoutSeconds = 8,
+
+    # Проверять только то, что нужно боту, — быстрее, но приложение может
+    # остаться с серым экраном
+    [switch] $BotOnly
 )
 
 $ErrorActionPreference = "Stop"
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$probe = "https://discord.com/api/v10/gateway"
+# Что именно должно открыться. Без склада картинок приложение показывает серый
+# экран, без сервера обновлений — виснет на «Starting…», так что «работает
+# Discord» — это все четыре, а не только первый
+$targets = @(
+    @{ Name = "API";        Url = "https://discord.com/api/v10/gateway"; Bot = $true },
+    @{ Name = "картинки";   Url = "https://cdn.discordapp.com/";         Bot = $false },
+    @{ Name = "обновления"; Url = "https://updates.discord.com/distributions/app/manifests/latest?channel=stable&platform=win&arch=x64"; Bot = $false },
+    @{ Name = "загрузки";   Url = "https://dl.discordapp.net/";          Bot = $false }
+)
+
+if ($BotOnly) {
+    $targets = $targets | Where-Object { $_.Bot }
+}
 
 function Test-Admin {
     $me = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
@@ -54,13 +69,28 @@ function Stop-Zapret {
     Start-Sleep -Milliseconds 800
 }
 
-function Test-Discord {
-    try {
-        $answer = Invoke-WebRequest -Uri $probe -TimeoutSec $TimeoutSeconds -UseBasicParsing
-        return $answer.StatusCode -eq 200
-    } catch {
-        return $false
+# Отвечает ли адрес хоть чем-нибудь. Именно «хоть чем-нибудь»: склад картинок на
+# голый корень отвечает ошибкой, и это всё равно означает, что связь есть.
+# Молчание — вот что говорит о блокировке
+function Test-Url {
+    param([string] $Url)
+
+    $code = & curl.exe -s -o NUL --max-time $TimeoutSeconds -w "%{http_code}" $Url 2>$null
+
+    return $code -and $code.Trim() -ne "000"
+}
+
+# Возвращает имена адресов, которые не отозвались
+function Find-Silent {
+    $silent = @()
+
+    foreach ($one in $targets) {
+        if (-not (Test-Url $one.Url)) {
+            $silent += $one.Name
+        }
     }
+
+    return ,$silent
 }
 
 # Ставит вперёд профили, которые срабатывают чаще прочих, остальные — следом
@@ -98,6 +128,11 @@ if (-not (Test-Admin)) {
     exit 2
 }
 
+if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
+    Write-Host "Не нашёл curl.exe — он есть в Windows 10 и новее." -ForegroundColor Red
+    exit 2
+}
+
 if ($Root -eq "") {
     Write-Host "Ищу папку zapret..."
     $Root = Find-Root
@@ -109,12 +144,14 @@ if ($Root -eq "" -or -not (Test-Path $Root)) {
 }
 
 Write-Host "Сборка: $Root"
+Write-Host "Проверяю адресов: $($targets.Count) — $(($targets | ForEach-Object { $_.Name }) -join ', ')"
 
-# Служба, если она уже стоит, держит свой winws.exe и мешает проверке:
-# профили будут запускаться поверх работающего и результат окажется не тот
+# Служба, если она стоит, держит свой winws.exe и мешает проверке:
+# профили будут запускаться поверх работающего, и результат окажется не тот
 $service = Get-Service -Name "zapret" -ErrorAction SilentlyContinue
+$wasRunning = $service -and $service.Status -eq "Running"
 
-if ($service -and $service.Status -eq "Running") {
+if ($wasRunning) {
     Write-Host "Служба zapret запущена — останавливаю на время подбора." -ForegroundColor Yellow
     Stop-Service -Name "zapret" -Force
     Start-Sleep -Seconds 2
@@ -122,18 +159,23 @@ if ($service -and $service.Status -eq "Running") {
 
 Stop-Zapret
 
-if (Test-Discord) {
-    Write-Host "Discord доступен и без zapret — подбирать нечего." -ForegroundColor Green
+$silent = Find-Silent
+
+if ($silent.Count -eq 0) {
+    Write-Host "Discord открыт целиком и без zapret — подбирать нечего." -ForegroundColor Green
+    if ($wasRunning) { Start-Service -Name "zapret" }
     exit 0
 }
 
 $all = Get-ChildItem -Path $Root -Filter "general*.bat" | Select-Object -ExpandProperty Name
 $order = Get-ProfileOrder $all
 
-Write-Host "Профилей к перебору: $($order.Count). Каждый проверяю примерно $($WarmupSeconds + 2) секунд."
+Write-Host "Профилей к перебору: $($order.Count)."
 Write-Host ""
 
 $stillborn = 0
+$bestName = ""
+$bestSilent = $silent
 
 foreach ($name in $order) {
     Write-Host ("  {0,-38}" -f $name) -NoNewline
@@ -159,20 +201,25 @@ foreach ($name in $order) {
         continue
     }
 
-    if (Test-Discord) {
-        Write-Host " работает!" -ForegroundColor Green
+    $silent = Find-Silent
+
+    if ($silent.Count -eq 0) {
+        Write-Host " всё открыто!" -ForegroundColor Green
         Write-Host ""
-        Write-Host "Discord доступен. Окно профиля свёрнуто — не закрывай его, пока работает бот." -ForegroundColor Green
+        Write-Host "Discord доступен целиком. Окно профиля свёрнуто — не закрывай его." -ForegroundColor Green
         Write-Host ""
-        Write-Host "Чтобы не запускать каждый раз руками, поставь этот профиль службой:"
+        Write-Host "Поставить этот профиль службой, чтобы поднимался с Windows:"
         Write-Host "  1. запусти от администратора $Root\service.bat"
         Write-Host "  2. выбери установку службы и профиль «$name»"
-        Write-Host ""
-        Write-Host "Теперь можно запускать бота."
         exit 0
     }
 
-    Write-Host " нет"
+    Write-Host (" нет: " + ($silent -join ", "))
+
+    if ($silent.Count -lt $bestSilent.Count) {
+        $bestName = $name
+        $bestSilent = $silent
+    }
 
     Stop-Zapret
 
@@ -195,6 +242,15 @@ if ($stillborn -gt 0) {
     Write-Host "Не запустились: $stillborn из $($order.Count). Их проверка ничего не значит." -ForegroundColor Yellow
 }
 
-Write-Host "Ни один из запустившихся профилей не помог." -ForegroundColor Red
-Write-Host "Остаётся VPN — либо ждать обновления списков обхода в сборке."
+if ($bestName -ne "") {
+    Write-Host "Полностью не справился никто. Ближе всех «$bestName»:" -ForegroundColor Yellow
+    Write-Host "  остаются закрытыми: $($bestSilent -join ', ')"
+    Write-Host ""
+    Write-Host "Запусти его и живи с этим — бот будет работать, если открыт API."
+    Write-Host "Приложению Discord нужны остальные адреса, для него остаётся VPN."
+} else {
+    Write-Host "Ни один профиль не помог." -ForegroundColor Red
+    Write-Host "Остаётся VPN — либо ждать обновления списков обхода в сборке."
+}
+
 exit 1

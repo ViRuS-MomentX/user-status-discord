@@ -28,10 +28,26 @@ public final class DiscordWebhook {
     /** Предел на текст одного сообщения. */
     private static final int TEXT_LIMIT = 2000;
 
-    private final HttpClient http = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(15))
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .build();
+    /**
+     * Меняется на новый после обрыва, поэтому не final.
+     *
+     * <p>Java оставляет порванное соединение в пуле, и следующая отправка уходит
+     * в ту же дыру. Снаружи это выглядело как «бот иногда не пользуется вебхуком»:
+     * он послушно откатывался на запасной путь и писал от своего имени.
+     */
+    private volatile HttpClient http = build();
+
+    /**
+     * Просим HTTP/1.1: по HTTP/2 Java сводит все запросы к хосту в одно соединение,
+     * и обрыв роняет их все разом.
+     */
+    private static HttpClient build() {
+        return HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofSeconds(15))
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .build();
+    }
 
     private final String url;
 
@@ -80,6 +96,16 @@ public final class DiscordWebhook {
         return sentId(post(body.toByteArray(), "multipart/form-data; boundary=" + boundary));
     }
 
+    /**
+     * Заменяет клиента после обрыва — вместе с ним уходит пул порванных соединений.
+     * Меняем только тот, которым ходили: иначе два потока пересоздадут его дважды.
+     */
+    private synchronized void renew(HttpClient broken) {
+        if (http == broken) {
+            http = build();
+        }
+    }
+
     /** Номер созданного сообщения из ответа Discord; 0, если разобрать не вышло. */
     private static long sentId(String answer) {
         try {
@@ -105,18 +131,31 @@ public final class DiscordWebhook {
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
 
-        try {
-            var response = http.send(request, HttpResponse.BodyHandlers.ofString());
+        // Вторая попытка — на свежем соединении. Обрыв обычно рвёт именно то, что
+        // лежало в пуле, и повтор проходит; без него сообщение ушло бы запасным
+        // путём, от имени бота, потеряв ник и аватарку написавшего
+        for (var attempt = 0; ; attempt++) {
+            var client = http;
 
-            if (response.statusCode() / 100 != 2) {
-                throw new IOException("вебхук ответил " + response.statusCode() + ": "
-                        + response.body());
+            try {
+                var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+                if (response.statusCode() / 100 != 2) {
+                    throw new IOException("вебхук ответил " + response.statusCode() + ": "
+                            + response.body());
+                }
+
+                return response.body();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("отправка прервана");
+            } catch (IOException broken) {
+                renew(client);
+
+                if (attempt > 0) {
+                    throw broken;
+                }
             }
-
-            return response.body();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("отправка прервана");
         }
     }
 

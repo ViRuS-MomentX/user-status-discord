@@ -49,7 +49,20 @@ public final class ParodySamples {
 
             samples.removeIf(String::isBlank);
         } catch (IOException | RuntimeException e) {
-            log.error("Не прочитались образцы из {}: {}", file.getFileName(), e.getMessage());
+            samples.clear();
+
+            // Откладываем в сторону, а не затираем первым же новым сообщением:
+            // вдруг там месяцы переписки, которые ещё можно спасти руками
+            var aside = file.resolveSibling(file.getFileName() + ".broken");
+
+            try {
+                Files.move(file, aside, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            } catch (IOException moveFailed) {
+                aside = file;
+            }
+
+            log.error("Не прочитались образцы из {}: {}. Файл отложен как {}, начинаю с нуля.",
+                    file.getFileName(), e.getMessage(), aside.getFileName());
         }
     }
 

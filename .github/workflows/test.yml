@@ -1,0 +1,24 @@
+name: Тесты
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bot
+    steps:
+      - uses: actions/checkout@v4
+
+      # Java 25 — как и для запуска: без неё не соберётся шифрование голоса
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Сборка и тесты
+        run: mvn -B package

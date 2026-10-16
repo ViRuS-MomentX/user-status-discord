@@ -310,9 +310,14 @@ public final class Parody {
         lastSent = now;
         var context = context();
 
+        // На обращение и на вопрос — ответом в цепочке, чтобы было видно, к чему
+        // реплика; на прочее — просто в разговор, как пишут люди
+        var threaded = direct || message.text().trim().endsWith("?");
+        var replyTo = threaded ? message.messageId() : 0;
+
         writer.execute(() -> {
             try {
-                speak(context, direct ? message.messageId() : 0);
+                speak(context, replyTo, direct, null);
             } finally {
                 busy.set(false);
             }
@@ -414,7 +419,7 @@ public final class Parody {
 
                     writer.execute(() -> {
                         try {
-                            speak(context, 0);
+                            speak(context, 0, false, null);
                         } finally {
                             busy.set(false);
                         }
@@ -433,7 +438,7 @@ public final class Parody {
 
                     writer.execute(() -> {
                         try {
-                            speak(context, 0, where);
+                            speak(context, 0, false, where);
                         } finally {
                             busy.set(false);
                         }
@@ -532,9 +537,6 @@ public final class Parody {
         }
     }
 
-    private void speak(String context, long replyTo) {
-        speak(context, replyTo, null);
-    }
 
     /**
      * Пробный запрос при запуске. Неверный ключ или нет сертификата — лучше
@@ -568,10 +570,11 @@ public final class Parody {
     }
 
     /**
+     * @param direct обратились ли к нему самому — ответом на реплику или по имени
      * @param preview куда отправить пробную реплику вместо группы; {@code null} —
      *                обычная реплика в группу
      */
-    private void speak(String context, long replyTo, String preview) {
+    private void speak(String context, long replyTo, boolean direct, String preview) {
         try {
             // Пока ИИ думает, в группе видно «печатает…» — как у живого человека
             telegram.typing(preview == null ? chatId : preview);
@@ -582,7 +585,7 @@ public final class Parody {
         String text;
 
         try {
-            text = clean(llm.complete(system(), prompt(context, replyTo != 0), 300));
+            text = clean(llm.complete(system(), prompt(context, direct), 300));
             llmFailures = 0;
             llmHealth = "отвечает";
         } catch (Exception e) {

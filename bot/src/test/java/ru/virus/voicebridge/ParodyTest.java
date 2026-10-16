@@ -437,6 +437,24 @@ class ParodyTest {
     }
 
     @Test
+    void answersQuestionInThreadButNotStatement() throws Exception {
+        start(settings(100, 0, 1), llm(p -> "ответ " + System.nanoTime()), "образец");
+
+        var question = telegram.say(7, "Петя", "кто в доту?");
+        var first = telegram.awaitSent(1, 3000);
+        assertNotNull(first);
+        assertEquals(String.valueOf(question), first.get("reply_to_message_id"));
+        assertTrue(!prompts.getFirst().contains("ответ на его реплику"),
+                "вопрос в чат — не обращение к нему, подсказка не должна врать");
+
+        Thread.sleep(200);
+        telegram.say(7, "Петя", "я пошёл");
+        var second = telegram.awaitSent(2, 3000);
+        assertNotNull(second);
+        assertNull(second.get("reply_to_message_id"), "на простую реплику — не цепочкой");
+    }
+
+    @Test
     void photoWithoutCaptionShowsInContext() throws Exception {
         start(settings(100, 0, 1), llm(p -> "ответ"), "образец");
 

@@ -384,9 +384,29 @@ public final class Parody {
                     });
                 }
             }
+            case "/parody_try" -> {
+                if (samples.size() == 0) {
+                    answer(message, "Пока не по чему пародировать: нет ни одного сообщения "
+                            + settings.name() + ".");
+                } else if (message.chat().equals(chatId)) {
+                    answer(message, "Проба приходит только в личку — напиши мне её туда.");
+                } else if (busy.compareAndSet(false, true)) {
+                    var context = context();
+                    var where = message.chat();
+
+                    writer.execute(() -> {
+                        try {
+                            speak(context, 0, where);
+                        } finally {
+                            busy.set(false);
+                        }
+                    });
+                }
+            }
             case "/parody_status" -> answer(message, status());
             default -> answer(message, """
                     /parody_say — сказать что-нибудь сейчас
+                    /parody_try — пробная реплика только тебе, в личке
                     /parody_off — выключить
                     /parody_on — включить
                     /parody_forget — стереть собранные сообщения
@@ -467,9 +487,17 @@ public final class Parody {
     }
 
     private void speak(String context, long replyTo) {
+        speak(context, replyTo, null);
+    }
+
+    /**
+     * @param preview куда отправить пробную реплику вместо группы; {@code null} —
+     *                обычная реплика в группу
+     */
+    private void speak(String context, long replyTo, String preview) {
         try {
             // Пока ИИ думает, в группе видно «печатает…» — как у живого человека
-            telegram.typing(chatId);
+            telegram.typing(preview == null ? chatId : preview);
         } catch (Exception e) {
             log.debug("«Печатает» не показалось: {}", e.getMessage());
         }
@@ -487,6 +515,16 @@ public final class Parody {
             llmBlockedUntil = clock.millis() + pause;
             log.warn("ИИ не ответил: {}. Следующая попытка не раньше чем через {} мин.",
                     e.getMessage(), pause / 60_000);
+            return;
+        }
+
+        if (preview != null) {
+            // Проба не идёт в счёт: её видит только спросивший
+            try {
+                telegram.sendText(preview, text.isBlank() ? "⚙️ ИИ решил промолчать." : MARK + text, 0);
+            } catch (Exception e) {
+                log.warn("Пробная реплика не ушла: {}", e.getMessage());
+            }
             return;
         }
 
@@ -569,7 +607,10 @@ public final class Parody {
             }
         }
 
-        return "Образцы его настоящих сообщений:\n" + examples
+        var style = ParodyStyle.describe(samples.all());
+
+        return (style.isEmpty() ? "" : "Его манера в цифрах — держись её:\n" + style + "\n\n")
+                + "Образцы его настоящих сообщений:\n" + examples
                 + (recentOwn.isEmpty() ? ""
                     : "\nТвои недавние реплики-пародии — не повторяй их и не пересказывай:\n" + recentOwn)
                 + "\nПоследние сообщения в чате (снизу — самое новое):\n" + context + "\n\n"

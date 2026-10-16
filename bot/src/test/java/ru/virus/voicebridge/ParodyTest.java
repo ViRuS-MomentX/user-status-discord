@@ -296,6 +296,44 @@ class ParodyTest {
     }
 
     @Test
+    void tryGoesOnlyToPrivateChat() throws Exception {
+        start(settings(0, 60, 1), llm(p -> "проба"), "образец");
+
+        telegram.say(OWNER, OWNER, "Хозяин", false, "/parody_try", null);
+
+        var line = telegram.awaitSent(1, 3000);
+        assertNotNull(line);
+        assertEquals(String.valueOf(OWNER), line.get("chat_id"));
+        assertEquals(Parody.MARK + "проба", line.get("text"));
+        assertEquals(0, state.sentToday(java.time.LocalDate.now()), "проба не должна идти в счёт");
+    }
+
+    @Test
+    void tryInGroupIsRefused() throws Exception {
+        start(settings(0, 60, 1), llm(p -> "проба"), "образец");
+
+        telegram.say(OWNER, "Хозяин", "/parody_try");
+
+        var line = telegram.awaitSent(1, 3000);
+        assertNotNull(line);
+        assertTrue(line.get("text").contains("личку"), line.get("text"));
+        assertTrue(prompts.isEmpty());
+    }
+
+    @Test
+    void promptCarriesStyleWhenEnoughSamples() throws Exception {
+        var many = new String[12];
+        java.util.Arrays.fill(many, 0, 6, "ну го)))");
+        java.util.Arrays.fill(many, 6, 12, "ахах да");
+        start(settings(100, 0, 1), llm(p -> "ок"), many);
+
+        telegram.say(7, "Петя", "привет");
+
+        assertNotNull(telegram.awaitSent(1, 3000));
+        assertTrue(prompts.getFirst().contains("манера в цифрах"), prompts.getFirst());
+    }
+
+    @Test
     void quietHoursKeepSilence() throws Exception {
         start(settings(100, 0, 1, "23-8", 0), llm(p -> "ответ"), at(3), "образец");
 

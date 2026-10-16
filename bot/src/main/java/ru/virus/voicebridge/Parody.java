@@ -101,6 +101,9 @@ public final class Parody {
     /** До какого времени ИИ не трогаем после сбоя, и сколько сбоев было подряд. */
     private volatile long llmBlockedUntil;
     private int llmFailures;
+
+    /** Чем кончилась последняя попытка спросить ИИ — для /parody_status. */
+    private volatile String llmHealth = "ещё не спрашивал";
     private volatile boolean running = true;
     private Thread worker;
 
@@ -168,6 +171,8 @@ public final class Parody {
                 // Последним: пока группа не узнана, цикл повторяет всё сначала, и
                 // сбой на полпути не оставит бота без имени или без отметки
                 chatId = chat;
+
+                writer.execute(this::checkLlm);
             } catch (Exception e) {
                 log.warn("Пародийный бот не достучался до Telegram: {}. Пробую через {} с.",
                         e.getMessage(), RETRY_PAUSE_MS / 1000);
@@ -455,6 +460,10 @@ public final class Parody {
         lines.add("Сегодня реплик: " + state.sentToday(LocalDate.now(clock))
                 + (settings.daily() > 0 ? " из " + settings.daily() : "") + ".");
 
+        var blocked = llmBlockedUntil - clock.millis();
+        lines.add("ИИ: " + llmHealth
+                + (blocked > 0 ? " — жду ещё " + Math.max(1, blocked / 60_000) + " мин." : "."));
+
         if (!settings.quiet().isBlank()) {
             lines.add("Тихие часы: " + settings.quiet()
                     + (settings.isQuiet(LocalTime.now(clock).getHour()) ? " — сейчас как раз они." : "."));
@@ -519,6 +528,37 @@ public final class Parody {
     }
 
     /**
+     * Пробный запрос при запуске. Неверный ключ или нет сертификата — лучше
+     * узнать сразу, а не через час, когда бот впервые решит встрять.
+     */
+    private void checkLlm() {
+        try {
+            llm.complete("Отвечай одним словом.", "Проверка связи. Ответь: ок", 10);
+            llmHealth = "отвечает";
+            log.info("ИИ на связи — пародия готова.");
+        } catch (Exception e) {
+            log.error("ИИ не ответил на проверку: {}. Пока это не исправлено, пародия будет молчать.",
+                    e.getMessage());
+            failed(e);
+        }
+    }
+
+    /**
+     * Сбой ИИ: неверный ключ или кончился лимит сам не пройдёт, а долбить API
+     * на каждое сообщение группы — только засорять лог. Ждём минуту и вдвое
+     * дольше с каждым сбоем подряд.
+     *
+     * @return сколько ждать, мс
+     */
+    private long failed(Exception e) {
+        llmFailures++;
+        var pause = Math.min(LLM_PAUSE_MS << Math.min(llmFailures - 1, 10), LLM_PAUSE_LIMIT_MS);
+        llmBlockedUntil = clock.millis() + pause;
+        llmHealth = "ошибка: " + e.getMessage();
+        return pause;
+    }
+
+    /**
      * @param preview куда отправить пробную реплику вместо группы; {@code null} —
      *                обычная реплика в группу
      */
@@ -535,12 +575,9 @@ public final class Parody {
         try {
             text = clean(llm.complete(system(), prompt(context, replyTo != 0), 300));
             llmFailures = 0;
+            llmHealth = "отвечает";
         } catch (Exception e) {
-            // Неверный ключ или кончился лимит сам не пройдёт, а долбить API на
-            // каждое сообщение группы — только засорять лог
-            llmFailures++;
-            var pause = Math.min(LLM_PAUSE_MS << Math.min(llmFailures - 1, 10), LLM_PAUSE_LIMIT_MS);
-            llmBlockedUntil = clock.millis() + pause;
+            var pause = failed(e);
             log.warn("ИИ не ответил: {}. Следующая попытка не раньше чем через {} мин.",
                     e.getMessage(), pause / 60_000);
             return;

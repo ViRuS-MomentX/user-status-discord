@@ -47,6 +47,11 @@ class ParodyTest {
     /** Модель, которая отвечает заданным и запоминает, о чём её спросили. */
     Llm llm(Function<String, String> answer) {
         return (system, prompt, maxTokens) -> {
+            // Проверку связи при запуске не записываем: она не реплика
+            if (prompt.startsWith("Проверка связи")) {
+                return "ок";
+            }
+
             prompts.add(prompt);
             return answer.apply(prompt);
         };
@@ -334,6 +339,19 @@ class ParodyTest {
     }
 
     @Test
+    void statusTellsAboutBrokenModel() throws Exception {
+        start(settings(0, 0, 1), (system, prompt, max) -> {
+            throw new java.io.IOException("ключ не принят");
+        }, "образец");
+
+        telegram.say(OWNER, OWNER, "Хозяин", false, "/parody_status", null);
+
+        var status = telegram.awaitSent(1, 3000);
+        assertNotNull(status);
+        assertTrue(status.get("text").contains("ИИ: ошибка: ключ не принят"), status.get("text"));
+    }
+
+    @Test
     void registersCommandMenu() throws Exception {
         start(settings(0, 0, 1), llm(p -> ""), "образец");
 
@@ -426,6 +444,7 @@ class ParodyTest {
             throw new java.io.IOException("ключ не принят");
         }, "образец");
 
+        // Проверка при запуске уже упала — и бот выжидает, не спрашивая снова
         telegram.say(7, "Петя", "раз");
         Thread.sleep(800);
         telegram.say(7, "Петя", "два");

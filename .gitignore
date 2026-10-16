@@ -3,3 +3,4 @@ config.properties
 parody-samples.json
 parody-samples.json.tmp
 result.json
+dist/

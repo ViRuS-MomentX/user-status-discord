@@ -455,18 +455,6 @@ public final class Telegram {
         }
     }
 
-    /**
-     * Прямая ссылка на файл Telegram.
-     *
-     * <p>Свой сервер Bot API в отдельном режиме отдаёт не ссылку, а путь к файлу у себя
-     * на диске. Такое ссылкой не сделать — это видно вызывающему по возвращённому пути.
-     */
-    public String fileUrl(String fileId) throws IOException {
-        var path = filePath(fileId);
-
-        return isOnDisk(path) ? path : api + "/file/bot" + token + "/" + path;
-    }
-
     private String filePath(String fileId) throws IOException {
         var path = call("getFile", Map.of("file_id", fileId))
                 .getObject("result").getString("file_path", "");

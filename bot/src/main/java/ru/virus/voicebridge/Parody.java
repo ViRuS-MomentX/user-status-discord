@@ -36,6 +36,20 @@ public final class Parody {
     /** С чего начинается каждая реплика. */
     static final String MARK = "пародия: ";
 
+    /** Меню команд: Telegram подсказывает их при наборе «/». */
+    private static final java.util.Map<String, String> COMMANDS;
+
+    static {
+        var commands = new java.util.LinkedHashMap<String, String>();
+        commands.put("parody_say", "сказать что-нибудь сейчас");
+        commands.put("parody_try", "пробная реплика только тебе, в личке");
+        commands.put("parody_off", "выключить пародию");
+        commands.put("parody_on", "включить пародию");
+        commands.put("parody_forget", "стереть собранные сообщения");
+        commands.put("parody_status", "как дела");
+        COMMANDS = java.util.Collections.unmodifiableMap(commands);
+    }
+
     /** Сколько последних сообщений группы показывать ИИ, чтобы он понимал разговор. */
     private static final int CONTEXT = 20;
 
@@ -144,6 +158,13 @@ public final class Parody {
                 // Старое не разбираем: отвечать на вчерашнее никто не просил
                 offset = telegram.lastUpdateId(0);
 
+                try {
+                    telegram.setCommands(COMMANDS);
+                } catch (Exception e) {
+                    // Без меню команды всё равно работают — их просто не подскажут
+                    log.debug("Меню команд не завелось: {}", e.getMessage());
+                }
+
                 // Последним: пока группа не узнана, цикл повторяет всё сначала, и
                 // сбой на полпути не оставит бота без имени или без отметки
                 chatId = chat;
@@ -174,8 +195,15 @@ public final class Parody {
                     return;
                 }
 
-                log.warn("Telegram не ответил пародийному боту: {}. Пробую через {} с.",
-                        e.getMessage(), RETRY_PAUSE_MS / 1000);
+                if (String.valueOf(e.getMessage()).contains("Conflict")) {
+                    // Обновления у бота одни: их забирает тот, кто спросил последним
+                    log.warn("Обновления пародийного бота забирает кто-то ещё — скорее всего, "
+                            + "вторая копия бота с тем же parody.telegram.token. Закрой её. "
+                            + "Пробую через {} с.", RETRY_PAUSE_MS / 1000);
+                } else {
+                    log.warn("Telegram не ответил пародийному боту: {}. Пробую через {} с.",
+                            e.getMessage(), RETRY_PAUSE_MS / 1000);
+                }
 
                 if (!pause()) {
                     return;

@@ -29,6 +29,7 @@ final class FakeTelegram implements AutoCloseable {
     final List<Map<String, String>> sent = new CopyOnWriteArrayList<>();
     final List<Map<String, String>> actions = new CopyOnWriteArrayList<>();
     final List<Long> sentIds = new CopyOnWriteArrayList<>();
+    volatile String commands;
 
     private final HttpServer server;
     private final BlockingQueue<DataObject> updates = new LinkedBlockingQueue<>();
@@ -117,6 +118,10 @@ final class FakeTelegram implements AutoCloseable {
                 sentIds.add(id);
                 sent.add(form);
                 answer.put("result", DataObject.empty().put("message_id", id));
+            }
+            case "setMyCommands" -> {
+                commands = form.get("commands");
+                answer.put("result", true);
             }
             case "sendChatAction" -> {
                 actions.add(form);

@@ -143,6 +143,21 @@ public final class Telegram {
     }
 
     /**
+     * Заводит меню команд: Telegram подсказывает их, как только наберёшь «/».
+     *
+     * @param commands команда без косой черты → что она делает
+     */
+    public void setCommands(Map<String, String> commands) throws IOException {
+        var list = DataArray.empty();
+
+        commands.forEach((command, description) -> list.add(DataObject.empty()
+                .put("command", command)
+                .put("description", description)));
+
+        call("setMyCommands", Map.of("commands", list.toString()));
+    }
+
+    /**
      * Показывает в группе «печатает…» — само гаснет через несколько секунд
      * или как только придёт сообщение.
      */

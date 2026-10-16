@@ -334,6 +334,15 @@ class ParodyTest {
     }
 
     @Test
+    void registersCommandMenu() throws Exception {
+        start(settings(0, 0, 1), llm(p -> ""), "образец");
+
+        var menu = net.dv8tion.jda.api.utils.data.DataArray.fromJson(telegram.commands);
+        assertEquals("parody_say", menu.getObject(0).getString("command"));
+        assertEquals(6, menu.length());
+    }
+
+    @Test
     void quietHoursKeepSilence() throws Exception {
         start(settings(100, 0, 1, "23-8", 0), llm(p -> "ответ"), at(3), "образец");
 

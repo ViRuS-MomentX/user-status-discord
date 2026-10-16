@@ -339,6 +339,75 @@ class ParodyTest {
     }
 
     @Test
+    void discordPeopleThroughBridgeAreHeard() throws Exception {
+        start(settings(100, 0, 1), llm(p -> "ответ"), "образец");
+
+        // Так мост пересылает сообщение из Discord: от своего бота, с подписью
+        telegram.say(FakeTelegram.CHAT, 500, "Мост", true, "Коля · Discord\nкто в войс?", null);
+
+        assertNotNull(telegram.awaitSent(1, 3000), "на человека из Discord бот должен реагировать");
+        assertTrue(prompts.getFirst().contains("Коля (из Discord): кто в войс?"), prompts.getFirst());
+    }
+
+    @Test
+    void ordinaryBotStaysIgnored() {
+        var message = new TelegramMessage(1, 2, 0, "-1", 9, "Бот", "просто текст", "", "", true, "", "");
+        assertTrue(Parody.unbridge(message).fromBot());
+
+        var bare = new TelegramMessage(1, 2, 0, "-1", 9, "Бот", " · Discord", "", "", true, "", "");
+        assertTrue(Parody.unbridge(bare).fromBot(), "пустое имя — не сообщение моста");
+    }
+
+    @Test
+    void photoWithoutCaptionShowsInContext() throws Exception {
+        start(settings(100, 0, 1), llm(p -> "ответ"), "образец");
+
+        telegram.sayPhoto(8, "Маша");
+        Thread.sleep(300);
+        telegram.say(7, "Петя", "ахах смотри");
+
+        assertNotNull(telegram.awaitSent(1, 3000));
+        assertTrue(prompts.getFirst().contains("Маша: [фото]"), prompts.getFirst());
+    }
+
+    @Test
+    void failingModelIsGivenRest() throws Exception {
+        start(settings(100, 0, 1), (system, prompt, max) -> {
+            prompts.add(prompt);
+            throw new java.io.IOException("ключ не принят");
+        }, "образец");
+
+        telegram.say(7, "Петя", "раз");
+        Thread.sleep(800);
+        telegram.say(7, "Петя", "два");
+        Thread.sleep(800);
+
+        assertEquals(1, prompts.size(), "после сбоя ИИ надо подождать, а не спрашивать снова");
+        assertTrue(telegram.sent.isEmpty());
+    }
+
+    @Test
+    void examplesMixFreshAndOldWithoutRepeats() throws Exception {
+        start(settings(0, 0, 1), llm(p -> ""));
+
+        var history = new java.util.ArrayList<String>();
+        for (var i = 0; i < 300; i++) {
+            history.add("старое " + i);
+            history.add("ок");
+        }
+        history.add("самое свежее");
+
+        var picked = parody.examples(history);
+
+        assertEquals(80, picked.size());
+        assertEquals(picked.size(), new java.util.HashSet<>(picked).size(), "повторы остались");
+        assertTrue(picked.contains("самое свежее"));
+        assertTrue(picked.contains("старое 299"), "свежие должны попадать всегда");
+        assertTrue(picked.stream().anyMatch(x -> x.matches("старое ([0-9]|[1-9][0-9]|1[0-9][0-9])")),
+                "должны попадать и давние");
+    }
+
+    @Test
     void cleanStripsWhatModelAdds() {
         assertEquals("йо", Parody.clean("пародия: йо", "Вася"));
         assertEquals("йо", Parody.clean("Пародия: йо", "Вася"));

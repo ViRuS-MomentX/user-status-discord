@@ -68,6 +68,16 @@ final class FakeTelegram implements AutoCloseable {
         return id;
     }
 
+    /** Фото без подписи. */
+    void sayPhoto(long authorId, String author) {
+        updates.add(DataObject.empty().put("update_id", updateId.getAndIncrement())
+                .put("message", DataObject.empty()
+                        .put("message_id", messageId.incrementAndGet())
+                        .put("chat", DataObject.empty().put("id", CHAT))
+                        .put("from", DataObject.empty().put("id", authorId).put("first_name", author))
+                        .put("photo", DataArray.empty().add(DataObject.empty().put("file_id", "F")))));
+    }
+
     /** Ответ на сообщение с этим номером — как его видит Telegram. */
     static DataObject original(long id, long authorId, String author, boolean bot, String text) {
         return DataObject.empty()

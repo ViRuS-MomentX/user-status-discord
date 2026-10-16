@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Random;
 import java.util.SequencedSet;
 import java.util.concurrent.ExecutorService;
@@ -55,6 +56,13 @@ public final class Parody {
 
     private static final long RETRY_PAUSE_MS = 15_000;
 
+    /** Пауза после сбоя ИИ: минута, дальше вдвое длиннее с каждым сбоем подряд. */
+    private static final long LLM_PAUSE_MS = 60_000;
+    private static final long LLM_PAUSE_LIMIT_MS = 30 * 60_000;
+
+    /** Как мост подписывает перенесённое из Discord: «Имя · Discord», дальше текст. */
+    private static final String BRIDGED = " · Discord";
+
     private final ParodySettings settings;
     private final Telegram telegram;
     private final Llm llm;
@@ -78,6 +86,10 @@ public final class Parody {
     });
 
     private volatile long lastSent;
+
+    /** До какого времени ИИ не трогаем после сбоя, и сколько сбоев было подряд. */
+    private volatile long llmBlockedUntil;
+    private int llmFailures;
     private volatile boolean running = true;
     private Thread worker;
 
@@ -181,12 +193,18 @@ public final class Parody {
         }
     }
 
-    private void handle(TelegramMessage message) {
+    private void handle(TelegramMessage incoming) {
+        var message = unbridge(incoming);
+        var group = message.chat().equals(chatId);
+
         if (message.text().isBlank()) {
+            // Фото или голосовое без подписи: отвечать не на что, но разговор без
+            // них рвётся — «смотри» повисло бы без того, на что смотреть
+            if (group && !message.fileName().isBlank()) {
+                remember(message.author() + ": [" + attachment(message.fileName()) + "]");
+            }
             return;
         }
-
-        var group = message.chat().equals(chatId);
 
         // Команды принимаются и в личке: выключить пародию тихо, не при всех
         if (message.text().startsWith("/") && command(message)) {
@@ -238,7 +256,8 @@ public final class Parody {
             return;
         }
 
-        if (settings.isQuiet(LocalTime.now(clock).getHour()) || overDaily()) {
+        if (settings.isQuiet(LocalTime.now(clock).getHour()) || overDaily()
+                || now < llmBlockedUntil) {
             return;
         }
 
@@ -261,6 +280,46 @@ public final class Parody {
                 busy.set(false);
             }
         });
+    }
+
+    /**
+     * Сообщение, которое мост перенёс из Discord, — от лица того, кто его написал.
+     *
+     * <p>В Telegram его прислал бот моста, и без разбора ИИ видел бы безымянного
+     * бота, а пародия молчала бы в ответ живым людям с той стороны.
+     */
+    static TelegramMessage unbridge(TelegramMessage message) {
+        if (!message.fromBot()) {
+            return message;
+        }
+
+        var text = message.text();
+        var newline = text.indexOf('\n');
+        var head = newline < 0 ? text : text.substring(0, newline);
+
+        if (!head.endsWith(BRIDGED) || head.length() == BRIDGED.length()) {
+            return message;
+        }
+
+        var author = head.substring(0, head.length() - BRIDGED.length()).trim() + " (из Discord)";
+        var body = newline < 0 ? "" : text.substring(newline + 1).trim();
+
+        return new TelegramMessage(message.updateId(), message.messageId(), message.replyToId(),
+                message.chat(), message.authorId(), author, body, message.fileId(),
+                message.fileName(), false, message.replyToAuthor(), message.replyToText());
+    }
+
+    private static String attachment(String fileName) {
+        if (fileName.startsWith("photo")) {
+            return "фото";
+        }
+        if (fileName.startsWith("voice")) {
+            return "голосовое";
+        }
+        if (fileName.startsWith("video")) {
+            return "видео";
+        }
+        return "файл " + fileName;
     }
 
     private boolean overDaily() {
@@ -426,8 +485,15 @@ public final class Parody {
 
         try {
             text = clean(llm.complete(system(), prompt(context, replyTo != 0), 300));
+            llmFailures = 0;
         } catch (Exception e) {
-            log.warn("ИИ не ответил: {}", e.getMessage());
+            // Неверный ключ или кончился лимит сам не пройдёт, а долбить API на
+            // каждое сообщение группы — только засорять лог
+            llmFailures++;
+            var pause = Math.min(LLM_PAUSE_MS << Math.min(llmFailures - 1, 10), LLM_PAUSE_LIMIT_MS);
+            llmBlockedUntil = clock.millis() + pause;
+            log.warn("ИИ не ответил: {}. Следующая попытка не раньше чем через {} мин.",
+                    e.getMessage(), pause / 60_000);
             return;
         }
 
@@ -496,12 +562,9 @@ public final class Parody {
     }
 
     private String prompt(String context, boolean direct) {
-        var all = new ArrayList<>(samples.all());
-        Collections.shuffle(all, random);
-
         var examples = new StringBuilder();
 
-        for (var sample : all.subList(0, Math.min(EXAMPLES, all.size()))) {
+        for (var sample : examples(samples.all())) {
             examples.append("- ").append(sample.replace('\n', ' ')).append('\n');
         }
 
@@ -521,6 +584,27 @@ public final class Parody {
                     ? "Последнее сообщение — ответ на его реплику. Ответь так, как ответил бы "
                     : "Встрянь в разговор одной репликой — так, как написал бы ")
                 + settings.name() + ".";
+    }
+
+    /**
+     * Какие образцы показать: половина — самые свежие, чтобы ИИ знал его
+     * нынешние словечки, половина — вразброс по всей истории. Повторы
+     * («ок», «ахах») убираются: десять одинаковых строк манеры не прибавят.
+     */
+    List<String> examples(List<String> all) {
+        var distinct = new ArrayList<>(new LinkedHashSet<>(all.reversed()));
+
+        if (distinct.size() <= EXAMPLES) {
+            Collections.shuffle(distinct, random);
+            return distinct;
+        }
+
+        var chosen = new ArrayList<>(distinct.subList(0, EXAMPLES / 2));
+        var older = new ArrayList<>(distinct.subList(EXAMPLES / 2, distinct.size()));
+        Collections.shuffle(older, random);
+        chosen.addAll(older.subList(0, EXAMPLES - chosen.size()));
+        Collections.shuffle(chosen, random);
+        return chosen;
     }
 
     /** Снимает то, что модель иногда добавляет сама: имя, пометку, кавычки. */

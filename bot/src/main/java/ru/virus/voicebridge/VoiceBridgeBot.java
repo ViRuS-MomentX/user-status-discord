@@ -4,11 +4,13 @@ import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import club.minnced.discord.jdave.interop.JDaveSessionFactory;
 import net.dv8tion.jda.api.audio.AudioModuleConfig;
+import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.exceptions.ErrorResponseException;
 import net.dv8tion.jda.api.exceptions.InvalidTokenException;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import net.dv8tion.jda.api.utils.MemberCachePolicy;
 import net.dv8tion.jda.api.utils.cache.CacheFlag;
+import net.dv8tion.jda.api.utils.messages.MessageRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,6 +19,7 @@ import java.net.BindException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 
 /**
@@ -44,6 +47,12 @@ public final class VoiceBridgeBot {
             System.exit(2);
             return;
         }
+
+        // Никого не пингуем без явного разрешения. Упоминания по-прежнему видны как
+        // имена и роли, просто без уведомлений. Иначе ролик с названием «@everyone»,
+        // брошенный в канал фонотеки, заставил бы бота дёрнуть весь сервер, а
+        // «Ранг повышен: @роль» — всех, у кого эта роль
+        MessageRequest.setDefaultMentions(EnumSet.noneOf(Message.MentionType.class));
 
         VoiceTracker tracker = new VoiceTracker(config.getGuildId(), config.getUserId());
         RankLadder ladder = config.getLadder();

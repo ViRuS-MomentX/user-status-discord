@@ -179,9 +179,20 @@ public final class RankStore {
 
             log.info("Загружены балансы: {} участников.", entries.size());
         } catch (Exception e) {
-            // Лучше начать с пустого файла, чем не запуститься совсем; старый файл
-            // при этом не трогаем, чтобы данные можно было вытащить руками.
-            log.error("Не удалось прочитать {}: {}. Начинаю с пустых балансов.", file, e.getMessage());
+            // Лучше начать с пустого файла, чем не запуститься совсем. Но старый
+            // откладываем в сторону: первое же начисление минуты иначе записало бы
+            // пустые балансы поверх него, и вытаскивать руками было бы уже нечего.
+            entries.clear();
+            var aside = file.resolveSibling(file.getFileName() + ".broken");
+
+            try {
+                Files.move(file, aside, StandardCopyOption.REPLACE_EXISTING);
+                log.error("Не удалось прочитать {}: {}. Файл отложен как {}, начинаю с пустых "
+                        + "балансов.", file, e.getMessage(), aside.getFileName());
+            } catch (IOException moveFailed) {
+                log.error("Не удалось прочитать {}: {}. Начинаю с пустых балансов.",
+                        file, e.getMessage());
+            }
         }
     }
 }

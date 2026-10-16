@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.concurrent.Executors;
 
 /**
@@ -25,10 +26,15 @@ public final class HttpBridge {
     private final String authToken;
     private final HttpServer server;
 
+    /** Слушаем только свою машину — тогда и звать нас должны по её имени. */
+    private final boolean loopback;
+
     public HttpBridge(VoiceTracker tracker, String host, int port, String authToken) throws IOException {
         this.tracker = tracker;
         this.authToken = authToken;
-        this.server = HttpServer.create(new InetSocketAddress(host, port), 0);
+        var address = new InetSocketAddress(host, port);
+        this.loopback = address.getAddress() != null && address.getAddress().isLoopbackAddress();
+        this.server = HttpServer.create(address, 0);
 
         server.createContext("/voice", this::handleVoice);
         // Одного потока хватает с запасом: клиент один и ходит раз в несколько секунд.
@@ -56,7 +62,16 @@ public final class HttpBridge {
                 return;
             }
 
-            if (!authToken.isEmpty() && !authToken.equals(exchange.getRequestHeaders().getFirst("X-Auth-Token"))) {
+            // Защита от подмены адреса (DNS rebinding): чужой сайт в браузере может
+            // назначить своему имени адрес 127.0.0.1 и читать эндпоинт как свой —
+            // а с ним и то, где ты сидишь. Но в заголовке Host останется его имя.
+            // CustomRP и браузер на этой машине зовут нас по 127.0.0.1 или localhost
+            if (loopback && !isLocalHost(exchange.getRequestHeaders().getFirst("Host"))) {
+                respond(exchange, 403, "{\"error\":\"forbidden host\"}");
+                return;
+            }
+
+            if (!authToken.isEmpty() && !sameToken(exchange.getRequestHeaders().getFirst("X-Auth-Token"))) {
                 respond(exchange, 401, "{\"error\":\"unauthorized\"}");
                 return;
             }
@@ -65,6 +80,35 @@ public final class HttpBridge {
         } finally {
             exchange.close();
         }
+    }
+
+    /**
+     * Совпадает ли токен — за одно и то же время, чем бы ни отличался.
+     *
+     * <p>Заголовки сервер читает побайтно, как ISO-8859-1. Обратно в байты —
+     * так же, и тогда токен кириллицей, присланный в UTF-8, тоже совпадёт.
+     */
+    private boolean sameToken(String given) {
+        return given != null && MessageDigest.isEqual(
+                authToken.getBytes(StandardCharsets.UTF_8), given.getBytes(StandardCharsets.ISO_8859_1));
+    }
+
+    /** Имя из заголовка Host — своя ли это машина. Без заголовка — старый клиент, пускаем. */
+    static boolean isLocalHost(String header) {
+        if (header == null || header.isBlank()) {
+            return true;
+        }
+
+        var host = header.trim().toLowerCase(java.util.Locale.ROOT);
+
+        if (host.startsWith("[")) {
+            var end = host.indexOf(']');
+            host = end > 0 ? host.substring(1, end) : host;
+        } else if (host.indexOf(':') == host.lastIndexOf(':') && host.contains(":")) {
+            host = host.substring(0, host.indexOf(':'));
+        }
+
+        return host.equals("localhost") || host.equals("::1") || host.matches("127(\\.\\d{1,3}){3}");
     }
 
     private void respond(HttpExchange exchange, int status, String body) throws IOException {

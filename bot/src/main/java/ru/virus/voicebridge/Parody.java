@@ -706,7 +706,20 @@ public final class Parody {
         return chosen;
     }
 
-    /** Снимает то, что модель иногда добавляет сама: имя, пометку, кавычки. */
+    /** Строка, которая начинается чужой репликой: «Петя: …», «Коля (из Discord): …». */
+    private static final java.util.regex.Pattern SPEAKER = java.util.regex.Pattern.compile(
+            "^\\s*\\p{L}[\\p{L}\\p{N} ._-]{0,30}(\\s*\\([^)]{1,20}\\))?:\\s");
+
+    /** Длиннее — уже не реплика в чате, а простыня. */
+    static final int LONGEST_REPLY = 400;
+
+    /**
+     * Снимает то, что модель иногда добавляет сама: имя, пометку, кавычки.
+     *
+     * <p>И главное — обрезает, если модель пустилась сочинять разговор дальше,
+     * за других: «Петя: …» на следующей строке — это уже слова, приписанные
+     * живому человеку, и в чат они уйти не должны.
+     */
     static String clean(String text, String name) {
         var result = text.trim();
 
@@ -722,12 +735,35 @@ public final class Parody {
             result = result.substring(name.length() + 1).trim();
         }
 
+        var lines = result.split("\\R");
+        var kept = new StringBuilder();
+
+        for (var i = 0; i < lines.length; i++) {
+            if (i > 0 && SPEAKER.matcher(lines[i]).find()) {
+                break;
+            }
+
+            if (!kept.isEmpty()) {
+                kept.append('\n');
+            }
+
+            kept.append(lines[i]);
+        }
+
+        result = kept.toString().trim();
+
         if (result.length() >= 2 && (result.startsWith("\"") && result.endsWith("\"")
                 || result.startsWith("«") && result.endsWith("»"))) {
             result = result.substring(1, result.length() - 1).trim();
         }
 
-        return result;
+        if (result.length() > LONGEST_REPLY) {
+            // Режем по последнему пробелу, чтобы не рвать слово пополам
+            var space = result.lastIndexOf(' ', LONGEST_REPLY - 1);
+            result = result.substring(0, space > LONGEST_REPLY / 2 ? space : LONGEST_REPLY - 1).trim() + "…";
+        }
+
+        return result.equals("-") || result.equals("—") ? "" : result;
     }
 
     private String clean(String text) {

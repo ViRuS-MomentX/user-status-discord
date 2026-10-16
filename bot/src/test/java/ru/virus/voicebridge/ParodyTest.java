@@ -486,4 +486,22 @@ class ParodyTest {
         assertEquals("", Parody.clean("  —  ", "Вася"));
         assertEquals("ну «да» и что", Parody.clean("ну «да» и что", "Вася"));
     }
+
+    @Test
+    void cleanCutsMadeUpLinesOfOthers() {
+        assertEquals("го катку", Parody.clean("го катку\nПетя: давай\nВася: ок", "Вася"));
+        assertEquals("го", Parody.clean("Вася: го\nКоля (из Discord): я за", "Вася"));
+        assertEquals("раз\nдва", Parody.clean("раз\nдва", "Вася"), "свои две строки остаются");
+        assertEquals("ну короче вот: всё", Parody.clean("ну короче вот: всё", "Вася"),
+                "двоеточие в первой строке — не чужая реплика");
+    }
+
+    @Test
+    void cleanLimitsLength() {
+        var wall = "слово ".repeat(200);
+        var cut = Parody.clean(wall, "Вася");
+
+        assertTrue(cut.length() <= Parody.LONGEST_REPLY + 1, String.valueOf(cut.length()));
+        assertTrue(cut.endsWith("слово…"), cut.substring(cut.length() - 10));
+    }
 }

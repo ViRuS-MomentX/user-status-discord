@@ -44,6 +44,12 @@ public final class Parody {
     /** Сколько своих сообщений помнить, чтобы узнавать ответы на них. */
     private static final int OWN_LIMIT = 200;
 
+    /** Сколько своих последних реплик показывать ИИ, чтобы он не повторялся. */
+    private static final int SAID_LIMIT = 10;
+
+    /** Сколько знаков чужой реплики приводить, когда на неё отвечают. */
+    private static final int QUOTE_LIMIT = 120;
+
     private static final long RETRY_PAUSE_MS = 15_000;
 
     private final ParodySettings settings;
@@ -54,6 +60,7 @@ public final class Parody {
 
     private final Deque<String> recent = new ArrayDeque<>();
     private final SequencedSet<Long> own = new LinkedHashSet<>();
+    private final Deque<String> said = new ArrayDeque<>();
 
     /** Одна реплика за раз: пока ИИ думает, новые поводы пропускаются. */
     private final AtomicBoolean busy = new AtomicBoolean();
@@ -69,6 +76,9 @@ public final class Parody {
 
     /** Группа числом: в обновлениях она приходит только так. */
     private String chatId;
+
+    /** «@имя» бота строчными: по нему узнаём, что к нему обратились. */
+    private String mention = "";
 
     public Parody(ParodySettings settings, Telegram telegram, Llm llm, ParodySamples samples) {
         this.settings = settings;
@@ -100,6 +110,8 @@ public final class Parody {
                 chatId = settings.chat().startsWith("@")
                         ? telegram.chatId(settings.chat())
                         : settings.chat();
+
+                mention = "@" + telegram.whoAmI().toLowerCase(java.util.Locale.ROOT);
 
                 if (!telegram.readsAllGroupMessages()) {
                     log.warn("Пародийный бот видит в группе только обращённое к нему. Чтобы он "
@@ -162,7 +174,7 @@ public final class Parody {
             return;
         }
 
-        remember(message.author() + ": " + message.text());
+        remember(line(message));
 
         if (message.authorId() == settings.target()) {
             samples.add(message.text());
@@ -175,11 +187,15 @@ public final class Parody {
             return;
         }
 
-        boolean direct;
+        boolean replied;
 
         synchronized (own) {
-            direct = message.replyToId() != 0 && own.contains(message.replyToId());
+            replied = message.replyToId() != 0 && own.contains(message.replyToId());
         }
+
+        // Позвали по имени бота — тоже обращение
+        var direct = replied || mention.length() > 1
+                && message.text().toLowerCase(java.util.Locale.ROOT).contains(mention);
 
         var now = System.currentTimeMillis();
         var gap = direct ? REPLY_GAP_MS : settings.cooldownMinutes() * 60_000L;
@@ -213,6 +229,29 @@ public final class Parody {
         });
     }
 
+    /** Строка переписки для ИИ: кто, кому отвечает и что сказал. */
+    private String line(TelegramMessage message) {
+        var line = new StringBuilder(message.author());
+
+        if (!message.replyToAuthor().isBlank()) {
+            var quote = message.replyToText().replace('\n', ' ');
+
+            if (quote.length() > QUOTE_LIMIT) {
+                quote = quote.substring(0, QUOTE_LIMIT) + "…";
+            }
+
+            line.append(" (в ответ ").append(message.replyToAuthor());
+
+            if (!quote.isBlank()) {
+                line.append(" на «").append(quote).append("»");
+            }
+
+            line.append(")");
+        }
+
+        return line.append(": ").append(message.text()).toString();
+    }
+
     private void remember(String line) {
         synchronized (recent) {
             recent.addLast(line);
@@ -230,6 +269,13 @@ public final class Parody {
     }
 
     private void speak(String context, long replyTo) {
+        try {
+            // Пока ИИ думает, в группе видно «печатает…» — как у живого человека
+            telegram.typing(chatId);
+        } catch (Exception e) {
+            log.debug("«Печатает» не показалось: {}", e.getMessage());
+        }
+
         String text;
 
         try {
@@ -239,13 +285,30 @@ public final class Parody {
             return;
         }
 
-        if (text.isBlank()) {
+        if (text.isBlank() || repeats(text)) {
             return;
         }
 
+        post(text, replyTo);
+    }
+
+    /**
+     * Отправляет реплику с пометкой и запоминает её как свою.
+     *
+     * @param replyTo на что отвечаем; 0 — просто в группу
+     */
+    void post(String text, long replyTo) {
         try {
             var id = telegram.sendText(chatId, MARK + text, replyTo);
             remember(settings.name() + ": " + text);
+
+            synchronized (said) {
+                said.addLast(text);
+
+                while (said.size() > SAID_LIMIT) {
+                    said.removeFirst();
+                }
+            }
 
             synchronized (own) {
                 own.add(id);
@@ -257,6 +320,19 @@ public final class Parody {
         } catch (Exception e) {
             log.warn("Реплика пародийного бота не ушла: {}", e.getMessage());
         }
+    }
+
+    /** Сказал ли бот это недавно слово в слово. */
+    private boolean repeats(String text) {
+        var normalized = normalize(text);
+
+        synchronized (said) {
+            return said.stream().anyMatch(old -> normalize(old).equals(normalized));
+        }
+    }
+
+    private static String normalize(String text) {
+        return text.toLowerCase(java.util.Locale.ROOT).replaceAll("[\\p{P}\\p{S}\\s]+", " ").trim();
     }
 
     private String system() {
@@ -282,7 +358,17 @@ public final class Parody {
             examples.append("- ").append(sample.replace('\n', ' ')).append('\n');
         }
 
+        var recentOwn = new StringBuilder();
+
+        synchronized (said) {
+            for (var line : said) {
+                recentOwn.append("- ").append(line.replace('\n', ' ')).append('\n');
+            }
+        }
+
         return "Образцы его настоящих сообщений:\n" + examples
+                + (recentOwn.isEmpty() ? ""
+                    : "\nТвои недавние реплики-пародии — не повторяй их и не пересказывай:\n" + recentOwn)
                 + "\nПоследние сообщения в чате (снизу — самое новое):\n" + context + "\n\n"
                 + (direct
                     ? "Последнее сообщение — ответ на его реплику. Ответь так, как ответил бы "

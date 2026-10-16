@@ -127,6 +127,68 @@ class ParodyTest {
     }
 
     @Test
+    void answersReplyToItselfDespiteZeroChance() throws Exception {
+        start(settings(0, 60, 1), llm(p -> p.contains("ответ на его реплику") ? "сам такой" : "?"),
+                "образец");
+
+        // Шанс нулевой: сам он не встрянет, но на ответ себе ответит
+        telegram.say(7, "Петя", "раз");
+        assertNull(telegram.awaitSent(1, 800));
+
+        parody.post("скажу", 0);
+        assertNotNull(telegram.awaitSent(1, 3000));
+        var mine = telegram.sentIds.getFirst();
+
+        var question = telegram.say(FakeTelegram.CHAT, 7, "Петя", false, "чё сказал?",
+                FakeTelegram.original(mine, 777, "Вася", true, "пародия: скажу"));
+
+        var reply = telegram.awaitSent(2, 3000);
+        assertNotNull(reply, "на ответ себе бот должен ответить");
+        assertEquals(Parody.MARK + "сам такой", reply.get("text"));
+        // Отвечает именно на вопрос Пети, цепочкой
+        assertEquals(String.valueOf(question), reply.get("reply_to_message_id"));
+    }
+
+    @Test
+    void answersMentionAndShowsTyping() throws Exception {
+        start(settings(0, 60, 1), llm(p -> "тут я"), "образец");
+
+        telegram.say(7, "Петя", "@Parody_Bot ты где");
+
+        assertNotNull(telegram.awaitSent(1, 3000), "на упоминание бот должен ответить");
+        assertEquals("typing", telegram.actions.getFirst().get("action"));
+    }
+
+    @Test
+    void promptShowsWhatWasAnswered() throws Exception {
+        start(settings(100, 0, 1), llm(p -> "ок"), "образец");
+
+        // Вопрос задаёт сам участник: на его реплики бот не встревает, и повод
+        // ответить даст только Петя
+        var question = telegram.say(TARGET, "Вася", "кто идёт в кино?");
+        telegram.say(FakeTelegram.CHAT, 7, "Петя", false, "я",
+                FakeTelegram.original(question, TARGET, "Вася", false, "кто идёт в кино?"));
+
+        assertNotNull(telegram.awaitSent(1, 3000));
+        var prompt = prompts.getFirst();
+        assertTrue(prompt.contains("Петя (в ответ Вася на «кто идёт в кино?»): я"), prompt);
+    }
+
+    @Test
+    void doesNotRepeatItself() throws Exception {
+        start(settings(100, 0, 1), llm(p -> "Го катку!!"), "образец");
+
+        telegram.say(7, "Петя", "раз");
+        assertNotNull(telegram.awaitSent(1, 3000));
+
+        // Та же реплика с другой пунктуацией — повтор
+        Thread.sleep(200);
+        telegram.say(7, "Петя", "два");
+        assertNull(telegram.awaitSent(2, 1500), "бот повторился");
+        assertTrue(prompts.getLast().contains("не повторяй"), prompts.getLast());
+    }
+
+    @Test
     void cleanStripsWhatModelAdds() {
         assertEquals("йо", Parody.clean("пародия: йо", "Вася"));
         assertEquals("йо", Parody.clean("Пародия: йо", "Вася"));

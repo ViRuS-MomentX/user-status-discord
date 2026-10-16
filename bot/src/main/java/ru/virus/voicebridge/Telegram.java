@@ -143,6 +143,14 @@ public final class Telegram {
     }
 
     /**
+     * Показывает в группе «печатает…» — само гаснет через несколько секунд
+     * или как только придёт сообщение.
+     */
+    public void typing(String chat) throws IOException {
+        call("sendChatAction", Map.of("chat_id", chat, "action", "typing"));
+    }
+
+    /**
      * Шлёт текст как есть, без оформления и разметки.
      *
      * @param replyTo номер сообщения, на которое отвечаем; 0 — обычная реплика

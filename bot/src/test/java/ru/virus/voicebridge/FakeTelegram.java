@@ -28,6 +28,7 @@ final class FakeTelegram implements AutoCloseable {
 
     final List<Map<String, String>> sent = new CopyOnWriteArrayList<>();
     final List<Map<String, String>> actions = new CopyOnWriteArrayList<>();
+    final List<Long> sentIds = new CopyOnWriteArrayList<>();
 
     private final HttpServer server;
     private final BlockingQueue<DataObject> updates = new LinkedBlockingQueue<>();
@@ -67,6 +68,15 @@ final class FakeTelegram implements AutoCloseable {
         return id;
     }
 
+    /** Ответ на сообщение с этим номером — как его видит Telegram. */
+    static DataObject original(long id, long authorId, String author, boolean bot, String text) {
+        return DataObject.empty()
+                .put("message_id", id)
+                .put("from", DataObject.empty().put("id", authorId).put("first_name", author)
+                        .put("is_bot", bot))
+                .put("text", text);
+    }
+
     /** Ждёт, пока бот что-нибудь отправит. */
     Map<String, String> awaitSent(int count, long millis) throws InterruptedException {
         var deadline = System.currentTimeMillis() + millis;
@@ -93,8 +103,10 @@ final class FakeTelegram implements AutoCloseable {
             case "getChat" -> answer.put("result", DataObject.empty().put("id", CHAT));
             case "getUpdates" -> answer.put("result", poll(form));
             case "sendMessage" -> {
+                var id = messageId.incrementAndGet();
+                sentIds.add(id);
                 sent.add(form);
-                answer.put("result", DataObject.empty().put("message_id", messageId.incrementAndGet()));
+                answer.put("result", DataObject.empty().put("message_id", id));
             }
             case "sendChatAction" -> {
                 actions.add(form);

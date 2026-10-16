@@ -14,10 +14,13 @@ import net.dv8tion.jda.api.utils.data.DataObject;
  * @param text написанное; пустая строка, если прислали один файл
  * @param fileId чем забрать вложение; пустая строка, если его нет
  * @param fromBot прислал ли это бот — такое пересылать нельзя, иначе мост зациклится
+ * @param replyToAuthor кому отвечают; пустая строка — это не ответ
+ * @param replyToText что было в сообщении, на которое отвечают
  */
 public record TelegramMessage(long updateId, long messageId, long replyToId, String chat,
                               long authorId, String author, String text, String fileId,
-                              String fileName, boolean fromBot) {
+                              String fileName, boolean fromBot,
+                              String replyToAuthor, String replyToText) {
 
     /**
      * Разбирает одно обновление.
@@ -36,9 +39,16 @@ public record TelegramMessage(long updateId, long messageId, long replyToId, Str
         var messageId = message.getLong("message_id", 0);
 
         // На что отвечают. Свои же пересланные сообщения бот узнаёт по этому номеру
-        var replyToId = message.hasKey("reply_to_message")
-                ? message.getObject("reply_to_message").getLong("message_id", 0)
-                : 0;
+        var replyToId = 0L;
+        var replyToAuthor = "";
+        var replyToText = "";
+
+        if (message.hasKey("reply_to_message")) {
+            var original = message.getObject("reply_to_message");
+            replyToId = original.getLong("message_id", 0);
+            replyToText = original.getString("text", original.getString("caption", ""));
+            replyToAuthor = original.hasKey("from") ? name(original.getObject("from")) : "Кто-то";
+        }
 
         var author = "Кто-то";
         var authorId = 0L;
@@ -47,18 +57,7 @@ public record TelegramMessage(long updateId, long messageId, long replyToId, Str
         if (message.hasKey("from")) {
             var from = message.getObject("from");
             authorId = from.getLong("id", 0);
-            var name = from.getString("first_name", "");
-            var last = from.getString("last_name", "");
-
-            if (!last.isBlank()) {
-                name = name + " " + last;
-            }
-
-            if (name.isBlank()) {
-                name = from.getString("username", "Кто-то");
-            }
-
-            author = name;
+            author = name(from);
             fromBot = from.getBoolean("is_bot", false);
         }
 
@@ -97,6 +96,18 @@ public record TelegramMessage(long updateId, long messageId, long replyToId, Str
         }
 
         return new TelegramMessage(updateId, messageId, replyToId, String.valueOf(chat),
-                authorId, author, text, fileId, fileName, fromBot);
+                authorId, author, text, fileId, fileName, fromBot, replyToAuthor, replyToText);
+    }
+
+    /** Как показывать человека: имя с фамилией, а без них — юзернейм. */
+    private static String name(DataObject from) {
+        var name = from.getString("first_name", "");
+        var last = from.getString("last_name", "");
+
+        if (!last.isBlank()) {
+            name = name + " " + last;
+        }
+
+        return name.isBlank() ? from.getString("username", "Кто-то") : name;
     }
 }

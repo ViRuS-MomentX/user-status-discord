@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -204,7 +205,20 @@ public final class MusicLibrary {
                 save();
             }
         } catch (Exception e) {
-            log.error("Не удалось прочитать опись {}: {}", index.toAbsolutePath(), e.getMessage());
+            // Начинаем с пустой описи, но испорченную откладываем: первая же
+            // скачанная песня иначе записала бы опись из одной себя поверх неё,
+            // и про остальные файлы в папке бот забыл бы насовсем
+            tracks.clear();
+            var aside = index.resolveSibling(INDEX + ".broken");
+
+            try {
+                Files.move(index, aside, StandardCopyOption.REPLACE_EXISTING);
+            } catch (IOException moveFailed) {
+                aside = index;
+            }
+
+            log.error("Не удалось прочитать опись {}: {}. Она отложена как {}.",
+                    index.toAbsolutePath(), e.getMessage(), aside.getFileName());
         }
     }
 
@@ -214,7 +228,11 @@ public final class MusicLibrary {
 
         try {
             Files.createDirectories(folder);
-            Files.writeString(folder.resolve(INDEX), array.toPrettyString(), StandardCharsets.UTF_8);
+            // Через временный файл: выключение света посреди записи иначе оставило бы
+            // обрезанную опись
+            var temporary = folder.resolve(INDEX + ".tmp");
+            Files.writeString(temporary, array.toPrettyString(), StandardCharsets.UTF_8);
+            Files.move(temporary, folder.resolve(INDEX), StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
             log.error("Не удалось записать опись: {}", e.getMessage());
         }

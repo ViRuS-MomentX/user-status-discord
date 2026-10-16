@@ -618,6 +618,8 @@ public final class Parody {
         try {
             var id = telegram.sendText(chatId, MARK + text, replyTo);
             state.countSent(LocalDate.now(clock));
+            // Хозяин должен видеть, что бот говорит от лица участника
+            log.info("Пародия сказала: {}", text);
             remember(settings.name() + ": " + text);
 
             synchronized (said) {

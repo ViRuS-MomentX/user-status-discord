@@ -57,6 +57,10 @@ public final class Telegram {
     private final String proxy;
     private final String token;
 
+    /** Умеет ли пересыльщик аватарки по подписи; {@code null} — ещё не проверяли. */
+    private volatile Boolean signedAvatars;
+    private volatile boolean warnedAboutAvatars;
+
     /** Куда стучаться: официальный сервер или свой. */
     private final String api;
 
@@ -378,7 +382,77 @@ public final class Telegram {
         // Последний размер — самый крупный; Discord всё равно ужмёт его под кружок
         var fileId = sizes.getObject(sizes.length() - 1).getString("file_id", "");
 
-        return fileId.isEmpty() ? "" : fileUrl(fileId);
+        if (fileId.isEmpty()) {
+            return "";
+        }
+
+        var path = filePath(fileId);
+        return isOnDisk(path) ? path : avatarUrl(path);
+    }
+
+    /**
+     * Ссылка на аватарку для Discord.
+     *
+     * <p>Обычная ссылка на файл Telegram несёт в себе токен бота, а забирает её
+     * Discord — токен уходил бы чужим серверам. Пересыльщик из папки cloudflare
+     * умеет отдавать аватарки по подписи пути вместо токена. Умеет ли именно
+     * этот — проверяем один раз; старый пересыльщик или свой сервер Bot API
+     * так не умеют, и тогда остаётся обычная ссылка.
+     */
+    String avatarUrl(String path) throws IOException {
+        var plain = api + "/file/bot" + token + "/" + path;
+
+        if (api.equals(OFFICIAL) || !path.startsWith("profile_photos/")) {
+            if (!warnedAboutAvatars) {
+                warnedAboutAvatars = true;
+                log.info("Ссылки на аватарки уходят в Discord с токеном бота внутри: так их "
+                        + "отдаёт Telegram. Чтобы токен не покидал бота — пересыльщик из папки "
+                        + "cloudflare (bridge.telegram.api) или bridge.avatars=false.");
+            }
+            return plain;
+        }
+
+        var signed = api + "/avatar/" + sign(token, path) + "/" + path;
+        var known = signedAvatars;
+
+        if (known == null) {
+            known = probe(signed);
+            signedAvatars = known;
+
+            if (!known) {
+                log.warn("Пересыльщик не умеет отдавать аватарки без токена — обнови в "
+                        + "Cloudflare worker.js из папки cloudflare. Пока ссылки на аватарки "
+                        + "несут токен бота.");
+            }
+        }
+
+        return known ? signed : plain;
+    }
+
+    /** Отдаёт ли адрес картинку. Сбой связи — исключение: решать по нему рано. */
+    private boolean probe(String url) throws IOException {
+        var request = HttpRequest.newBuilder(URI.create(url))
+                .timeout(Duration.ofSeconds(15))
+                .GET()
+                .build();
+
+        try {
+            return http.send(request, HttpResponse.BodyHandlers.discarding()).statusCode() == 200;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("проверка прервана");
+        }
+    }
+
+    /** HMAC-SHA256 пути ключом-токеном, шестнадцатеричной строкой — как в worker.js. */
+    static String sign(String token, String path) {
+        try {
+            var mac = javax.crypto.Mac.getInstance("HmacSHA256");
+            mac.init(new javax.crypto.spec.SecretKeySpec(token.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            return java.util.HexFormat.of().formatHex(mac.doFinal(path.getBytes(StandardCharsets.UTF_8)));
+        } catch (java.security.GeneralSecurityException e) {
+            throw new IllegalStateException("HmacSHA256 недоступен", e);
+        }
     }
 
     /**

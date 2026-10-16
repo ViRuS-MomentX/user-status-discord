@@ -24,6 +24,12 @@ export default {
     // смотрит сюда человек, а не бот
     if (url.pathname === '/check') return check(env);
 
+    // Аватарки для Discord. Обычная ссылка на файл Telegram несёт в себе токен
+    // бота, а её получает Discord — токен уходил бы чужим серверам. Здесь вместо
+    // токена подпись пути: её считает бот тем же токеном, и чужие файлы
+    // перебором путей не достать
+    if (url.pathname.startsWith('/avatar/')) return avatar(url, env);
+
     // Пересылаем только то, что относится к Bot API: вызовы методов и выдачу файлов.
     // Всё прочее — не наше дело, и открывать через себя произвольные адреса незачем
     const isApi = url.pathname.startsWith('/bot');
@@ -53,6 +59,44 @@ export default {
     return fetch(new Request(TELEGRAM + url.pathname + url.search, request));
   }
 };
+
+async function avatar(url, env) {
+  const rest = url.pathname.slice('/avatar/'.length);
+  const slash = rest.indexOf('/');
+
+  if (slash <= 0) return say('Нет подписи.', 404);
+
+  const signature = rest.slice(0, slash).toLowerCase();
+  const path = rest.slice(slash + 1);
+
+  // Только аватарки: подпись не должна открывать всё, что присылали боту
+  if (!path.startsWith('profile_photos/') || path.includes('..')) return say('Не аватарка.', 404);
+
+  for (const token of ownTokens(env)) {
+    if (await sign(token, path) === signature) {
+      const answer = await fetch(TELEGRAM + '/file/bot' + token + '/' + path);
+
+      // Отдаём только картинку и без заголовков Telegram: ни к чему Discord знать лишнее
+      return new Response(answer.body, {
+        status: answer.status,
+        headers: {
+          'content-type': answer.headers.get('content-type') || 'image/jpeg',
+          'cache-control': 'public, max-age=86400'
+        }
+      });
+    }
+  }
+
+  return say('Подпись не та.', 403);
+}
+
+// HMAC-SHA256 пути ключом-токеном, шестнадцатеричной строкой. Бот считает так же.
+async function sign(token, path) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(token),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(path));
+  return [...new Uint8Array(mac)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 // Свои токены: бота моста и, если задан, пародийного бота.
 function ownTokens(env) {

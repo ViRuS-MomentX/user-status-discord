@@ -422,9 +422,22 @@ public final class VoiceBridgeBot {
         log.info("Образцов речи участника: {}. Пародировать начну с {}.",
                 samples.size(), settings.minSamples());
 
-        var parody = new Parody(settings, telegram,
-                new Llm(settings.llmKey(), settings.llmModel(), settings.llmUrl(), settings.llmProxy()),
-                samples);
+        Llm llm;
+
+        if (settings.isGigaChat()) {
+            var cert = settings.llmCert().isBlank() ? null
+                    : configPath.toAbsolutePath().resolveSibling(settings.llmCert());
+            llm = new GigaChatLlm(settings.llmKey(), settings.llmScope(), settings.llmModel(),
+                    settings.llmUrl(), settings.llmProxy(), cert);
+        } else {
+            llm = new AnthropicLlm(settings.llmKey(), settings.llmModel(), settings.llmUrl(),
+                    settings.llmProxy());
+        }
+
+        log.info("Реплики сочиняет {}, модель {}.",
+                settings.isGigaChat() ? "GigaChat" : "Anthropic", settings.llmModel());
+
+        var parody = new Parody(settings, telegram, llm, samples);
         parody.start();
         return parody;
     }

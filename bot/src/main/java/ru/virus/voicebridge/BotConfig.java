@@ -263,6 +263,22 @@ public final class BotConfig {
      */
     private static ParodySettings parodySettings(Properties props) {
         var name = props.getProperty("parody.name", "").trim();
+        var provider = props.getProperty("parody.llm.provider", "anthropic").trim().toLowerCase();
+
+        if (!provider.equals("anthropic") && !provider.equals("gigachat")) {
+            log.error("parody.llm.provider должен быть anthropic или gigachat, а не «{}». "
+                    + "Беру anthropic.", provider);
+            provider = "anthropic";
+        }
+
+        var model = props.getProperty("parody.llm.model", "").trim();
+
+        if (model.isEmpty() && provider.equals("gigachat")) {
+            // У GigaChat базовая модель так и называется, и бесплатный лимит — на неё
+            model = "GigaChat";
+        }
+
+        var scope = props.getProperty("parody.llm.scope", "").trim();
 
         return new ParodySettings(
                 Boolean.parseBoolean(props.getProperty("parody.enabled", "false").trim()),
@@ -270,8 +286,11 @@ public final class BotConfig {
                 props.getProperty("parody.telegram.chat", "").trim(),
                 number(props, "parody.telegram.user", 0),
                 name.isEmpty() ? "участник" : name,
+                provider,
                 pick(props, "parody.llm.key", "VOICEBRIDGE_LLM_KEY"),
-                props.getProperty("parody.llm.model", "").trim(),
+                model,
+                scope.isEmpty() ? "GIGACHAT_API_PERS" : scope,
+                props.getProperty("parody.llm.cert", "russian_trusted_root_ca.cer").trim(),
                 props.getProperty("parody.llm.url", "").trim(),
                 props.getProperty("parody.llm.proxy", "").trim(),
                 bounded(props, "parody.chance", 5, 0, 100),

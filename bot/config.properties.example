@@ -268,7 +268,8 @@ bridge.telegram.proxy=
 # Пародийный бот в Telegram
 # ---------------------------------------------------------------------------
 # Отдельный телеграм-бот, который читает группу и время от времени вставляет
-# реплику в манере выбранного участника. Реплики пишет ИИ (API Anthropic).
+# реплику в манере выбранного участника. Реплики пишет ИИ: GigaChat от Сбера
+# или Anthropic.
 # Каждая начинается с «пародия:» — это не отключается. В Discord они не уходят:
 # мост не переносит сообщения ботов.
 #
@@ -292,18 +293,42 @@ parody.telegram.user=
 # Как называть участника в подсказке для ИИ.
 parody.name=
 
-# Ключ API: https://console.anthropic.com → API Keys.
-# Можно задать переменной VOICEBRIDGE_LLM_KEY.
+# Чья модель сочиняет реплики: gigachat или anthropic.
+#
+# gigachat — работает из России без прокси, у физлиц есть бесплатный лимит.
+# anthropic — пишет живее, но платный и из России отвечает только через прокси.
+parody.llm.provider=gigachat
+
+# Ключ. Можно задать переменной VOICEBRIDGE_LLM_KEY.
+#
+# GigaChat: https://developers.sber.ru/studio → войти через Сбер ID → создать
+# проект GigaChat API → «Получить ключ». Нужен «Ключ авторизации»
+# (Authorization key) — длинная строка, показывается один раз.
+#
+# Anthropic: https://console.anthropic.com → API Keys.
 parody.llm.key=
 
-# Имя модели — список на https://docs.anthropic.com/en/docs/about-claude/models
+# Имя модели. Для GigaChat можно оставить пустым — возьмётся GigaChat
+# (бесплатный лимит — на неё; ещё бывают GigaChat-Pro и GigaChat-Max).
+# Для Anthropic — список на https://docs.anthropic.com/en/docs/about-claude/models
 parody.llm.model=
 
-# Свой адрес API вместо официального. Пусто — https://api.anthropic.com/v1/messages
+# Только для GigaChat: тариф ключа. GIGACHAT_API_PERS — физлица (по умолчанию),
+# GIGACHAT_API_B2B и GIGACHAT_API_CORP — компании.
+parody.llm.scope=GIGACHAT_API_PERS
+
+# Только для GigaChat: корневой сертификат НУЦ Минцифры. Им подписаны серверы
+# Сбера, а Java сама ему не доверяет. Скачай «Корневой сертификат» на
+# https://www.gosuslugi.ru/crt и положи рядом с этим файлом под этим именем.
+# Доверие к нему действует только на запросы к GigaChat, а не на весь бот.
+parody.llm.cert=russian_trusted_root_ca.cer
+
+# Свой адрес API вместо официального. Пусто — официальный.
 parody.llm.url=
 
 # HTTP-прокси до API: «хост:порт» или «логин:пароль@хост:порт».
-# Из России API напрямую не отвечает (ошибка 403) — тогда нужен прокси в другой стране.
+# GigaChat из России работает напрямую. Anthropic из России отвечает
+# ошибкой 403 — для него нужен прокси в другой стране.
 parody.llm.proxy=
 
 # С какой вероятностью, в процентах, бот встревает после чужого сообщения.

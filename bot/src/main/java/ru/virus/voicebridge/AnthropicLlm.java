@@ -71,7 +71,14 @@ public final class AnthropicLlm implements Llm {
             throw new IOException(explain(response.statusCode()) + said(response.body()));
         }
 
-        var content = DataObject.fromJson(response.body()).getArray("content");
+        var json = DataObject.fromJson(response.body());
+
+        // Модель отказалась писать — реплики нет, а не «отказ» от лица участника
+        if ("refusal".equals(json.getString("stop_reason", ""))) {
+            return "";
+        }
+
+        var content = json.getArray("content");
         var text = new StringBuilder();
 
         for (var i = 0; i < content.length(); i++) {

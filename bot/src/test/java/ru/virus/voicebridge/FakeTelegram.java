@@ -69,6 +69,17 @@ final class FakeTelegram implements AutoCloseable {
         return id;
     }
 
+    /** Пересланное сообщение. */
+    void sayForwarded(long authorId, String author, String text) {
+        updates.add(DataObject.empty().put("update_id", updateId.getAndIncrement())
+                .put("message", DataObject.empty()
+                        .put("message_id", messageId.incrementAndGet())
+                        .put("chat", DataObject.empty().put("id", CHAT))
+                        .put("from", DataObject.empty().put("id", authorId).put("first_name", author))
+                        .put("forward_origin", DataObject.empty().put("type", "hidden_user"))
+                        .put("text", text)));
+    }
+
     /** Фото без подписи. */
     void sayPhoto(long authorId, String author) {
         updates.add(DataObject.empty().put("update_id", updateId.getAndIncrement())

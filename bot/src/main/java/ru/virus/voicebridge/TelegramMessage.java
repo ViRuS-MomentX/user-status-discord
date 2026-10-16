@@ -16,11 +16,12 @@ import net.dv8tion.jda.api.utils.data.DataObject;
  * @param fromBot прислал ли это бот — такое пересылать нельзя, иначе мост зациклится
  * @param replyToAuthor кому отвечают; пустая строка — это не ответ
  * @param replyToText что было в сообщении, на которое отвечают
+ * @param forwarded пересланное или присланное через инлайн-бота — не свои слова автора
  */
 public record TelegramMessage(long updateId, long messageId, long replyToId, String chat,
                               long authorId, String author, String text, String fileId,
                               String fileName, boolean fromBot,
-                              String replyToAuthor, String replyToText) {
+                              String replyToAuthor, String replyToText, boolean forwarded) {
 
     /**
      * Разбирает одно обновление.
@@ -96,7 +97,10 @@ public record TelegramMessage(long updateId, long messageId, long replyToId, Str
         }
 
         return new TelegramMessage(updateId, messageId, replyToId, String.valueOf(chat),
-                authorId, author, text, fileId, fileName, fromBot, replyToAuthor, replyToText);
+                authorId, author, text, fileId, fileName, fromBot, replyToAuthor, replyToText,
+                message.hasKey("forward_origin") || message.hasKey("forward_from")
+                        || message.hasKey("forward_from_chat") || message.hasKey("forward_sender_name")
+                        || message.hasKey("via_bot"));
     }
 
     /** Как показывать человека: имя с фамилией, а без них — юзернейм. */

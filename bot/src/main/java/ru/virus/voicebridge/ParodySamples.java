@@ -88,6 +88,11 @@ public final class ParodySamples {
                 continue;
             }
 
+            // Пересланное и присланное через инлайн-бота — не его слова
+            if (message.hasKey("forwarded_from") || message.hasKey("via_bot")) {
+                continue;
+            }
+
             var text = flatten(message);
 
             if (fits(text)) {

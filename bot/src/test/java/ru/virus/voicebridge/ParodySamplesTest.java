@@ -25,7 +25,10 @@ class ParodySamplesTest {
                   {"type": "message", "from_id": "user5", "text": "это не он"},
                   {"type": "service", "from_id": "user42", "text": "вошёл в группу"},
                   {"type": "message", "from_id": "user42", "text": "/start"},
-                  {"type": "message", "from_id": "user42", "text": ""}
+                  {"type": "message", "from_id": "user42", "text": ""},
+                  {"type": "message", "from_id": "user42", "forwarded_from": "Канал",
+                   "text": "чужое"},
+                  {"type": "message", "from_id": "user42", "via_bot": "@gif", "text": "котик"}
                 ]}""");
 
         var samples = new ParodySamples(dir.resolve("samples.json"));

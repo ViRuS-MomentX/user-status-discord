@@ -258,7 +258,11 @@ public final class Parody {
         }
 
         if (message.authorId() == settings.target()) {
-            samples.add(message.text());
+            // Пересланное и присланное через инлайн-бота — не его слова
+            if (!message.forwarded()) {
+                samples.add(message.text());
+            }
+
             // Самому участнику не отвечаем: разговор с собой выглядел бы странно
             return;
         }
@@ -331,7 +335,7 @@ public final class Parody {
         }
 
         handle(new TelegramMessage(0, 0, 0, chat, 0, author + " (из Discord)", text,
-                "", "", false, "", ""));
+                "", "", false, "", "", false));
     }
 
     private static String attachment(String fileName) {
@@ -507,9 +511,14 @@ public final class Parody {
         return line.append(": ").append(message.text()).toString();
     }
 
+    /** Длиннее строку переписки не держим: простыня вытеснила бы из подсказки весь разговор. */
+    private static final int LINE_LIMIT = 300;
+
     private void remember(String line) {
+        var cut = line.length() > LINE_LIMIT ? line.substring(0, LINE_LIMIT) + "…" : line;
+
         synchronized (recent) {
-            recent.addLast(line);
+            recent.addLast(cut);
 
             while (recent.size() > CONTEXT) {
                 recent.removeFirst();

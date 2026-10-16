@@ -426,6 +426,17 @@ class ParodyTest {
     }
 
     @Test
+    void forwardedIsNotHisWords() throws Exception {
+        start(settings(0, 0, 1), llm(p -> ""), "образец");
+
+        telegram.sayForwarded(TARGET, "Вася", "чужая цитата из канала");
+        telegram.say(TARGET, "Вася", "а это моё");
+        Thread.sleep(800);
+
+        assertEquals(java.util.List.of("образец", "а это моё"), store.all());
+    }
+
+    @Test
     void photoWithoutCaptionShowsInContext() throws Exception {
         start(settings(100, 0, 1), llm(p -> "ответ"), "образец");
 

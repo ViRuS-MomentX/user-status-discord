@@ -403,6 +403,12 @@ public final class VoiceBridgeBot {
         } catch (IOException e) {
             log.warn("Telegram сейчас не отвечает пародийному боту: {}. Буду пробовать дальше.",
                     e.getMessage());
+
+            if (settings.api().contains("workers.dev")) {
+                // Пересыльщик пускает только знакомые токены, а у пародии свой
+                log.warn("Telegram идёт через Cloudflare-пересыльщик — добавь в нём секрет "
+                        + "PARODY_TOKEN с токеном пародийного бота и проверь /check.");
+            }
         }
 
         var samples = new ParodySamples(configPath.toAbsolutePath().resolveSibling("parody-samples.json"));

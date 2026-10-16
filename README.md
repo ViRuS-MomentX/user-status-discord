@@ -494,6 +494,9 @@ telegram-bot-api.exe --api-id=ВАШ_ID --api-hash=ВАШ_HASH --http-port=8081
      `parody.llm.proxy` с прокси в другой стране.
 4. Заполни раздел `parody.*` в `config.properties` (образец — в
    `config.properties.example`) и перезапусти бота.
+5. Если Telegram у тебя идёт через Cloudflare-пересыльщик (`bridge.telegram.api`),
+   добавь в нём второй секрет **PARODY_TOKEN** с токеном пародийного бота:
+   пересыльщик пускает только знакомые токены. `/check` проверит оба.
 
 ### Если пародия молчит
 

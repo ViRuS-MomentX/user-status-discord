@@ -31,6 +31,11 @@ public record BridgeSettings(boolean enabled, long channel, String token, String
      * запрет должен касаться только своих адресов, а не любого своего сервера.
      */
     public boolean isLocalApi() {
+        return isLocal(api);
+    }
+
+    /** То же для любого адреса — пародийный бот ходит той же дорогой. */
+    static boolean isLocal(String api) {
         if (api.isBlank()) {
             return false;
         }

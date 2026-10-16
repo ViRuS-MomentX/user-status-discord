@@ -298,6 +298,8 @@ public final class VoiceBridgeBot {
             log.error("Слежение за лентой включено, но не задан posts.url или posts.channel.");
         }
 
+        var parody = startParody(config, configPath);
+
         var runningToTelegram = toTelegram;
         var runningFromTelegram = fromTelegram;
         var runningLibrary = libraryChannel;
@@ -319,6 +321,10 @@ public final class VoiceBridgeBot {
 
             if (runningFromTelegram != null) {
                 runningFromTelegram.stop();
+            }
+
+            if (parody != null) {
+                parody.stop();
             }
 
             if (runningLibrary != null) {
@@ -348,6 +354,79 @@ public final class VoiceBridgeBot {
     }
 
     private VoiceBridgeBot() {
+    }
+
+    /**
+     * Поднимает пародийного бота, если он включён.
+     *
+     * <p>Discord ему не нужен: он живёт только в группе Telegram.
+     *
+     * @return запущенный бот или {@code null}
+     */
+    private static Parody startParody(BotConfig config, Path configPath) {
+        var settings = config.getParody();
+
+        if (!settings.isUsable()) {
+            if (settings.enabled()) {
+                log.error("Пародия включена, но не задан parody.telegram.token, "
+                        + "parody.telegram.chat, parody.telegram.user, parody.llm.key "
+                        + "или parody.llm.model.");
+            }
+            return null;
+        }
+
+        if (settings.token().equals(config.getBridge().token())) {
+            // Обновления у бота одни на всех: два потока с одним токеном
+            // растаскивали бы сообщения друг у друга, и часть не дошла бы до Discord
+            log.error("У пародийного бота должен быть свой токен, не тот, что у моста. "
+                    + "Заведи второго бота у @BotFather. Пародия выключена.");
+            return null;
+        }
+
+        // К своему серверу на этой же машине прокси только мешает — как и у моста
+        var telegram = new Telegram(settings.token(),
+                BridgeSettings.isLocal(settings.api()) ? "" : settings.proxy(),
+                settings.api());
+
+        try {
+            log.info("Пародийный бот @{}: группа {}, участник {}.",
+                    telegram.whoAmI(), settings.chat(), settings.target());
+        } catch (Telegram.RejectedException e) {
+            log.error("Telegram отказал пародийному боту: {}. Проверь parody.telegram.token.",
+                    e.getMessage());
+            return null;
+        } catch (IOException e) {
+            log.warn("Telegram сейчас не отвечает пародийному боту: {}. Буду пробовать дальше.",
+                    e.getMessage());
+        }
+
+        var samples = new ParodySamples(configPath.toAbsolutePath().resolveSibling("parody-samples.json"));
+        samples.load();
+
+        if (!settings.importFile().isBlank()) {
+            if (samples.size() == 0) {
+                var export = configPath.toAbsolutePath().resolveSibling(settings.importFile());
+
+                try {
+                    log.info("Из экспорта взято сообщений участника: {}.",
+                            samples.importExport(export, settings.target()));
+                } catch (IOException | RuntimeException e) {
+                    log.error("Не прочитался экспорт {}: {}", export, e.getMessage());
+                }
+            } else {
+                // Иначе каждый запуск добавлял бы те же сообщения ещё раз
+                log.info("Экспорт уже забран. Чтобы забрать заново, удали parody-samples.json.");
+            }
+        }
+
+        log.info("Образцов речи участника: {}. Пародировать начну с {}.",
+                samples.size(), settings.minSamples());
+
+        var parody = new Parody(settings, telegram,
+                new Llm(settings.llmKey(), settings.llmModel(), settings.llmUrl(), settings.llmProxy()),
+                samples);
+        parody.start();
+        return parody;
     }
 
     /** Сколько ждать между попытками войти в Discord, в секундах. */

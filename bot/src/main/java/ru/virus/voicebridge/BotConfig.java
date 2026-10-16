@@ -44,13 +44,14 @@ public final class BotConfig {
     private final PostsSettings posts;
     private final LibrarySettings library;
     private final BridgeSettings bridge;
+    private final ParodySettings parody;
 
     private BotConfig(String token, long guildId, long userId, String httpHost, int httpPort, String httpToken,
                       RankLadder ladder, String botsRole, boolean moderation,
                       boolean music, boolean soundcloud, String lastFmKey,
                       int playlistSize, MusicCatalog catalog,
                       OnlineStatus status, PanelSettings panel, PostsSettings posts,
-                      LibrarySettings library, BridgeSettings bridge) {
+                      LibrarySettings library, BridgeSettings bridge, ParodySettings parody) {
         this.token = token;
         this.guildId = guildId;
         this.userId = userId;
@@ -70,6 +71,7 @@ public final class BotConfig {
         this.posts = posts;
         this.library = library;
         this.bridge = bridge;
+        this.parody = parody;
     }
 
     public String getToken() {
@@ -164,6 +166,11 @@ public final class BotConfig {
         return bridge;
     }
 
+    /** Пародийный бот в Telegram. */
+    public ParodySettings getParody() {
+        return parody;
+    }
+
     /** Сколько треков класть в очередь за одну команду start. */
     public int getPlaylistSize() {
         return playlistSize;
@@ -227,7 +234,8 @@ public final class BotConfig {
                 panelSettings(props),
                 postsSettings(props),
                 librarySettings(props),
-                bridgeSettings(props));
+                bridgeSettings(props),
+                parodySettings(props));
     }
 
     /**
@@ -244,6 +252,33 @@ public final class BotConfig {
                 props.getProperty("bridge.telegram.proxy", "").trim(),
                 pick(props, "bridge.discord.webhook", "VOICEBRIDGE_DISCORD_WEBHOOK"),
                 Boolean.parseBoolean(props.getProperty("bridge.avatars", "true").trim()),
+                props.getProperty("bridge.telegram.api", "").trim());
+    }
+
+    /**
+     * Настройки пародийного бота.
+     *
+     * <p>Прокси и свой сервер Bot API берутся у моста: дорога до Telegram у обоих
+     * ботов одна и та же.
+     */
+    private static ParodySettings parodySettings(Properties props) {
+        var name = props.getProperty("parody.name", "").trim();
+
+        return new ParodySettings(
+                Boolean.parseBoolean(props.getProperty("parody.enabled", "false").trim()),
+                pick(props, "parody.telegram.token", "VOICEBRIDGE_PARODY_TOKEN"),
+                props.getProperty("parody.telegram.chat", "").trim(),
+                number(props, "parody.telegram.user", 0),
+                name.isEmpty() ? "участник" : name,
+                pick(props, "parody.llm.key", "VOICEBRIDGE_LLM_KEY"),
+                props.getProperty("parody.llm.model", "").trim(),
+                props.getProperty("parody.llm.url", "").trim(),
+                props.getProperty("parody.llm.proxy", "").trim(),
+                bounded(props, "parody.chance", 5, 0, 100),
+                bounded(props, "parody.cooldown", 10, 0, 1440),
+                bounded(props, "parody.minsamples", 20, 1, 1000),
+                props.getProperty("parody.import", "").trim(),
+                props.getProperty("bridge.telegram.proxy", "").trim(),
                 props.getProperty("bridge.telegram.api", "").trim());
     }
 

@@ -25,6 +25,7 @@ final class ParodyState {
     private final Path file;
 
     private boolean paused;
+    private boolean imported;
     private String day = "";
     private int sentToday;
 
@@ -40,6 +41,7 @@ final class ParodyState {
         try {
             var json = DataObject.fromJson(Files.readString(file, StandardCharsets.UTF_8));
             paused = json.getBoolean("paused", false);
+            imported = json.getBoolean("imported", false);
             day = json.getString("day", "");
             sentToday = json.getInt("sentToday", 0);
         } catch (IOException | RuntimeException e) {
@@ -57,6 +59,19 @@ final class ParodyState {
 
     synchronized void setPaused(boolean paused) {
         this.paused = paused;
+        save();
+    }
+
+    /**
+     * Забран ли уже экспорт истории. Отмечается раз и навсегда: иначе после
+     * /parody_forget перезапуск вернул бы стёртое из того же экспорта.
+     */
+    synchronized boolean isImported() {
+        return imported;
+    }
+
+    synchronized void markImported() {
+        imported = true;
         save();
     }
 
@@ -83,6 +98,7 @@ final class ParodyState {
     private void save() {
         var json = DataObject.empty()
                 .put("paused", paused)
+                .put("imported", imported)
                 .put("day", day)
                 .put("sentToday", sentToday);
 

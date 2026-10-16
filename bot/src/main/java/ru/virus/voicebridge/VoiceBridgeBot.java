@@ -300,6 +300,11 @@ public final class VoiceBridgeBot {
 
         var parody = startParody(config, configPath);
 
+        if (parody != null && toTelegram != null) {
+            // Пародия слышит и Discord: сообщений моста она в группе не видит
+            toTelegram.listen(parody::hearDiscord);
+        }
+
         var runningToTelegram = toTelegram;
         var runningFromTelegram = fromTelegram;
         var runningLibrary = libraryChannel;
@@ -403,19 +408,24 @@ public final class VoiceBridgeBot {
         var samples = new ParodySamples(configPath.toAbsolutePath().resolveSibling("parody-samples.json"));
         samples.load();
 
-        if (!settings.importFile().isBlank()) {
+        var state = new ParodyState(configPath.toAbsolutePath().resolveSibling("parody-state.json"));
+        state.load();
+
+        if (!settings.importFile().isBlank() && !state.isImported()) {
             if (samples.size() == 0) {
                 var export = configPath.toAbsolutePath().resolveSibling(settings.importFile());
 
                 try {
                     log.info("Из экспорта взято сообщений участника: {}.",
                             samples.importExport(export, settings.target()));
+                    state.markImported();
                 } catch (IOException | RuntimeException e) {
                     log.error("Не прочитался экспорт {}: {}", export, e.getMessage());
                 }
             } else {
-                // Иначе каждый запуск добавлял бы те же сообщения ещё раз
-                log.info("Экспорт уже забран. Чтобы забрать заново, удали parody-samples.json.");
+                // Образцы уже есть — значит, экспорт забирали до того, как это
+                // стало отмечаться. Второй раз те же сообщения не нужны
+                state.markImported();
             }
         }
 
@@ -436,9 +446,6 @@ public final class VoiceBridgeBot {
 
         log.info("Реплики сочиняет {}, модель {}.",
                 settings.isGigaChat() ? "GigaChat" : "Anthropic", settings.llmModel());
-
-        var state = new ParodyState(configPath.toAbsolutePath().resolveSibling("parody-state.json"));
-        state.load();
 
         if (state.isPaused()) {
             log.info("Пародия выключена командой /parody_off — молчу, пока не включат /parody_on.");

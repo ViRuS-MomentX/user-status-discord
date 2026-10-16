@@ -59,6 +59,28 @@ class ParodySamplesTest {
     }
 
     @Test
+    void importIsRememberedAcrossRestarts() {
+        var file = dir.resolve("state.json");
+        var state = new ParodyState(file);
+        state.load();
+        state.markImported();
+
+        var again = new ParodyState(file);
+        again.load();
+        org.junit.jupiter.api.Assertions.assertTrue(again.isImported());
+    }
+
+    @Test
+    void unreadableStateMeansSilence() throws Exception {
+        var file = dir.resolve("state.json");
+        Files.writeString(file, "мусор");
+
+        var state = new ParodyState(file);
+        state.load();
+        org.junit.jupiter.api.Assertions.assertTrue(state.isPaused());
+    }
+
+    @Test
     void brokenFileDoesNotStopBot() throws Exception {
         var file = dir.resolve("samples.json");
         Files.writeString(file, "{не json");

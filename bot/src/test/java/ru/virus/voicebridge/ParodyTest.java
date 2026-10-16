@@ -339,23 +339,25 @@ class ParodyTest {
     }
 
     @Test
-    void discordPeopleThroughBridgeAreHeard() throws Exception {
+    void discordPeopleAreHeardButAnsweredInTelegram() throws Exception {
         start(settings(100, 0, 1), llm(p -> "ответ"), "образец");
 
-        // Так мост пересылает сообщение из Discord: от своего бота, с подписью
-        telegram.say(FakeTelegram.CHAT, 500, "Мост", true, "Коля · Discord\nкто в войс?", null);
+        parody.hearDiscord("Коля", "кто в войс?");
 
-        assertNotNull(telegram.awaitSent(1, 3000), "на человека из Discord бот должен реагировать");
+        var sent = telegram.awaitSent(1, 3000);
+        assertNotNull(sent, "на человека из Discord бот должен реагировать");
+        assertEquals(String.valueOf(FakeTelegram.CHAT), sent.get("chat_id"));
         assertTrue(prompts.getFirst().contains("Коля (из Discord): кто в войс?"), prompts.getFirst());
     }
 
     @Test
-    void ordinaryBotStaysIgnored() {
-        var message = new TelegramMessage(1, 2, 0, "-1", 9, "Бот", "просто текст", "", "", true, "", "");
-        assertTrue(Parody.unbridge(message).fromBot());
+    void discordCannotCommand() throws Exception {
+        start(settings(0, 0, 1), llm(p -> "ответ"), "образец");
 
-        var bare = new TelegramMessage(1, 2, 0, "-1", 9, "Бот", " · Discord", "", "", true, "", "");
-        assertTrue(Parody.unbridge(bare).fromBot(), "пустое имя — не сообщение моста");
+        parody.hearDiscord("Коля", "/parody_off");
+
+        assertNull(telegram.awaitSent(1, 1000));
+        assertTrue(!state.isPaused());
     }
 
     @Test

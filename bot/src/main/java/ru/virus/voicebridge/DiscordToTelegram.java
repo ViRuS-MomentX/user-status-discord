@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.BiConsumer;
 
 /**
  * Половина моста: из канала Discord в группу Telegram.
@@ -39,6 +40,13 @@ public final class DiscordToTelegram extends ListenerAdapter {
         thread.setDaemon(true);
         return thread;
     });
+
+    /**
+     * Кому ещё рассказать о сказанном в Discord: имя и текст. Пародийный бот
+     * живёт в той же группе, но сообщений моста не видит — Telegram не
+     * показывает ботам сообщения других ботов, — поэтому узнаёт о них отсюда.
+     */
+    private volatile BiConsumer<String, String> listener;
 
     public DiscordToTelegram(long guildId, BridgeSettings settings, Telegram telegram,
                              BridgeLinks links) {
@@ -75,12 +83,29 @@ public final class DiscordToTelegram extends ListenerAdapter {
         // Ботов помечаем: в Telegram иначе не отличить живого человека от Ириса
         var shown = author.isBot() || event.isWebhookMessage() ? "🤖 " + name : name;
 
-        worker.submit(() -> forward(message, shown));
+        var human = !author.isBot() && !event.isWebhookMessage();
+
+        worker.submit(() -> forward(message, shown, human));
     }
 
-    private void forward(Message message, String author) {
+    /** Слушатель сказанного живыми людьми; {@code null} — никого не звать. */
+    public void listen(BiConsumer<String, String> listener) {
+        this.listener = listener;
+    }
+
+    private void forward(Message message, String author, boolean human) {
         try {
             var text = textOf(message);
+            var heard = listener;
+
+            if (human && heard != null && !text.isBlank()) {
+                try {
+                    heard.accept(author, text);
+                } catch (RuntimeException e) {
+                    // Чужая беда не должна останавливать перенос сообщения
+                    log.warn("Слушатель сообщений Discord упал: {}", e.getMessage());
+                }
+            }
             var attachments = message.getAttachments();
 
             // На что отвечают. Если это ответ на сообщение, принесённое из Telegram,

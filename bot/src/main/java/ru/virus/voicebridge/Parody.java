@@ -60,9 +60,6 @@ public final class Parody {
     private static final long LLM_PAUSE_MS = 60_000;
     private static final long LLM_PAUSE_LIMIT_MS = 30 * 60_000;
 
-    /** Как мост подписывает перенесённое из Discord: «Имя · Discord», дальше текст. */
-    private static final String BRIDGED = " · Discord";
-
     private final ParodySettings settings;
     private final Telegram telegram;
     private final Llm llm;
@@ -94,7 +91,7 @@ public final class Parody {
     private Thread worker;
 
     /** Группа числом: в обновлениях она приходит только так. */
-    private String chatId;
+    private volatile String chatId;
 
     /** «@имя» бота строчными: по нему узнаём, что к нему обратились. */
     private String mention = "";
@@ -132,7 +129,7 @@ public final class Parody {
 
         while (running && chatId == null) {
             try {
-                chatId = settings.chat().startsWith("@")
+                var chat = settings.chat().startsWith("@")
                         ? telegram.chatId(settings.chat())
                         : settings.chat();
 
@@ -146,6 +143,10 @@ public final class Parody {
 
                 // Старое не разбираем: отвечать на вчерашнее никто не просил
                 offset = telegram.lastUpdateId(0);
+
+                // Последним: пока группа не узнана, цикл повторяет всё сначала, и
+                // сбой на полпути не оставит бота без имени или без отметки
+                chatId = chat;
             } catch (Exception e) {
                 log.warn("Пародийный бот не достучался до Telegram: {}. Пробую через {} с.",
                         e.getMessage(), RETRY_PAUSE_MS / 1000);
@@ -193,8 +194,7 @@ public final class Parody {
         }
     }
 
-    private void handle(TelegramMessage incoming) {
-        var message = unbridge(incoming);
+    private void handle(TelegramMessage message) {
         var group = message.chat().equals(chatId);
 
         if (message.text().isBlank()) {
@@ -283,30 +283,22 @@ public final class Parody {
     }
 
     /**
-     * Сообщение, которое мост перенёс из Discord, — от лица того, кто его написал.
+     * Сказанное в Discord — его пересказывает мост.
      *
-     * <p>В Telegram его прислал бот моста, и без разбора ИИ видел бы безымянного
-     * бота, а пародия молчала бы в ответ живым людям с той стороны.
+     * <p>Сообщения моста в группе пародийный бот не видит: Telegram не показывает
+     * ботам сообщения других ботов. Поэтому мост сообщает о них напрямую, и
+     * пародия слышит и людей с той стороны. Отвечает она всё равно в Telegram.
      */
-    static TelegramMessage unbridge(TelegramMessage message) {
-        if (!message.fromBot()) {
-            return message;
+    public void hearDiscord(String author, String text) {
+        var chat = chatId;
+
+        // Команды пародии — только из Telegram: в Discord не видно, кто их дал
+        if (chat == null || text.isBlank() || text.startsWith("/")) {
+            return;
         }
 
-        var text = message.text();
-        var newline = text.indexOf('\n');
-        var head = newline < 0 ? text : text.substring(0, newline);
-
-        if (!head.endsWith(BRIDGED) || head.length() == BRIDGED.length()) {
-            return message;
-        }
-
-        var author = head.substring(0, head.length() - BRIDGED.length()).trim() + " (из Discord)";
-        var body = newline < 0 ? "" : text.substring(newline + 1).trim();
-
-        return new TelegramMessage(message.updateId(), message.messageId(), message.replyToId(),
-                message.chat(), message.authorId(), author, body, message.fileId(),
-                message.fileName(), false, message.replyToAuthor(), message.replyToText());
+        handle(new TelegramMessage(0, 0, 0, chat, 0, author + " (из Discord)", text,
+                "", "", false, "", ""));
     }
 
     private static String attachment(String fileName) {
@@ -370,7 +362,8 @@ public final class Parody {
                 var count = samples.clear();
                 log.info("{} стёр образцы речи: {}.", message.author(), count);
                 answer(message, "Стёрто сообщений: " + count + ". Пока не наберётся "
-                        + settings.minSamples() + " новых, бот молчит.");
+                        + settings.minSamples() + " новых, бот молчит. Чтобы он и новых не "
+                        + "собирал — /parody_off.");
             }
             case "/parody_say" -> {
                 if (state.isPaused()) {

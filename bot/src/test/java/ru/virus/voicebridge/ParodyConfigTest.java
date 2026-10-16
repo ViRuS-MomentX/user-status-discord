@@ -67,6 +67,28 @@ class ParodyConfigTest {
     }
 
     @Test
+    void ownerQuietAndDaily() throws Exception {
+        var settings = load("""
+                parody.telegram.owner=1
+                parody.quiet=23-8
+                parody.daily=12
+                """);
+
+        assertEquals(1, settings.owner());
+        assertEquals("23-8", settings.quiet());
+        assertEquals(12, settings.daily());
+        assertTrue(settings.mayCommand(1));
+        assertFalse(settings.mayCommand(0));
+    }
+
+    @Test
+    void badQuietIsDropped() throws Exception {
+        assertEquals("", load("parody.quiet=ночью\n").quiet());
+        assertEquals("", load("parody.quiet=25-8\n").quiet());
+        assertEquals(30, load("").daily());
+    }
+
+    @Test
     void offByDefault() throws Exception {
         assertFalse(load("").enabled());
     }

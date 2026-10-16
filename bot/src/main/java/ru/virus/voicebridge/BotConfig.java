@@ -298,7 +298,21 @@ public final class BotConfig {
                 bounded(props, "parody.minsamples", 20, 1, 1000),
                 props.getProperty("parody.import", "").trim(),
                 props.getProperty("bridge.telegram.proxy", "").trim(),
-                props.getProperty("bridge.telegram.api", "").trim());
+                props.getProperty("bridge.telegram.api", "").trim(),
+                number(props, "parody.telegram.owner", 0),
+                quiet(props.getProperty("parody.quiet", "").trim()),
+                bounded(props, "parody.daily", 30, 0, 10_000));
+    }
+
+    /** Тихие часы «с-до»; неразборчивое — без тихих часов, но с записью в лог. */
+    private static String quiet(String raw) {
+        if (raw.isEmpty() || raw.matches("([01]?\\d|2[0-3])\\s*-\\s*([01]?\\d|2[0-3])")) {
+            return raw;
+        }
+
+        log.error("parody.quiet должен быть вида «23-8» (часы от 0 до 23), а не «{}». "
+                + "Тихих часов не будет.", raw);
+        return "";
     }
 
     /** Площадки, ссылки на которые принимаются по умолчанию. */

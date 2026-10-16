@@ -3,6 +3,9 @@ package ru.virus.voicebridge;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Clock;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -56,7 +59,11 @@ public final class Parody {
     private final Telegram telegram;
     private final Llm llm;
     private final ParodySamples samples;
+    private final ParodyState state;
     private final Random random = new Random();
+
+    /** Часы подменяются в тестах: тихие часы и счёт за сутки зависят от них. */
+    private Clock clock = Clock.systemDefaultZone();
 
     private final Deque<String> recent = new ArrayDeque<>();
     private final SequencedSet<Long> own = new LinkedHashSet<>();
@@ -80,11 +87,17 @@ public final class Parody {
     /** «@имя» бота строчными: по нему узнаём, что к нему обратились. */
     private String mention = "";
 
-    public Parody(ParodySettings settings, Telegram telegram, Llm llm, ParodySamples samples) {
+    public Parody(ParodySettings settings, Telegram telegram, Llm llm, ParodySamples samples,
+                  ParodyState state) {
         this.settings = settings;
         this.telegram = telegram;
         this.llm = llm;
         this.samples = samples;
+        this.state = state;
+    }
+
+    void setClock(Clock clock) {
+        this.clock = clock;
     }
 
     public void start() {
@@ -169,12 +182,29 @@ public final class Parody {
     }
 
     private void handle(TelegramMessage message) {
-        // Личку и чужие группы не читаем: бот живёт в одной группе
-        if (!message.chat().equals(chatId) || message.text().isBlank()) {
+        if (message.text().isBlank()) {
+            return;
+        }
+
+        var group = message.chat().equals(chatId);
+
+        // Команды принимаются и в личке: выключить пародию тихо, не при всех
+        if (message.text().startsWith("/") && command(message)) {
+            return;
+        }
+
+        // В остальном личку и чужие группы не читаем: бот живёт в одной группе
+        if (!group) {
             return;
         }
 
         remember(line(message));
+
+        // Выключенный бот не копит и речь участника: раз попросили остановиться,
+        // собирать его сообщения дальше тоже незачем
+        if (state.isPaused()) {
+            return;
+        }
 
         if (message.authorId() == settings.target()) {
             samples.add(message.text());
@@ -197,7 +227,7 @@ public final class Parody {
         var direct = replied || mention.length() > 1
                 && message.text().toLowerCase(java.util.Locale.ROOT).contains(mention);
 
-        var now = System.currentTimeMillis();
+        var now = clock.millis();
         var gap = direct ? REPLY_GAP_MS : settings.cooldownMinutes() * 60_000L;
 
         if (now - lastSent < gap) {
@@ -205,6 +235,10 @@ public final class Parody {
         }
 
         if (!direct && random.nextInt(100) >= settings.chance()) {
+            return;
+        }
+
+        if (settings.isQuiet(LocalTime.now(clock).getHour()) || overDaily()) {
             return;
         }
 
@@ -227,6 +261,118 @@ public final class Parody {
                 busy.set(false);
             }
         });
+    }
+
+    private boolean overDaily() {
+        return settings.daily() > 0 && state.sentToday(LocalDate.now(clock)) >= settings.daily();
+    }
+
+    /**
+     * Команды управления. Слушаются хозяина бота и самого участника — последнего
+     * особенно: передумал — выключает пародию и стирает своё, ни у кого не спрашивая.
+     *
+     * @return была ли это команда пародии
+     */
+    private boolean command(TelegramMessage message) {
+        var word = message.text().trim().split("\\s+", 2)[0].toLowerCase(java.util.Locale.ROOT);
+        var at = word.indexOf('@');
+
+        if (at > 0) {
+            // «/parody_off@другой_bot» адресована не нам
+            if (!("@" + word.substring(at + 1)).equals(mention)) {
+                return false;
+            }
+
+            word = word.substring(0, at);
+        }
+
+        if (!word.startsWith("/parody")) {
+            return false;
+        }
+
+        if (!settings.mayCommand(message.authorId())) {
+            answer(message, "Пародией управляют только хозяин бота и сам " + settings.name() + ".");
+            return true;
+        }
+
+        switch (word) {
+            case "/parody_off" -> {
+                state.setPaused(true);
+                log.info("Пародию выключил {}.", message.author());
+                answer(message, "Пародия выключена: бот молчит и не собирает сообщения. "
+                        + "Включить — /parody_on.");
+            }
+            case "/parody_on" -> {
+                state.setPaused(false);
+                log.info("Пародию включил {}.", message.author());
+                answer(message, "Пародия включена.");
+            }
+            case "/parody_forget" -> {
+                var count = samples.clear();
+                log.info("{} стёр образцы речи: {}.", message.author(), count);
+                answer(message, "Стёрто сообщений: " + count + ". Пока не наберётся "
+                        + settings.minSamples() + " новых, бот молчит.");
+            }
+            case "/parody_say" -> {
+                if (state.isPaused()) {
+                    answer(message, "Пародия выключена — сначала /parody_on.");
+                } else if (samples.size() == 0) {
+                    answer(message, "Пока не по чему пародировать: нет ни одного сообщения "
+                            + settings.name() + ".");
+                } else if (busy.compareAndSet(false, true)) {
+                    lastSent = clock.millis();
+                    var context = context();
+
+                    writer.execute(() -> {
+                        try {
+                            speak(context, 0);
+                        } finally {
+                            busy.set(false);
+                        }
+                    });
+                }
+            }
+            case "/parody_status" -> answer(message, status());
+            default -> answer(message, """
+                    /parody_say — сказать что-нибудь сейчас
+                    /parody_off — выключить
+                    /parody_on — включить
+                    /parody_forget — стереть собранные сообщения
+                    /parody_status — как дела""");
+        }
+
+        return true;
+    }
+
+    private String status() {
+        var lines = new ArrayList<String>();
+        lines.add(state.isPaused() ? "Выключена." : "Включена.");
+        lines.add("Сообщений " + settings.name() + " собрано: " + samples.size()
+                + (samples.size() < settings.minSamples()
+                    ? " (начну с " + settings.minSamples() + ")" : "") + ".");
+        lines.add("Встреваю с вероятностью " + settings.chance() + "%, не чаще раза в "
+                + settings.cooldownMinutes() + " мин.");
+        lines.add("Сегодня реплик: " + state.sentToday(LocalDate.now(clock))
+                + (settings.daily() > 0 ? " из " + settings.daily() : "") + ".");
+
+        if (!settings.quiet().isBlank()) {
+            lines.add("Тихие часы: " + settings.quiet()
+                    + (settings.isQuiet(LocalTime.now(clock).getHour()) ? " — сейчас как раз они." : "."));
+        }
+
+        return String.join("\n", lines);
+    }
+
+    /**
+     * Ответ на команду. Без пометки «пародия»: это не реплика участника, а
+     * служебное сообщение, — зато со значком, чтобы его ни с чем не спутать.
+     */
+    private void answer(TelegramMessage message, String text) {
+        try {
+            telegram.sendText(message.chat(), "⚙️ " + text, message.messageId());
+        } catch (Exception e) {
+            log.warn("Ответ на команду не ушёл: {}", e.getMessage());
+        }
     }
 
     /** Строка переписки для ИИ: кто, кому отвечает и что сказал. */
@@ -300,6 +446,7 @@ public final class Parody {
     void post(String text, long replyTo) {
         try {
             var id = telegram.sendText(chatId, MARK + text, replyTo);
+            state.countSent(LocalDate.now(clock));
             remember(settings.name() + ": " + text);
 
             synchronized (said) {

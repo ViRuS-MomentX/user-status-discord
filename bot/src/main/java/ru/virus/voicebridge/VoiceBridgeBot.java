@@ -437,7 +437,14 @@ public final class VoiceBridgeBot {
         log.info("Реплики сочиняет {}, модель {}.",
                 settings.isGigaChat() ? "GigaChat" : "Anthropic", settings.llmModel());
 
-        var parody = new Parody(settings, telegram, llm, samples);
+        var state = new ParodyState(configPath.toAbsolutePath().resolveSibling("parody-state.json"));
+        state.load();
+
+        if (state.isPaused()) {
+            log.info("Пародия выключена командой /parody_off — молчу, пока не включат /parody_on.");
+        }
+
+        var parody = new Parody(settings, telegram, llm, samples, state);
         parody.start();
         return parody;
     }

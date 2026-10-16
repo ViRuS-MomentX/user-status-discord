@@ -5,3 +5,5 @@ parody-samples.json.tmp
 result.json
 dist/
 parody-samples.json.broken
+parody-state.json
+parody-state.json.tmp

@@ -5,7 +5,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
@@ -18,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ParodyTest {
 
     static final long TARGET = 42;
+    static final long OWNER = 1;
 
     @TempDir
     Path dir;
@@ -48,19 +53,38 @@ class ParodyTest {
     }
 
     static ParodySettings settings(int chance, int cooldown, int minSamples) {
-        return new ParodySettings(true, "T", "@grp", TARGET, "Вася",
-                "anthropic", "KEY", "model", "", "", "", "",
-                chance, cooldown, minSamples, "", "", "");
+        return settings(chance, cooldown, minSamples, "", 0);
     }
 
+    static ParodySettings settings(int chance, int cooldown, int minSamples, String quiet, int daily) {
+        return new ParodySettings(true, "T", "@grp", TARGET, "Вася",
+                "anthropic", "KEY", "model", "", "", "", "",
+                chance, cooldown, minSamples, "", "", "", OWNER, quiet, daily);
+    }
+
+    ParodySamples store;
+    ParodyState state;
+
     void start(ParodySettings settings, Llm llm, String... samples) throws Exception {
-        var store = new ParodySamples(dir.resolve("parody-samples.json"));
+        start(settings, llm, null, samples);
+    }
+
+    void start(ParodySettings settings, Llm llm, Clock clock, String... samples) throws Exception {
+        store = new ParodySamples(dir.resolve("parody-samples.json"));
 
         for (var sample : samples) {
             store.add(sample);
         }
 
-        parody = new Parody(settings, new Telegram("T", "", telegram.url()), llm, store);
+        state = new ParodyState(dir.resolve("parody-state.json"));
+        state.load();
+
+        parody = new Parody(settings, new Telegram("T", "", telegram.url()), llm, store, state);
+
+        if (clock != null) {
+            parody.setClock(clock);
+        }
+
         parody.start();
         // Дать боту узнать группу, прежде чем в неё писать
         Thread.sleep(300);
@@ -186,6 +210,132 @@ class ParodyTest {
         telegram.say(7, "Петя", "два");
         assertNull(telegram.awaitSent(2, 1500), "бот повторился");
         assertTrue(prompts.getLast().contains("не повторяй"), prompts.getLast());
+    }
+
+    static Clock at(int hour) {
+        var zone = ZoneId.of("Europe/Moscow");
+        return Clock.fixed(LocalDateTime.of(2026, 10, 16, hour, 30).atZone(zone).toInstant(), zone);
+    }
+
+    @Test
+    void targetCanSwitchOffAndItSticks() throws Exception {
+        start(settings(100, 0, 1), llm(p -> "ответ"), "образец");
+
+        telegram.say(TARGET, "Вася", "/parody_off");
+        var answer = telegram.awaitSent(1, 3000);
+        assertNotNull(answer);
+        assertTrue(answer.get("text").startsWith("⚙️"), answer.get("text"));
+        assertTrue(!answer.get("text").startsWith(Parody.MARK));
+
+        telegram.say(7, "Петя", "эй");
+        telegram.say(TARGET, "Вася", "это не должно сохраниться");
+        assertNull(telegram.awaitSent(2, 1500), "выключенный бот заговорил");
+        assertTrue(!store.all().contains("это не должно сохраниться"), "выключенный бот копит речь");
+
+        // После перезапуска — всё ещё выключен
+        var reloaded = new ParodyState(dir.resolve("parody-state.json"));
+        reloaded.load();
+        assertTrue(reloaded.isPaused());
+    }
+
+    @Test
+    void ownerTurnsBackOnFromPrivateChat() throws Exception {
+        start(settings(100, 0, 1), llm(p -> "ответ"), "образец");
+        state.setPaused(true);
+
+        telegram.say(OWNER, OWNER, "Хозяин", false, "/parody_on@parody_bot", null);
+        var answer = telegram.awaitSent(1, 3000);
+        assertNotNull(answer);
+        assertEquals(String.valueOf(OWNER), answer.get("chat_id"), "ответ должен прийти в личку");
+        assertTrue(!state.isPaused());
+    }
+
+    @Test
+    void strangersCannotCommand() throws Exception {
+        start(settings(0, 0, 1), llm(p -> "ответ"), "образец");
+
+        telegram.say(7, "Петя", "/parody_forget");
+
+        var answer = telegram.awaitSent(1, 3000);
+        assertNotNull(answer);
+        assertTrue(answer.get("text").contains("только"), answer.get("text"));
+        assertEquals(1, store.size(), "посторонний стёр образцы");
+    }
+
+    @Test
+    void commandForAnotherBotIsIgnored() throws Exception {
+        start(settings(0, 0, 1), llm(p -> "ответ"), "образец");
+
+        telegram.say(TARGET, "Вася", "/parody_off@other_bot");
+
+        assertNull(telegram.awaitSent(1, 1500));
+        assertTrue(!state.isPaused());
+    }
+
+    @Test
+    void targetCanForgetEverything() throws Exception {
+        start(settings(0, 0, 1), llm(p -> "ответ"), "раз", "два");
+
+        telegram.say(TARGET, "Вася", "/parody_forget");
+
+        assertNotNull(telegram.awaitSent(1, 3000));
+        assertEquals(0, store.size());
+        assertEquals("[]", Files.readString(dir.resolve("parody-samples.json")));
+    }
+
+    @Test
+    void sayForcesLineEvenAtZeroChance() throws Exception {
+        start(settings(0, 60, 1), llm(p -> "по заказу"), "образец");
+
+        telegram.say(OWNER, "Хозяин", "/parody_say");
+
+        var line = telegram.awaitSent(1, 3000);
+        assertNotNull(line);
+        assertEquals(Parody.MARK + "по заказу", line.get("text"));
+        assertEquals(String.valueOf(FakeTelegram.CHAT), line.get("chat_id"));
+    }
+
+    @Test
+    void quietHoursKeepSilence() throws Exception {
+        start(settings(100, 0, 1, "23-8", 0), llm(p -> "ответ"), at(3), "образец");
+
+        telegram.say(7, "Петя", "не спится");
+        assertNull(telegram.awaitSent(1, 1500), "бот заговорил ночью");
+    }
+
+    @Test
+    void quietHoursLetDaytimeThrough() throws Exception {
+        start(settings(100, 0, 1, "23-8", 0), llm(p -> "ответ"), at(14), "образец");
+
+        telegram.say(7, "Петя", "день");
+        assertNotNull(telegram.awaitSent(1, 3000));
+    }
+
+    @Test
+    void dailyCapStopsAfterLimit() throws Exception {
+        start(settings(100, 0, 1, "", 1), llm(p -> "ответ " + System.nanoTime()), "образец");
+
+        telegram.say(7, "Петя", "раз");
+        assertNotNull(telegram.awaitSent(1, 3000));
+
+        Thread.sleep(200);
+        telegram.say(7, "Петя", "два");
+        assertNull(telegram.awaitSent(2, 1500), "дневной предел не сработал");
+    }
+
+    @Test
+    void quietRangeAcrossMidnight() {
+        var settings = settings(0, 0, 1, "23-8", 0);
+        assertTrue(settings.isQuiet(23));
+        assertTrue(settings.isQuiet(0));
+        assertTrue(settings.isQuiet(7));
+        assertTrue(!settings.isQuiet(8));
+        assertTrue(!settings.isQuiet(22));
+
+        var day = settings(0, 0, 1, "13-15", 0);
+        assertTrue(day.isQuiet(14));
+        assertTrue(!day.isQuiet(15));
+        assertTrue(!settings(0, 0, 1, "", 0).isQuiet(3));
     }
 
     @Test

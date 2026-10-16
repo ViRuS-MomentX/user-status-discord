@@ -147,6 +147,18 @@ public final class ParodySamples {
         save();
     }
 
+    /**
+     * Стирает всё собранное — и в памяти, и на диске.
+     *
+     * @return сколько было
+     */
+    public synchronized int clear() {
+        var count = samples.size();
+        samples.clear();
+        save();
+        return count;
+    }
+
     public synchronized int size() {
         return samples.size();
     }

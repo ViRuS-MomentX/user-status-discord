@@ -156,7 +156,52 @@ class ParodyTest {
         telegram.say(7, "Петя", "привет");
 
         assertNull(telegram.awaitSent(1, 1500));
-        assertEquals(1, prompts.size());
+        // При 100% молчать нельзя — была вторая попытка, но и она пустая
+        assertEquals(2, prompts.size());
+    }
+
+    @Test
+    void fullChanceDoesNotStaySilentAfterTyping() throws Exception {
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        start(settings(100, 0, 1), llm(p -> calls.incrementAndGet() == 1 ? "-" : "ну да"), "образец");
+
+        telegram.say(7, "Петя", "как дела");
+
+        var sent = telegram.awaitSent(1, 3000);
+        assertNotNull(sent, "при вероятности 100% бот не должен молчать после «печатает»");
+        assertEquals(Parody.MARK + "ну да", sent.get("text"));
+    }
+
+    @Test
+    void messageDuringThinkingIsAnsweredAfterwards() throws Exception {
+        var first = new java.util.concurrent.CountDownLatch(1);
+        start(settings(100, 0, 1), llm(p -> {
+            if (first.getCount() > 0) {
+                try {
+                    // Пока он думает над первым, приходят ещё два
+                    Thread.sleep(800);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+
+                first.countDown();
+                return "первый";
+            }
+
+            return "второй";
+        }), "образец");
+
+        telegram.say(7, "Петя", "раз");
+        Thread.sleep(200);
+        telegram.say(7, "Петя", "два");
+        telegram.say(8, "Коля", "три");
+
+        var sent = telegram.awaitSent(2, 4000);
+        assertNotNull(sent, "сообщения, пришедшие пока ИИ думал, потерялись");
+        assertEquals(Parody.MARK + "второй", sent.get("text"));
+        // Отложенное — одно, последнее: на пачку отвечает одной репликой
+        assertNull(telegram.awaitSent(3, 1200));
+        assertTrue(prompts.get(1).contains("три"), prompts.get(1));
     }
 
     @Test
@@ -184,14 +229,14 @@ class ParodyTest {
     }
 
     @Test
-    void emojiStaysWhenThatIsHisStyle() throws Exception {
-        start(settings(100, 0, 1), llm(p -> "го 😂"), "ахах 😂", "го 🔥", "да 😎", "ок");
+    void trailingEmojiIsDroppedEvenWhenHeUsesThem() throws Exception {
+        start(settings(100, 0, 1), llm(p -> "го 😂 катку 🔥"), "ахах 😂", "го 🔥", "да 😎", "ок");
 
         telegram.say(7, "Петя", "раз");
 
         var sent = telegram.awaitSent(1, 3000);
         assertNotNull(sent);
-        assertEquals(Parody.MARK + "го 😂", sent.get("text"));
+        assertEquals(Parody.MARK + "го 😂 катку", sent.get("text"));
     }
 
     @Test

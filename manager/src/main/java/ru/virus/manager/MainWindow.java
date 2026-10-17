@@ -58,6 +58,8 @@ final class MainWindow extends JFrame {
     private final Map<String, ProcessRow> rows = new LinkedHashMap<>();
     private final ProcessPage processPage;
     private final ConfigPage configPage;
+    private final FilesPage filesPage;
+    private final NavRow filesRow;
     private final CardLayout pages = new CardLayout();
     private final JPanel center = Ui.transparent(pages);
     private final NavRow configRow;
@@ -85,6 +87,10 @@ final class MainWindow extends JFrame {
 
         processPage = new ProcessPage(background, worker, this::editProcess);
         configPage = new ConfigPage(background, config, this::toast, this::configSaved);
+        filesPage = new FilesPage(background, supervisor, worker, this::toast, () -> {
+            refresh();
+            refreshMissing();
+        });
 
         // Фон — всё окно; поверх него карточки с отступами, чтобы между ними
         // оставалось место для кода и волн
@@ -108,6 +114,12 @@ final class MainWindow extends JFrame {
         autostartSwitch.setToolTipText("Запускать V.I.R.U.S. при входе в Windows");
         autostartSwitch.onChange(this::setAutostart);
         var autostartLabel = Ui.muted("Автозапуск", 13.5f);
+        var report = Ui.button("Отчёт для разбора");
+        report.setIcon(Icons.of(Icons.Kind.REPORT, Theme.TEXT));
+        report.setIconTextGap(8);
+        report.setToolTipText("Собрать логи и настройки без токенов в один архив — его можно отправить");
+        report.addActionListener(e -> makeReport());
+
         var quitButton = Ui.danger("Выключить всё");
         quitButton.setIcon(Icons.of(Icons.Kind.POWER, Theme.ERROR));
         quitButton.setIconTextGap(8);
@@ -122,6 +134,7 @@ final class MainWindow extends JFrame {
             actions.add(Box.createHorizontalStrut(10));
         }
 
+        actions.add(report);
         actions.add(quitButton);
 
         var header = Ui.transparent(new BorderLayout());
@@ -152,6 +165,7 @@ final class MainWindow extends JFrame {
         add.addActionListener(e -> editProcess(null));
 
         configRow = new NavRow(Icons.of(Icons.Kind.GEAR, Theme.ACCENT), "Конфиг ботов", () -> show("config"));
+        filesRow = new NavRow(Icons.of(Icons.Kind.FOLDER, Theme.ACCENT), "Файлы проектов", () -> show("files"));
 
         side.add(indent(Ui.caption("Процессы")));
         side.add(Box.createVerticalStrut(8));
@@ -162,6 +176,8 @@ final class MainWindow extends JFrame {
         side.add(indent(Ui.caption("Настройка")));
         side.add(Box.createVerticalStrut(8));
         side.add(configRow);
+        side.add(Box.createVerticalStrut(4));
+        side.add(filesRow);
         side.add(Box.createVerticalGlue());
         side.add(indent(Ui.label("Кликни по фону — пойдёт волна", Theme.ui.deriveFont(11.5f), Theme.DIM)));
 
@@ -180,6 +196,7 @@ final class MainWindow extends JFrame {
         center.add(empty, "");
         center.add(processPage, "process");
         center.add(configPage, "config");
+        center.add(filesPage, "files");
 
         var body = Ui.transparent(new BorderLayout(16, 0));
         body.add(side, BorderLayout.WEST);
@@ -307,12 +324,16 @@ final class MainWindow extends JFrame {
         } else if (next.equals("config")) {
             configPage.reload();
             pages.show(center, "config");
+        } else if (next.equals("files")) {
+            filesPage.reload();
+            pages.show(center, "files");
         } else {
             pages.show(center, "");
         }
 
         rows.forEach((id, row) -> row.setSelected(view.equals("process:" + id)));
         configRow.setSelected(view.equals("config"));
+        filesRow.setSelected(view.equals("files"));
     }
 
     private void refresh() {
@@ -415,6 +436,34 @@ final class MainWindow extends JFrame {
         } catch (IOException e) {
             autostartSwitch.setOn(!on);
             toast("Не вышло: " + e.getMessage());
+        }
+    }
+
+    /** Отчёт для разбора: собрать и показать, где лежит. */
+    private void makeReport() {
+        toast("Собираю отчёт…");
+
+        worker.submit(() -> {
+            try {
+                var zip = Reporter.build(supervisor.home(), supervisor, config.file());
+                SwingUtilities.invokeLater(() -> toast("Отчёт готов: reports/" + zip.getFileName()));
+                showInExplorer(zip);
+            } catch (IOException e) {
+                SwingUtilities.invokeLater(() -> toast("Отчёт не собрался: " + e.getMessage()));
+            }
+        });
+    }
+
+    /** Открывает Проводник с выделенным файлом; не Windows — просто папку. */
+    private static void showInExplorer(java.nio.file.Path file) {
+        try {
+            if (System.getProperty("os.name", "").toLowerCase().contains("win")) {
+                new ProcessBuilder("explorer.exe", "/select,", file.toString()).start();
+            } else if (java.awt.Desktop.isDesktopSupported()) {
+                java.awt.Desktop.getDesktop().open(file.getParent().toFile());
+            }
+        } catch (IOException | UnsupportedOperationException e) {
+            // Не открылось — путь уже показан в подсказке
         }
     }
 

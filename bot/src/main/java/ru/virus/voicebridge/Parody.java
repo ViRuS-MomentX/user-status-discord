@@ -94,8 +94,18 @@ public final class Parody {
     private final SequencedSet<Long> own = new LinkedHashSet<>();
     private final Deque<String> said = new ArrayDeque<>();
 
-    /** Одна реплика за раз: пока ИИ думает, новые поводы пропускаются. */
+    /** Одна реплика за раз: пока ИИ думает, новые поводы ждут в {@link #pending}. */
     private final AtomicBoolean busy = new AtomicBoolean();
+
+    /**
+     * Что пришло, пока ИИ думал, и на что ответить надо. Хранится только
+     * последнее: на пять сообщений подряд человек тоже отвечает одной репликой.
+     */
+    private final java.util.concurrent.atomic.AtomicReference<Waiting> pending =
+            new java.util.concurrent.atomic.AtomicReference<>();
+
+    private record Waiting(TelegramMessage message, boolean direct) {
+    }
     private final ExecutorService writer = Executors.newSingleThreadExecutor(runnable -> {
         var thread = new Thread(runnable, "parody-writer");
         thread.setDaemon(true);
@@ -313,15 +323,6 @@ public final class Parody {
                 && message.text().toLowerCase(java.util.Locale.ROOT).contains(mention);
 
         var now = clock.millis();
-        var gap = direct ? REPLY_GAP_MS : settings.cooldownMinutes() * 60_000L;
-
-        if (now - lastSent < gap) {
-            return;
-        }
-
-        if (!direct && random.nextInt(100) >= settings.chance()) {
-            return;
-        }
 
         if (settings.isQuiet(LocalTime.now(clock).getHour()) || overDaily()
                 || now < llmBlockedUntil) {
@@ -333,11 +334,42 @@ public final class Parody {
             return;
         }
 
-        if (!busy.compareAndSet(false, true)) {
+        // Пока ИИ думает над прошлым, обращение не теряем, а откладываем: раньше
+        // такие сообщения молча пропадали, и казалось, что бот отвечает выборочно
+        if (busy.get()) {
+            if (direct || alwaysAnswers()) {
+                pending.set(new Waiting(message, direct));
+            }
+
             return;
         }
 
-        lastSent = now;
+        var gap = direct ? REPLY_GAP_MS : settings.cooldownMinutes() * 60_000L;
+
+        if (now - lastSent < gap) {
+            return;
+        }
+
+        if (!direct && random.nextInt(100) >= settings.chance()) {
+            return;
+        }
+
+        reply(message, direct);
+    }
+
+    /** При вероятности 100% встревает во всё — значит, и молчать ему нельзя. */
+    private boolean alwaysAnswers() {
+        return settings.chance() >= 100;
+    }
+
+    /** Отвечает на сообщение; после ответа берётся за отложенное, если оно есть. */
+    private void reply(TelegramMessage message, boolean direct) {
+        if (!busy.compareAndSet(false, true)) {
+            pending.set(new Waiting(message, direct));
+            return;
+        }
+
+        lastSent = clock.millis();
         var context = context();
 
         // На обращение и на вопрос — ответом в цепочке, чтобы было видно, к чему
@@ -350,6 +382,11 @@ public final class Parody {
                 speak(context, replyTo, direct, null);
             } finally {
                 busy.set(false);
+                var next = pending.getAndSet(null);
+
+                if (next != null && running && !state.isPaused()) {
+                    reply(next.message(), next.direct());
+                }
             }
         });
     }
@@ -670,7 +707,7 @@ public final class Parody {
         }
 
         // К нему обратились — промолчать нельзя: вторая попытка, если первая не годится
-        var must = direct || preview != null;
+        var must = direct || preview != null || alwaysAnswers();
         var attempts = must ? 2 : 1;
         var text = "";
         var why = "";
@@ -764,22 +801,19 @@ public final class Parody {
     }
 
     /**
-     * Последняя доводка: эмодзи в конце, если сам участник ими почти не
-     * пользуется, — модели любят ставить их от себя.
+     * Последняя доводка: эмодзи в конце реплики убираются всегда — модели
+     * любят дописывать их от себя, и на живого человека это не похоже.
+     * Эмодзи внутри фразы остаются, если это его манера.
      */
     private String polish(String text) {
-        if (text.isBlank() || ParodyStyle.emojiShare(samples.all()) >= 10) {
-            return text;
-        }
-
-        return ParodyStyle.stripTrailingEmoji(text).strip();
+        return text.isBlank() ? text : ParodyStyle.stripTrailingEmoji(text).strip();
     }
 
     /** @param must обратились к нему — молчать нельзя */
     private String system(boolean must) {
         var name = settings.name();
         var emoji = ParodyStyle.emojiShare(samples.all()) >= 10
-                ? "Эмодзи — только как у него в образцах. "
+                ? "Эмодзи — только внутри фразы и только как у него в образцах, в конце реплики их не ставь. "
                 : "Эмодзи не ставь: он ими почти не пользуется. ";
         return "Ты пишешь пародийные реплики для группового чата в Telegram в манере участника "
                 + "по имени " + name + ". Он сам попросил об этой пародии, и каждая реплика "

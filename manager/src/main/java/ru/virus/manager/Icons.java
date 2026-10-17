@@ -20,7 +20,7 @@ import java.awt.geom.RoundRectangle2D;
  */
 final class Icons implements Icon {
 
-    enum Kind { PLAY, RESTART, STOP, EDIT, GEAR, PLUS, POWER }
+    enum Kind { PLAY, RESTART, STOP, EDIT, GEAR, PLUS, POWER, FOLDER, REPORT, UP, TRASH }
 
     private final Kind kind;
     private final Color color;
@@ -101,6 +101,49 @@ final class Icons implements Icon {
             case PLUS -> {
                 g.draw(new java.awt.geom.Line2D.Double(7, 2.5, 7, 11.5));
                 g.draw(new java.awt.geom.Line2D.Double(2.5, 7, 11.5, 7));
+            }
+            case FOLDER -> {
+                var p = new Path2D.Double();
+                p.moveTo(1.5, 3.5);
+                p.lineTo(5.5, 3.5);
+                p.lineTo(7, 5);
+                p.lineTo(12.5, 5);
+                p.lineTo(12.5, 11.5);
+                p.lineTo(1.5, 11.5);
+                p.closePath();
+                g.draw(p);
+            }
+            case REPORT -> {
+                var p = new Path2D.Double();
+                p.moveTo(3, 1.5);
+                p.lineTo(8.5, 1.5);
+                p.lineTo(11.5, 4.5);
+                p.lineTo(11.5, 12.5);
+                p.lineTo(3, 12.5);
+                p.closePath();
+                g.draw(p);
+                g.draw(new java.awt.geom.Line2D.Double(5, 7, 9.5, 7));
+                g.draw(new java.awt.geom.Line2D.Double(5, 9.5, 9.5, 9.5));
+            }
+            case UP -> {
+                g.draw(new java.awt.geom.Line2D.Double(7, 12, 7, 2.5));
+                var p = new Path2D.Double();
+                p.moveTo(3, 6.5);
+                p.lineTo(7, 2.5);
+                p.lineTo(11, 6.5);
+                g.draw(p);
+            }
+            case TRASH -> {
+                g.draw(new java.awt.geom.Line2D.Double(2, 3.5, 12, 3.5));
+                g.draw(new java.awt.geom.Line2D.Double(5.5, 3.5, 5.5, 1.8));
+                g.draw(new java.awt.geom.Line2D.Double(5.5, 1.8, 8.5, 1.8));
+                g.draw(new java.awt.geom.Line2D.Double(8.5, 1.8, 8.5, 3.5));
+                var p = new Path2D.Double();
+                p.moveTo(3.5, 3.5);
+                p.lineTo(4.3, 12.5);
+                p.lineTo(9.7, 12.5);
+                p.lineTo(10.5, 3.5);
+                g.draw(p);
             }
             case POWER -> {
                 g.draw(new Arc2D.Double(2, 2.5, 10, 10, 120, 300, Arc2D.OPEN));

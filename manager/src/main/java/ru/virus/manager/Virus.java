@@ -73,7 +73,9 @@ public final class Virus {
         var hasTray = SystemTray.isSupported();
 
         SwingUtilities.invokeAndWait(() -> {
-            var window = new MainWindow(supervisor, new ConfigService(home.resolve("config.properties")),
+            // Конфиг ищется там, где живёт бот: после переезда — в папке его проекта
+            var window = new MainWindow(supervisor,
+                    new ConfigService(() -> supervisor.botFolder().resolve("config.properties")),
                     autostart, quit, hasTray);
             instance.onShow(() -> SwingUtilities.invokeLater(window::reveal));
 

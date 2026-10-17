@@ -131,14 +131,26 @@ public final class DiscordWebhook {
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
 
-        // Вторая попытка — на свежем соединении. Обрыв обычно рвёт именно то, что
-        // лежало в пуле, и повтор проходит; без него сообщение ушло бы запасным
-        // путём, от имени бота, потеряв ник и аватарку написавшего
-        for (var attempt = 0; ; attempt++) {
+        var broken = 0;
+        var limited = 0;
+
+        while (true) {
+            // Discord заранее сказал, что лимит исчерпан, — ждём, а не получаем отказ
+            sleepUntil(pauseUntil);
             var client = http;
 
             try {
                 var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                remember(response);
+
+                // Слишком часто. У вебхука предел — около пяти сообщений за пару
+                // секунд, а в живой группе пишут быстрее. Раньше на этом сообщение
+                // уходило запасным путём, от имени бота, без ника и аватарки
+                if (response.statusCode() == 429 && limited < RATE_LIMIT_RETRIES) {
+                    limited++;
+                    pauseUntil = System.currentTimeMillis() + retryAfter(response);
+                    continue;
+                }
 
                 if (response.statusCode() / 100 != 2) {
                     throw new IOException("вебхук ответил " + response.statusCode() + ": "
@@ -149,13 +161,75 @@ public final class DiscordWebhook {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException("отправка прервана");
-            } catch (IOException broken) {
+            } catch (IOException failure) {
+                if (failure.getMessage() != null && failure.getMessage().startsWith("вебхук ответил")) {
+                    throw failure;
+                }
+
+                // Вторая попытка — на свежем соединении. Обрыв обычно рвёт именно то,
+                // что лежало в пуле, и повтор проходит
                 renew(client);
 
-                if (attempt > 0) {
-                    throw broken;
+                if (broken++ > 0) {
+                    throw failure;
                 }
             }
+        }
+    }
+
+    /** Сколько раз подряд ждать по просьбе Discord, прежде чем сдаться. */
+    private static final int RATE_LIMIT_RETRIES = 5;
+
+    /** Дольше не ждём: значит, что-то не так, пусть сообщение уйдёт запасным путём. */
+    private static final long LONGEST_WAIT_MS = 15_000;
+
+    /** До какого времени Discord просил не писать. */
+    private volatile long pauseUntil;
+
+    /** Заголовки лимита: «осталось 0, обнулится через N секунд» — запомним паузу заранее. */
+    private void remember(HttpResponse<String> response) {
+        var remaining = response.headers().firstValue("X-RateLimit-Remaining").orElse("");
+        var resetAfter = response.headers().firstValue("X-RateLimit-Reset-After").orElse("");
+
+        if (remaining.equals("0") && !resetAfter.isBlank()) {
+            try {
+                pauseUntil = System.currentTimeMillis() + Math.min(LONGEST_WAIT_MS,
+                        (long) (Double.parseDouble(resetAfter) * 1000) + 50);
+            } catch (NumberFormatException ignored) {
+                // непонятный заголовок — обойдёмся без паузы
+            }
+        }
+    }
+
+    /** Сколько ждать после 429: из тела (retry_after в секундах) или заголовка Retry-After. */
+    static long retryAfter(HttpResponse<String> response) {
+        double seconds = 1;
+
+        try {
+            seconds = DataObject.fromJson(response.body()).getDouble("retry_after", 1);
+        } catch (RuntimeException e) {
+            try {
+                seconds = Double.parseDouble(response.headers().firstValue("Retry-After").orElse("1"));
+            } catch (NumberFormatException ignored) {
+                // так и оставим секунду
+            }
+        }
+
+        return Math.min(LONGEST_WAIT_MS, Math.max(100, (long) (seconds * 1000) + 100));
+    }
+
+    private static void sleepUntil(long moment) throws IOException {
+        var wait = moment - System.currentTimeMillis();
+
+        if (wait <= 0) {
+            return;
+        }
+
+        try {
+            Thread.sleep(Math.min(wait, LONGEST_WAIT_MS));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("ожидание прервано");
         }
     }
 

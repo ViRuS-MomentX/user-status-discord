@@ -58,6 +58,24 @@ final class Supervisor {
         return new ManagedProcess(spec, home, java, home.resolve("logs").resolve(spec.id() + ".log"));
     }
 
+    Path home() {
+        return home;
+    }
+
+    /**
+     * Папка бота из этого репозитория — где лежат его настройки. Там, где
+     * запускается процесс с voice-bridge-bot.jar; нет такого — папка V.I.R.U.S.
+     */
+    synchronized Path botFolder() {
+        for (var process : processes.values()) {
+            if (process.spec().command().stream().anyMatch(part -> part.endsWith(Projects.BOT_JAR))) {
+                return process.workdir();
+            }
+        }
+
+        return home;
+    }
+
     synchronized List<ManagedProcess> all() {
         return List.copyOf(processes.values());
     }

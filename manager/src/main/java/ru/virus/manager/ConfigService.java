@@ -16,22 +16,27 @@ import java.util.Map;
  */
 final class ConfigService {
 
-    private final Path file;
+    /** Где файл — спрашиваем каждый раз: после переезда в папку проекта он уже в другом месте. */
+    private final java.util.function.Supplier<Path> where;
 
     ConfigService(Path file) {
-        this.file = file;
+        this(() -> file);
+    }
+
+    ConfigService(java.util.function.Supplier<Path> where) {
+        this.where = where;
     }
 
     Path file() {
-        return file;
+        return where.get();
     }
 
     boolean exists() {
-        return Files.isRegularFile(file);
+        return Files.isRegularFile(file());
     }
 
     ConfigFile read() throws IOException {
-        return ConfigFile.read(file);
+        return ConfigFile.read(file());
     }
 
     /** @return какие ключи действительно изменились */
@@ -40,7 +45,7 @@ final class ConfigService {
         var changed = config.update(changes);
 
         if (!changed.isEmpty()) {
-            config.write(file);
+            config.write(file());
         }
 
         return changed;
@@ -51,7 +56,7 @@ final class ConfigService {
     }
 
     void saveRaw(String text) throws IOException {
-        ConfigFile.parse(text.replace("\r\n", "\n")).write(file);
+        ConfigFile.parse(text.replace("\r\n", "\n")).write(file());
     }
 
     void createFromExample() throws IOException {
@@ -59,7 +64,7 @@ final class ConfigService {
             throw new IOException("config.properties уже есть");
         }
 
-        example().write(file);
+        example().write(file());
     }
 
     /** Сколько настроек из образца нет в файле. */
@@ -72,7 +77,7 @@ final class ConfigService {
         var added = config.addMissing(example());
 
         if (added > 0) {
-            config.write(file);
+            config.write(file());
         }
 
         return added;

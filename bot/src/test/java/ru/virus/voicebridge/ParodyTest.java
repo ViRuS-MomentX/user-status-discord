@@ -156,8 +156,8 @@ class ParodyTest {
         telegram.say(7, "Петя", "привет");
 
         assertNull(telegram.awaitSent(1, 1500));
-        // При 100% молчать нельзя — была вторая попытка, но и она пустая
-        assertEquals(2, prompts.size());
+        // При 100% молчать нельзя — были ещё попытки, но и они пустые
+        assertEquals(3, prompts.size());
     }
 
     @Test
@@ -653,5 +653,30 @@ class ParodyTest {
 
         assertTrue(cut.length() <= Parody.LONGEST_REPLY + 1, String.valueOf(cut.length()));
         assertTrue(cut.endsWith("слово…"), cut.substring(cut.length() - 10));
+    }
+
+    @Test
+    void copiedSampleIsRejectedAndNewLineSent() throws Exception {
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        start(settings(100, 0, 1), llm(p -> calls.incrementAndGet() == 1
+                ? "я сегодня опять не выспался короче" : "го лучше вечером катнём"),
+                "я сегодня опять не выспался короче", "ахах");
+
+        telegram.say(7, "Петя", "кто в доту");
+
+        var sent = telegram.awaitSent(1, 3000);
+        assertNotNull(sent);
+        assertEquals(Parody.MARK + "го лучше вечером катнём", sent.get("text"));
+        assertTrue(prompts.get(1).contains("слово в слово"), prompts.get(1));
+    }
+
+    @Test
+    void recognisesCopies() {
+        var samples = List.of("я сегодня опять не выспался короче", "ахах", "го");
+        assertTrue(Parody.copies("Я сегодня опять не выспался, короче!", samples));
+        assertTrue(Parody.copies("опять не выспался короче", samples), "кусок старого сообщения");
+        assertTrue(Parody.copies("я сегодня опять не выспался короче)", samples));
+        assertTrue(!Parody.copies("ахах", samples), "короткие словечки повторять можно");
+        assertTrue(!Parody.copies("сегодня как раз выспался, го катку", samples));
     }
 }

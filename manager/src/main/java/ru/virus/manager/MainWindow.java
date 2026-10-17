@@ -60,6 +60,8 @@ final class MainWindow extends JFrame {
     private final ConfigPage configPage;
     private final FilesPage filesPage;
     private final NavRow filesRow;
+    private final TasksPage tasksPage;
+    private final NavRow tasksRow;
     private final CardLayout pages = new CardLayout();
     private final JPanel center = Ui.transparent(pages);
     private final NavRow configRow;
@@ -71,7 +73,8 @@ final class MainWindow extends JFrame {
     private String view = "";
     private boolean trayHintShown;
 
-    MainWindow(Supervisor supervisor, ConfigService config, Autostart autostart, Runnable quit, boolean tray) {
+    MainWindow(Supervisor supervisor, ConfigService config, TaskStore tasks, Autostart autostart,
+               Runnable quit, boolean tray) {
         super(Virus.NAME);
         this.supervisor = supervisor;
         this.config = config;
@@ -87,6 +90,7 @@ final class MainWindow extends JFrame {
 
         processPage = new ProcessPage(background, worker, this::editProcess);
         configPage = new ConfigPage(background, config, this::toast, this::configSaved);
+        tasksPage = new TasksPage(background, tasks, this::toast, this::projectNames);
         filesPage = new FilesPage(background, supervisor, worker, this::toast, () -> {
             refresh();
             refreshMissing();
@@ -166,12 +170,17 @@ final class MainWindow extends JFrame {
 
         configRow = new NavRow(Icons.of(Icons.Kind.GEAR, Theme.ACCENT), "Конфиг ботов", () -> show("config"));
         filesRow = new NavRow(Icons.of(Icons.Kind.FOLDER, Theme.ACCENT), "Файлы проектов", () -> show("files"));
+        tasksRow = new NavRow(Icons.of(Icons.Kind.TASKS, Theme.ACCENT), "Задачи", () -> show("tasks"));
 
         side.add(indent(Ui.caption("Процессы")));
         side.add(Box.createVerticalStrut(8));
         side.add(processList);
         side.add(Box.createVerticalStrut(6));
         side.add(add);
+        side.add(Box.createVerticalStrut(20));
+        side.add(indent(Ui.caption("Работа")));
+        side.add(Box.createVerticalStrut(8));
+        side.add(tasksRow);
         side.add(Box.createVerticalStrut(20));
         side.add(indent(Ui.caption("Настройка")));
         side.add(Box.createVerticalStrut(8));
@@ -197,6 +206,7 @@ final class MainWindow extends JFrame {
         center.add(processPage, "process");
         center.add(configPage, "config");
         center.add(filesPage, "files");
+        center.add(tasksPage, "tasks");
 
         var body = Ui.transparent(new BorderLayout(16, 0));
         body.add(side, BorderLayout.WEST);
@@ -287,10 +297,21 @@ final class MainWindow extends JFrame {
 
         setVisible(false);
         background.stop();
+        tasksPage.flush();
 
         if (!trayHintShown) {
             trayHintShown = true;
             Virus.notifyTray("V.I.R.U.S. работает в трее", "Боты продолжают работать. Открыть окно — двойной клик по значку.");
+        }
+    }
+
+    /** Имена папок проектов — подсказки для поля «Проект» у задач. */
+    private List<String> projectNames() {
+        try {
+            return new Projects(supervisor.home()).list().stream()
+                    .map(path -> path.getFileName().toString()).toList();
+        } catch (java.io.IOException e) {
+            return List.of();
         }
     }
 
@@ -324,6 +345,9 @@ final class MainWindow extends JFrame {
         } else if (next.equals("config")) {
             configPage.reload();
             pages.show(center, "config");
+        } else if (next.equals("tasks")) {
+            tasksPage.reload();
+            pages.show(center, "tasks");
         } else if (next.equals("files")) {
             filesPage.reload();
             pages.show(center, "files");
@@ -334,6 +358,7 @@ final class MainWindow extends JFrame {
         rows.forEach((id, row) -> row.setSelected(view.equals("process:" + id)));
         configRow.setSelected(view.equals("config"));
         filesRow.setSelected(view.equals("files"));
+        tasksRow.setSelected(view.equals("tasks"));
     }
 
     private void refresh() {

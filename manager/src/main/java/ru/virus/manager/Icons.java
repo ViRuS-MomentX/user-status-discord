@@ -20,7 +20,7 @@ import java.awt.geom.RoundRectangle2D;
  */
 final class Icons implements Icon {
 
-    enum Kind { PLAY, RESTART, STOP, EDIT, GEAR, PLUS, POWER, FOLDER, REPORT, UP, TRASH }
+    enum Kind { PLAY, RESTART, STOP, EDIT, GEAR, PLUS, POWER, FOLDER, REPORT, UP, TRASH, TASKS }
 
     private final Kind kind;
     private final Color color;
@@ -144,6 +144,16 @@ final class Icons implements Icon {
                 p.lineTo(9.7, 12.5);
                 p.lineTo(10.5, 3.5);
                 g.draw(p);
+            }
+            case TASKS -> {
+                g.draw(new RoundRectangle2D.Double(1.5, 2, 4, 4, 1.5, 1.5));
+                var p = new Path2D.Double();
+                p.moveTo(2.4, 9.8);
+                p.lineTo(3.5, 11);
+                p.lineTo(5.6, 8.4);
+                g.draw(p);
+                g.draw(new java.awt.geom.Line2D.Double(8, 4, 12.5, 4));
+                g.draw(new java.awt.geom.Line2D.Double(8, 9.8, 12.5, 9.8));
             }
             case POWER -> {
                 g.draw(new Arc2D.Double(2, 2.5, 10, 10, 120, 300, Arc2D.OPEN));

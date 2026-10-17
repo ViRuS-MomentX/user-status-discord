@@ -63,7 +63,25 @@ public final class Virus {
             return;
         }
 
+        // Задачи — до процессов: их запись быстрая, а выключение ПК ждать не станет
+        var tasks = new TaskStore(home.resolve("tasks.json"));
+        String tasksProblem = null;
+
+        try {
+            tasks.load();
+        } catch (Exception e) {
+            tasksProblem = e.getMessage();
+        }
+
+        var tasksWarning = tasksProblem;
+
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                tasks.saveNow();
+            } catch (Exception e) {
+                say("Задачи не сохранились: " + e.getMessage());
+            }
+
             say("Останавливаю процессы…");
             supervisor.stopAll();
             instance.release();
@@ -76,7 +94,7 @@ public final class Virus {
             // Конфиг ищется там, где живёт бот: после переезда — в папке его проекта
             var window = new MainWindow(supervisor,
                     new ConfigService(() -> supervisor.botFolder().resolve("config.properties")),
-                    autostart, quit, hasTray);
+                    tasks, autostart, quit, hasTray);
             instance.onShow(() -> SwingUtilities.invokeLater(window::reveal));
 
             if (hasTray) {
@@ -88,6 +106,11 @@ public final class Virus {
             // Без значка в трее спрятанное окно было бы не найти
             if (!background || trayIcon == null) {
                 window.reveal();
+            }
+
+            if (tasksWarning != null) {
+                JOptionPane.showMessageDialog(window, "Задачи не прочитались: " + tasksWarning
+                        + "\nСтарый файл будет сохранён рядом как tasks.json.broken.", NAME, JOptionPane.WARNING_MESSAGE);
             }
         });
 

@@ -114,6 +114,9 @@ public final class Parody {
 
     private volatile long lastSent;
 
+    /** Подсказка про закрытый Telegram уже была. */
+    private volatile boolean blockAdvised;
+
     /** До какого времени ИИ не трогаем после сбоя, и сколько сбоев было подряд. */
     private volatile long llmBlockedUntil;
     private int llmFailures;
@@ -193,6 +196,7 @@ public final class Parody {
             } catch (Exception e) {
                 log.warn("Пародийный бот не достучался до Telegram: {}. Пробую через {} с.",
                         reason(e), RETRY_PAUSE_MS / 1000);
+                adviseIfBlocked(e);
 
                 if (!pause()) {
                     return;
@@ -225,6 +229,7 @@ public final class Parody {
                 } else {
                     log.warn("Telegram не ответил пародийному боту: {}. Пробую через {} с.",
                             reason(e), RETRY_PAUSE_MS / 1000);
+                    adviseIfBlocked(e);
                 }
 
                 if (!pause()) {
@@ -232,6 +237,29 @@ public final class Parody {
                 }
             }
         }
+    }
+
+    /**
+     * Обрыв рукопожатия, таймаут, сброс — так выглядит закрытый провайдером
+     * api.telegram.org. Подсказываем выход один раз, а не каждые 15 секунд.
+     */
+    private void adviseIfBlocked(Exception e) {
+        if (blockAdvised || !settings.api().isBlank() || !settings.proxy().isBlank()
+                || !looksBlocked(reason(e))) {
+            return;
+        }
+
+        blockAdvised = true;
+        log.warn("Похоже, api.telegram.org у тебя закрыт провайдером. Пропиши в настройках "
+                + "bridge.telegram.api — адрес пересыльщика на Cloudflare (папка cloudflare) — "
+                + "и добавь в нём секрет PARODY_TOKEN с токеном пародийного бота. "
+                + "Или задай HTTP-прокси в bridge.telegram.proxy.");
+    }
+
+    static boolean looksBlocked(String reason) {
+        var text = reason.toLowerCase(java.util.Locale.ROOT);
+        return text.contains("handshake") || text.contains("timed out") || text.contains("reset")
+                || text.contains("соединение не установилось");
     }
 
     /** Что случилось — словами; у отказа в соединении текста нет вовсе, и в логе стояло бы «null». */

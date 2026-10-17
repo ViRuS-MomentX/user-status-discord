@@ -23,8 +23,11 @@ import java.util.zip.ZipOutputStream;
  */
 final class Reporter {
 
-    /** Похоже на токен телеграм-бота: 1234567890:AAH… */
-    private static final Pattern TELEGRAM_TOKEN = Pattern.compile("\\b\\d{6,12}:[A-Za-z0-9_-]{30,}");
+    /**
+     * Похоже на токен телеграм-бота: 1234567890:AAH… Без \\b впереди: в адресах
+     * токен идёт сразу за «bot» — «/bot1234567890:AAH…/getMe».
+     */
+    private static final Pattern TELEGRAM_TOKEN = Pattern.compile("(?<!\\d)\\d{6,12}:[A-Za-z0-9_-]{30,}");
 
     /** Похоже на токен Discord-бота: три части через точку. */
     private static final Pattern DISCORD_TOKEN = Pattern.compile("\\b[A-Za-z0-9_-]{23,28}\\.[A-Za-z0-9_-]{6,7}\\.[A-Za-z0-9_-]{27,}");

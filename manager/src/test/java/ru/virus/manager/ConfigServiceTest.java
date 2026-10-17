@@ -53,4 +53,11 @@ class ConfigServiceTest {
         assertEquals("a=1\nb=2\n", Files.readString(file));
         assertEquals("2", config.read().values().get("b"));
     }
+
+    @Test
+    void pastedKeyIsCutFromValue() {
+        var clean = ConfigService.withoutPastedKeys(java.util.Map.of(
+                "bridge.telegram.api", "bridge.telegram.api=https://x.workers.dev"));
+        assertEquals("https://x.workers.dev", clean.get("bridge.telegram.api"));
+    }
 }

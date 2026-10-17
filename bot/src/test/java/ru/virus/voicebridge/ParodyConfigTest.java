@@ -122,4 +122,16 @@ class ParodyConfigTest {
     void offByDefault() throws Exception {
         assertFalse(load("").enabled());
     }
+
+    @Test
+    void keyPastedIntoValueIsCutOff() throws Exception {
+        var settings = load("bridge.telegram.api=bridge.telegram.api=https://x.y.workers.dev\n");
+        assertEquals("https://x.y.workers.dev", settings.api());
+    }
+
+    @Test
+    void apiMustBeAnAddress() {
+        org.junit.jupiter.api.Assertions.assertThrows(BotConfig.ConfigException.class,
+                () -> load("bridge.telegram.api=tg-bridge.workers.dev\n"));
+    }
 }

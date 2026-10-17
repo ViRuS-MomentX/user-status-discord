@@ -256,7 +256,36 @@ public final class BotConfig {
             }
         }
 
+        fixPastedKeys(props);
+        var api = props.getProperty("bridge.telegram.api", "").trim();
+
+        if (!api.isEmpty() && !api.matches("(?i)https?://[^\\s/]+.*")) {
+            throw new ConfigException("bridge.telegram.api должен быть адресом вида "
+                    + "https://имя.логин.workers.dev, а не «" + api + "».");
+        }
+
         return props;
+    }
+
+    /**
+     * «ключ=ключ=значение» — частая ошибка: строку из подсказки целиком
+     * вставляют в поле значения. Отрезаем повтор и предупреждаем.
+     */
+    static void fixPastedKeys(Properties props) {
+        for (var key : props.stringPropertyNames()) {
+            var value = props.getProperty(key).strip();
+            var fixed = value;
+
+            while (fixed.startsWith(key + "=") || fixed.startsWith(key + ":")) {
+                fixed = fixed.substring(key.length() + 1).strip();
+            }
+
+            if (!fixed.equals(value)) {
+                log.warn("В {} имя настройки повторено в значении («{}=…») — читаю как «{}=…». "
+                        + "Поправь строку в конфиге.", key, key, key);
+                props.setProperty(key, fixed);
+            }
+        }
     }
 
     /** Строка, значение которой — путь Windows: «C:\...» или сетевой «\\сервер\...». */

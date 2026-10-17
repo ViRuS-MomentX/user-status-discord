@@ -34,7 +34,7 @@ class ReporterTest {
         Files.writeString(home.resolve("parody-samples.json"), "[\"личное сообщение\"]");
         Files.writeString(home.resolve("parody-state.json"), "{\"paused\":false}");
         Files.createDirectories(home.resolve("logs"));
-        Files.writeString(home.resolve("logs/parody.log"), "ошибка с токеном " + TG + " и " + HOOK + " и " + DISCORD);
+        Files.writeString(home.resolve("logs/parody.log"), "ошибка с токеном " + TG + " и https://x.workers.dev/bot" + TG + "/getMe и " + HOOK + " и " + DISCORD);
 
         var supervisor = new Supervisor(home, "java");
         supervisor.load();

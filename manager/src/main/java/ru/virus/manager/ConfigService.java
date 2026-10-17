@@ -42,13 +42,33 @@ final class ConfigService {
     /** @return какие ключи действительно изменились */
     List<String> save(Map<String, String> changes) throws IOException {
         var config = read();
-        var changed = config.update(changes);
+        var changed = config.update(withoutPastedKeys(changes));
 
         if (!changed.isEmpty()) {
             config.write(file());
         }
 
         return changed;
+    }
+
+    /**
+     * Вставили в поле строку целиком — «ключ=значение» — и вышло бы
+     * «ключ=ключ=значение». Отрезаем повторённое имя.
+     */
+    static Map<String, String> withoutPastedKeys(Map<String, String> changes) {
+        var clean = new java.util.LinkedHashMap<String, String>();
+
+        changes.forEach((key, value) -> {
+            var fixed = value.strip();
+
+            while (fixed.startsWith(key + "=") || fixed.startsWith(key + ":")) {
+                fixed = fixed.substring(key.length() + 1).strip();
+            }
+
+            clean.put(key, fixed.equals(value.strip()) ? value : fixed);
+        });
+
+        return clean;
     }
 
     String raw() throws IOException {

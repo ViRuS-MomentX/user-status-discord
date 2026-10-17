@@ -146,6 +146,8 @@ public final class Virus {
                 window.reveal();
             }
 
+            DevicePage.applyOnStart(home);
+
             if (moveWarning != null) {
                 JOptionPane.showMessageDialog(window, "Не получилось перенести бота в папку projects/"
                         + Projects.BOT + ": " + moveWarning + "\nПока он работает из папки V.I.R.U.S.",

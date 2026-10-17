@@ -60,6 +60,8 @@ final class MainWindow extends JFrame {
     private final ConfigPage configPage;
     private final TasksPage tasksPage;
     private final NavRow tasksRow;
+    private final DevicePage devicePage;
+    private final NavRow deviceRow;
     private final CardLayout pages = new CardLayout();
     private final JPanel center = Ui.transparent(pages);
     private final NavRow configRow;
@@ -89,6 +91,7 @@ final class MainWindow extends JFrame {
 
         processPage = new ProcessPage(background, worker, this::editProcess);
         configPage = new ConfigPage(background, config, this::toast, this::configSaved);
+        devicePage = new DevicePage(background, supervisor.home(), this::toast, this::bridgeApi);
         tasksPage = new TasksPage(background, tasks, this::toast, this::projectNames);
 
         // Фон — всё окно; поверх него карточки с отступами, чтобы между ними
@@ -172,6 +175,7 @@ final class MainWindow extends JFrame {
 
         configRow = new NavRow(Icons.of(Icons.Kind.GEAR, Theme.ACCENT), "Конфиг ботов", () -> show("config"));
         tasksRow = new NavRow(Icons.of(Icons.Kind.TASKS, Theme.ACCENT), "Задачи", () -> show("tasks"));
+        deviceRow = new NavRow(Icons.of(Icons.Kind.DEVICE, Theme.ACCENT), "Устройство", () -> show("device"));
 
         side.add(indent(Ui.caption("Процессы")));
         side.add(Box.createVerticalStrut(8));
@@ -182,6 +186,8 @@ final class MainWindow extends JFrame {
         side.add(indent(Ui.caption("Работа")));
         side.add(Box.createVerticalStrut(8));
         side.add(tasksRow);
+        side.add(Box.createVerticalStrut(4));
+        side.add(deviceRow);
         side.add(Box.createVerticalStrut(20));
         side.add(indent(Ui.caption("Настройка")));
         side.add(Box.createVerticalStrut(8));
@@ -205,6 +211,7 @@ final class MainWindow extends JFrame {
         center.add(processPage, "process");
         center.add(configPage, "config");
         center.add(tasksPage, "tasks");
+        center.add(devicePage, "device");
 
         var body = Ui.transparent(new BorderLayout(16, 0));
         body.add(side, BorderLayout.WEST);
@@ -307,6 +314,15 @@ final class MainWindow extends JFrame {
         onDiscord = action;
     }
 
+    /** Свой адрес Bot API из настроек бота — его тоже проверяем на связь. */
+    private String bridgeApi() {
+        try {
+            return config.exists() ? config.read().values().getOrDefault("bridge.telegram.api", "").strip() : "";
+        } catch (java.io.IOException e) {
+            return "";
+        }
+    }
+
     /** Имена папок проектов — подсказки для поля «Проект» у задач. */
     private List<String> projectNames() {
         try {
@@ -332,6 +348,10 @@ final class MainWindow extends JFrame {
             return;
         }
 
+        if (view.equals("device") && !next.equals("device")) {
+            devicePage.closed();
+        }
+
         view = next;
 
         if (next.startsWith("process:")) {
@@ -347,6 +367,9 @@ final class MainWindow extends JFrame {
         } else if (next.equals("config")) {
             configPage.reload();
             pages.show(center, "config");
+        } else if (next.equals("device")) {
+            devicePage.opened();
+            pages.show(center, "device");
         } else if (next.equals("tasks")) {
             tasksPage.reload();
             pages.show(center, "tasks");
@@ -357,6 +380,7 @@ final class MainWindow extends JFrame {
         rows.forEach((id, row) -> row.setSelected(view.equals("process:" + id)));
         configRow.setSelected(view.equals("config"));
         tasksRow.setSelected(view.equals("tasks"));
+        deviceRow.setSelected(view.equals("device"));
     }
 
     private void refresh() {

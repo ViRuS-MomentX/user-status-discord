@@ -243,7 +243,7 @@ final class TasksPage extends Ui.Card {
         var notesScroll = new JScrollPane(notes);
         notesScroll.setBorder(BorderFactory.createLineBorder(Theme.LINE));
 
-        var notesHint = Ui.muted("Enter — продолжить список · Ctrl+D — галочка [x] · Alt+↑↓ — двигать задачу", 12f);
+        var notesHint = Ui.muted("Enter — список · Ctrl+D — галочка · Alt+↑↓ — двигать", 12f);
         notesHint.setToolTipText("Списки: «1.», «-», «•», «[ ]». Пустой пункт + Enter — конец списка.");
         var notesFoot = Ui.transparent(new BorderLayout(10, 0));
         notesFoot.add(notesHint, BorderLayout.CENTER);

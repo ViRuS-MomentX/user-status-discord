@@ -75,6 +75,25 @@ public final class Virus {
 
         var tasksWarning = tasksProblem;
 
+        // «Играет в V.I.R.U.S.» в Discord — со своей картинкой
+        var settings = new VirusSettings(home.resolve("virus-settings.json"));
+
+        try {
+            settings.load();
+        } catch (Exception e) {
+            say("virus-settings.json не прочитался: " + e.getMessage());
+        }
+
+        var startedAt = System.currentTimeMillis();
+        var presenceStatus = new java.util.concurrent.atomic.AtomicReference<>("ещё не подключался");
+        var presence = new DiscordPresence(
+                () -> settings.flag("discord.enabled", true) ? settings.text("discord.app", "") : "",
+                () -> new DiscordPresence.Activity(activityLine(supervisor), settings.text("discord.state", ""),
+                        settings.text("discord.image", "virus"), "Versatile Instance Runner & Unified Supervisor",
+                        startedAt),
+                presenceStatus::set);
+        presence.start();
+
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
                 tasks.saveNow();
@@ -82,6 +101,7 @@ public final class Virus {
                 say("Задачи не сохранились: " + e.getMessage());
             }
 
+            presence.close();
             say("Останавливаю процессы…");
             supervisor.stopAll();
             instance.release();
@@ -96,6 +116,8 @@ public final class Virus {
                     new ConfigService(() -> supervisor.botFolder().resolve("config.properties")),
                     tasks, autostart, quit, hasTray);
             instance.onShow(() -> SwingUtilities.invokeLater(window::reveal));
+            window.onDiscord(() -> PresenceDialog.show(window, settings, presence, presenceStatus::get,
+                    window::toast));
 
             if (hasTray) {
                 tray(window, quit);
@@ -115,6 +137,13 @@ public final class Virus {
         });
 
         supervisor.startAutostart();
+    }
+
+    /** Первая строка статуса в Discord: сколько процессов работает. */
+    static String activityLine(Supervisor supervisor) {
+        var all = supervisor.all();
+        var running = all.stream().filter(process -> process.state() == ManagedProcess.State.RUNNING).count();
+        return running == 0 ? "Процессы остановлены" : "Работает процессов: " + running + " из " + all.size();
     }
 
     /** Папка V.I.R.U.S.: где лежит virus.jar, а рядом с ним — боты и их настройки. */

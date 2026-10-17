@@ -71,6 +71,7 @@ final class MainWindow extends JFrame {
     private final Timer toastTimer;
 
     private String view = "";
+    private Runnable onDiscord = () -> toast("Статус в Discord недоступен");
     private boolean trayHintShown;
 
     MainWindow(Supervisor supervisor, ConfigService config, TaskStore tasks, Autostart autostart,
@@ -124,6 +125,12 @@ final class MainWindow extends JFrame {
         report.setToolTipText("Собрать логи и настройки без токенов в один архив — его можно отправить");
         report.addActionListener(e -> makeReport());
 
+        var discord = Ui.button("Discord");
+        discord.setIcon(Icons.of(Icons.Kind.GEAR, Theme.TEXT));
+        discord.setIconTextGap(8);
+        discord.setToolTipText("Статус «Играет в V.I.R.U.S.» с картинкой в профиле Discord");
+        discord.addActionListener(e -> onDiscord.run());
+
         var quitButton = Ui.danger("Выключить всё");
         quitButton.setIcon(Icons.of(Icons.Kind.POWER, Theme.ERROR));
         quitButton.setIconTextGap(8);
@@ -138,6 +145,7 @@ final class MainWindow extends JFrame {
             actions.add(Box.createHorizontalStrut(10));
         }
 
+        actions.add(discord);
         actions.add(report);
         actions.add(quitButton);
 
@@ -303,6 +311,10 @@ final class MainWindow extends JFrame {
             trayHintShown = true;
             Virus.notifyTray("V.I.R.U.S. работает в трее", "Боты продолжают работать. Открыть окно — двойной клик по значку.");
         }
+    }
+
+    void onDiscord(Runnable action) {
+        onDiscord = action;
     }
 
     /** Имена папок проектов — подсказки для поля «Проект» у задач. */

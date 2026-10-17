@@ -89,6 +89,17 @@ class ParodyConfigTest {
     }
 
     @Test
+    void markCanChangeWordsButNotMeaning() throws Exception {
+        assertEquals("пародия: ", load("").mark());
+        assertEquals("🤖 Вася-бот: ", load("parody.mark=🤖 Вася-бот:\n").mark());
+        assertEquals("[ИИ] ", load("parody.mark=[ИИ]\n").mark());
+        assertEquals("пародия: ", load("parody.mark=Вася:\n").mark(), "без признака ИИ — нельзя");
+        assertEquals("пародия: ", load("parody.mark=роботы атакуют\n").mark(),
+                "«бот» внутри другого слова — не признак");
+        assertEquals("пародия: ", load("parody.mark=" + "пародия".repeat(10) + "\n").mark());
+    }
+
+    @Test
     void offByDefault() throws Exception {
         assertFalse(load("").enabled());
     }

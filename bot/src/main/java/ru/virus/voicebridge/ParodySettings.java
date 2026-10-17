@@ -25,13 +25,48 @@ package ru.virus.voicebridge;
  *              выключать пародию командами; 0 — команды только у участника
  * @param quiet тихие часы «с-до» по часам компьютера, например «23-8»; пусто — без них
  * @param daily сколько реплик в сутки самое большее; 0 — без предела
+ * @param mark с чего начинается каждая реплика, с пробелом на конце
  */
 public record ParodySettings(boolean enabled, String token, String chat, long target, String name,
                              String llmProvider, String llmKey, String llmModel,
                              String llmScope, String llmCert, String llmUrl, String llmProxy,
                              int chance, int cooldownMinutes, int minSamples, String importFile,
                              String proxy, String api,
-                             long owner, String quiet, int daily) {
+                             long owner, String quiet, int daily, String mark) {
+
+    /** Пометка по умолчанию. */
+    public static final String DEFAULT_MARK = "пародия: ";
+
+    /** Длиннее — пометка уже не пометка, а отдельная реплика. */
+    private static final int MARK_LIMIT = 40;
+
+    /**
+     * Своя пометка — если по ней всё ещё видно, что пишет не человек.
+     *
+     * <p>Бот носит ник и аватарку участника, и без ясной пометки в группе думали
+     * бы, что это написал он сам. Поэтому слова менять можно, а убрать смысл —
+     * нет: в пометке должно быть «пародия», «ИИ», «AI», «бот» или 🤖.
+     *
+     * @return пометка с пробелом на конце; {@code null}, если такая не годится
+     */
+    public static String acceptMark(String raw) {
+        var trimmed = raw.strip();
+
+        if (trimmed.isEmpty()) {
+            return DEFAULT_MARK;
+        }
+
+        if (trimmed.length() > MARK_LIMIT) {
+            return null;
+        }
+
+        var lower = trimmed.toLowerCase(java.util.Locale.ROOT);
+        var clear = lower.contains("пароди") || lower.contains("🤖")
+                || lower.matches("(?s).*(^|[^\\p{L}])(ии|ai|бот|bot)([^\\p{L}]|$).*")
+                || lower.contains("бот-") || lower.contains("-бот");
+
+        return clear ? trimmed + " " : null;
+    }
 
     /**
      * Тихий ли сейчас час.

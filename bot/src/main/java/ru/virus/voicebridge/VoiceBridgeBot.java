@@ -35,7 +35,17 @@ public final class VoiceBridgeBot {
     private static final Logger log = LoggerFactory.getLogger(VoiceBridgeBot.class);
 
     public static void main(String[] args) {
-        Path configPath = Paths.get(args.length > 0 ? args[0] : "config.properties");
+        var launch = Launch.parse(args);
+        Path configPath = Paths.get(launch.config());
+
+        if (launch.supervised()) {
+            listenToSupervisor();
+        }
+
+        if (launch.parodyOnly()) {
+            runParodyOnly(configPath);
+            return;
+        }
 
         BotConfig config;
         try {
@@ -307,7 +317,8 @@ public final class VoiceBridgeBot {
             log.error("Слежение за лентой включено, но не задан posts.url или posts.channel.");
         }
 
-        var parody = startParody(config, configPath);
+        var parody = launch.withoutParody() ? null
+                : startParody(config.getParody(), config.getBridge().token(), configPath);
 
         if (parody != null && toTelegram != null) {
             // Пародия слышит и Discord: сообщений моста она в группе не видит
@@ -371,15 +382,124 @@ public final class VoiceBridgeBot {
     }
 
     /**
+     * Как запустили.
+     *
+     * @param config путь к настройкам
+     * @param parodyOnly только пародия, без Discord
+     * @param withoutParody всё, кроме пародии: её запускают отдельно
+     * @param supervised запущен из V.I.R.U.S. — слушать его команды
+     */
+    record Launch(String config, boolean parodyOnly, boolean withoutParody, boolean supervised) {
+
+        static Launch parse(String[] args) {
+            var config = "config.properties";
+            var parodyOnly = false;
+            var withoutParody = false;
+            var supervised = false;
+
+            for (var arg : args) {
+                switch (arg) {
+                    case "--parody-only" -> parodyOnly = true;
+                    case "--no-parody" -> withoutParody = true;
+                    case "--supervised" -> supervised = true;
+                    default -> {
+                        if (arg.startsWith("--")) {
+                            log.warn("Не знаю ключа {} — пропускаю.", arg);
+                        } else {
+                            config = arg;
+                        }
+                    }
+                }
+            }
+
+            return new Launch(config, parodyOnly, withoutParody, supervised);
+        }
+    }
+
+    /**
+     * Слушает V.I.R.U.S. через стандартный ввод.
+     *
+     * <p>«stop» — выйти по-хорошему: с сохранением балансов и прочего, чего не
+     * дождался бы жёсткий обрыв процесса. Конец ввода — V.I.R.U.S. закрылся сам,
+     * и мы тоже уходим: иначе после его перезапуска работали бы две копии бота
+     * с одним токеном и растаскивали бы сообщения друг у друга.
+     */
+    private static void listenToSupervisor() {
+        var listener = new Thread(() -> {
+            try (var in = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(System.in, java.nio.charset.StandardCharsets.UTF_8))) {
+                String line;
+
+                while ((line = in.readLine()) != null) {
+                    if (line.trim().equalsIgnoreCase("stop")) {
+                        log.info("V.I.R.U.S. просит остановиться.");
+                        System.exit(0);
+                    }
+                }
+
+                log.info("V.I.R.U.S. закрылся — останавливаюсь и я.");
+            } catch (IOException e) {
+                log.info("Связь с V.I.R.U.S. оборвалась — останавливаюсь.");
+            }
+
+            System.exit(0);
+        }, "supervisor");
+
+        listener.setDaemon(true);
+        listener.start();
+    }
+
+    /** Одна пародия, без Discord: настройки Discord для неё не нужны вовсе. */
+    private static void runParodyOnly(Path configPath) {
+        BotConfig.ParodyOnly settings;
+
+        try {
+            settings = BotConfig.loadParodyOnly(configPath);
+        } catch (BotConfig.ConfigException e) {
+            log.error("Ошибка настройки: {}", e.getMessage());
+            System.exit(2);
+            return;
+        }
+
+        if (!settings.parody().enabled()) {
+            log.error("Пародия выключена: parody.enabled=false. Включи её в настройках.");
+            System.exit(2);
+            return;
+        }
+
+        var parody = startParody(settings.parody(), settings.bridgeToken(), configPath);
+
+        if (parody == null) {
+            System.exit(2);
+            return;
+        }
+
+        log.info("Пародия работает отдельно от Discord — сказанное там она не слышит.");
+
+        var stopped = new java.util.concurrent.CountDownLatch(1);
+
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            log.info("Останавливаюсь.");
+            parody.stop();
+            stopped.countDown();
+        }, "parody-shutdown"));
+
+        try {
+            // Потоки пародии фоновые: без этого ожидания программа закрылась бы сразу
+            stopped.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
      * Поднимает пародийного бота, если он включён.
      *
      * <p>Discord ему не нужен: он живёт только в группе Telegram.
      *
      * @return запущенный бот или {@code null}
      */
-    private static Parody startParody(BotConfig config, Path configPath) {
-        var settings = config.getParody();
-
+    private static Parody startParody(ParodySettings settings, String bridgeToken, Path configPath) {
         if (!settings.isUsable()) {
             if (settings.enabled()) {
                 log.error("Пародия включена, но не задан parody.telegram.token, "
@@ -389,7 +509,7 @@ public final class VoiceBridgeBot {
             return null;
         }
 
-        if (settings.token().equals(config.getBridge().token())) {
+        if (settings.token().equals(bridgeToken)) {
             // Обновления у бота одни на всех: два потока с одним токеном
             // растаскивали бы сообщения друг у друга, и часть не дошла бы до Discord
             log.error("У пародийного бота должен быть свой токен, не тот, что у моста. "
@@ -411,7 +531,7 @@ public final class VoiceBridgeBot {
             return null;
         } catch (IOException e) {
             log.warn("Telegram сейчас не отвечает пародийному боту: {}. Буду пробовать дальше.",
-                    e.getMessage());
+                    Parody.reason(e));
 
             if (settings.api().contains("workers.dev")) {
                 // Пересыльщик пускает только знакомые токены, а у пародии свой

@@ -183,16 +183,7 @@ public final class BotConfig {
      *                         исключения рассчитан на то, что его увидит человек в консоли
      */
     public static BotConfig load(Path file) throws ConfigException {
-        Properties props = new Properties();
-
-        if (Files.isRegularFile(file)) {
-            try (InputStream in = Files.newInputStream(file);
-                 Reader reader = new InputStreamReader(in, StandardCharsets.UTF_8)) {
-                props.load(reader);
-            } catch (IOException e) {
-                throw new ConfigException("Не удалось прочитать " + file.toAbsolutePath() + ": " + e.getMessage());
-            }
-        }
+        Properties props = read(file);
 
         String token = pick(props, "bot.token", "VOICEBRIDGE_BOT_TOKEN");
         if (token.isEmpty()) {
@@ -236,6 +227,36 @@ public final class BotConfig {
                 librarySettings(props),
                 bridgeSettings(props),
                 parodySettings(props));
+    }
+
+    /**
+     * Только то, что нужно пародии, — для запуска её одной, без Discord.
+     *
+     * @return настройки пародии и токен моста: совпадать им нельзя
+     */
+    public static ParodyOnly loadParodyOnly(Path file) throws ConfigException {
+        var props = read(file);
+        return new ParodyOnly(parodySettings(props),
+                pick(props, "bridge.telegram.token", "VOICEBRIDGE_TELEGRAM_TOKEN"));
+    }
+
+    /** Пародия сама по себе и токен моста, с которым её токен сверяется. */
+    public record ParodyOnly(ParodySettings parody, String bridgeToken) {
+    }
+
+    private static Properties read(Path file) throws ConfigException {
+        Properties props = new Properties();
+
+        if (Files.isRegularFile(file)) {
+            try (InputStream in = Files.newInputStream(file);
+                 Reader reader = new InputStreamReader(in, StandardCharsets.UTF_8)) {
+                props.load(reader);
+            } catch (IOException e) {
+                throw new ConfigException("Не удалось прочитать " + file.toAbsolutePath() + ": " + e.getMessage());
+            }
+        }
+
+        return props;
     }
 
     /**
@@ -301,7 +322,22 @@ public final class BotConfig {
                 props.getProperty("bridge.telegram.api", "").trim(),
                 number(props, "parody.telegram.owner", 0),
                 quiet(props.getProperty("parody.quiet", "").trim()),
-                bounded(props, "parody.daily", 30, 0, 10_000));
+                bounded(props, "parody.daily", 30, 0, 10_000),
+                mark(props.getProperty("parody.mark", "")));
+    }
+
+    /** Пометка реплик пародии; негодная заменяется стандартной. */
+    private static String mark(String raw) {
+        var accepted = ParodySettings.acceptMark(raw);
+
+        if (accepted == null) {
+            log.error("parody.mark «{}» не годится: по пометке должно быть видно, что пишет не "
+                    + "человек, — нужно слово «пародия», «ИИ», «AI», «бот» или 🤖, и не длиннее "
+                    + "40 знаков. Беру «{}».", raw.strip(), ParodySettings.DEFAULT_MARK.strip());
+            return ParodySettings.DEFAULT_MARK;
+        }
+
+        return accepted;
     }
 
     /** Тихие часы «с-до»; неразборчивое — без тихих часов, но с записью в лог. */

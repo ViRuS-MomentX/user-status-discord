@@ -64,7 +64,8 @@ class ParodyTest {
     static ParodySettings settings(int chance, int cooldown, int minSamples, String quiet, int daily) {
         return new ParodySettings(true, "T", "@grp", TARGET, "Вася",
                 "anthropic", "KEY", "model", "", "", "", "",
-                chance, cooldown, minSamples, "", "", "", OWNER, quiet, daily);
+                chance, cooldown, minSamples, "", "", "", OWNER, quiet, daily,
+                ParodySettings.DEFAULT_MARK);
     }
 
     ParodySamples store;

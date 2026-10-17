@@ -25,16 +25,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>Пишет только в Telegram. В Discord его реплики не уходят: мост пропускает
  * всё, что прислали боты, а это бот.
  *
- * <p>Каждая реплика начинается с {@link #MARK}. Пометка зашита в код, а не в
- * настройки: бот выглядит как участник, и без неё в группе думали бы, что это
- * написал он сам.
+ * <p>Каждая реплика начинается с пометки — по умолчанию {@link #MARK}. Слова
+ * можно поменять в parody.mark, но убрать пометку нельзя: бот выглядит как
+ * участник, и без неё в группе думали бы, что это написал он сам.
  */
 public final class Parody {
 
     private static final Logger log = LoggerFactory.getLogger(Parody.class);
 
     /** С чего начинается каждая реплика. */
-    static final String MARK = "пародия: ";
+    static final String MARK = ParodySettings.DEFAULT_MARK;
 
     /** Меню команд: Telegram подсказывает их при наборе «/». */
     private static final java.util.Map<String, String> COMMANDS;
@@ -175,7 +175,7 @@ public final class Parody {
                 writer.execute(this::checkLlm);
             } catch (Exception e) {
                 log.warn("Пародийный бот не достучался до Telegram: {}. Пробую через {} с.",
-                        e.getMessage(), RETRY_PAUSE_MS / 1000);
+                        reason(e), RETRY_PAUSE_MS / 1000);
 
                 if (!pause()) {
                     return;
@@ -207,7 +207,7 @@ public final class Parody {
                             + "Пробую через {} с.", RETRY_PAUSE_MS / 1000);
                 } else {
                     log.warn("Telegram не ответил пародийному боту: {}. Пробую через {} с.",
-                            e.getMessage(), RETRY_PAUSE_MS / 1000);
+                            reason(e), RETRY_PAUSE_MS / 1000);
                 }
 
                 if (!pause()) {
@@ -215,6 +215,15 @@ public final class Parody {
                 }
             }
         }
+    }
+
+    /** Что случилось — словами; у отказа в соединении текста нет вовсе, и в логе стояло бы «null». */
+    static String reason(Exception e) {
+        var message = e.getMessage();
+        return message == null || message.isBlank()
+                ? (e instanceof java.net.ConnectException ? "соединение не установилось"
+                    : e.getClass().getSimpleName())
+                : message;
     }
 
     private boolean pause() {
@@ -598,7 +607,7 @@ public final class Parody {
         if (preview != null) {
             // Проба не идёт в счёт: её видит только спросивший
             try {
-                telegram.sendText(preview, text.isBlank() ? "⚙️ ИИ решил промолчать." : MARK + text, 0);
+                telegram.sendText(preview, text.isBlank() ? "⚙️ ИИ решил промолчать." : settings.mark() + text, 0);
             } catch (Exception e) {
                 log.warn("Пробная реплика не ушла: {}", e.getMessage());
             }
@@ -619,7 +628,7 @@ public final class Parody {
      */
     void post(String text, long replyTo) {
         try {
-            var id = telegram.sendText(chatId, MARK + text, replyTo);
+            var id = telegram.sendText(chatId, settings.mark() + text, replyTo);
             state.countSent(LocalDate.now(clock));
             // Хозяин должен видеть, что бот говорит от лица участника
             log.info("Пародия сказала: {}", text);
@@ -662,7 +671,7 @@ public final class Parody {
         var name = settings.name();
         return "Ты пишешь пародийные реплики для группового чата в Telegram в манере участника "
                 + "по имени " + name + ". Он сам попросил об этой пародии, и каждая реплика "
-                + "публикуется с пометкой «пародия». Перенимай его манеру по образцам: словарь, "
+                + "публикуется с пометкой, что это пародия. Перенимай его манеру по образцам: словарь, "
                 + "сленг, длину фраз, пунктуацию, регистр, эмодзи, юмор, типичные словечки. "
                 + "Пиши так, как он ответил бы на последние сообщения чата: обычно одна короткая "
                 + "реплика. Выводи только текст реплики — без имени, кавычек, пометок и пояснений. "
@@ -735,6 +744,10 @@ public final class Parody {
      * живому человеку, и в чат они уйти не должны.
      */
     static String clean(String text, String name) {
+        return clean(text, name, MARK);
+    }
+
+    static String clean(String text, String name, String mark) {
         var result = text.trim();
 
         if (result.equals("-") || result.equals("—")) {
@@ -743,7 +756,11 @@ public final class Parody {
 
         var lower = result.toLowerCase(java.util.Locale.ROOT);
 
-        if (lower.startsWith(MARK.trim())) {
+        var ownMark = mark.trim().toLowerCase(java.util.Locale.ROOT);
+
+        if (lower.startsWith(ownMark)) {
+            result = result.substring(ownMark.length()).trim();
+        } else if (lower.startsWith(MARK.trim())) {
             result = result.substring(MARK.trim().length()).trim();
         } else if (!name.isBlank() && lower.startsWith(name.toLowerCase(java.util.Locale.ROOT) + ":")) {
             result = result.substring(name.length() + 1).trim();
@@ -781,6 +798,6 @@ public final class Parody {
     }
 
     private String clean(String text) {
-        return clean(text, settings.name());
+        return clean(text, settings.name(), settings.mark());
     }
 }

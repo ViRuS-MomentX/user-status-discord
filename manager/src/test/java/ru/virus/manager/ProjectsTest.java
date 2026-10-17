@@ -75,22 +75,17 @@ class ProjectsTest {
     }
 
     @Test
-    void copiesFilesAndFoldersButNotFolderIntoItself() throws Exception {
-        var source = Files.createDirectories(home.resolve("src"));
-        Files.writeString(source.resolve("one.txt"), "1");
-        Files.createDirectories(source.resolve("deep"));
-        Files.writeString(source.resolve("deep/two.txt"), "2");
-        var target = Files.createDirectories(home.resolve("projects/p"));
+    void updateUnpackedOverHomeReplacesBotFilesButNotSettings() throws Exception {
+        var project = Files.createDirectories(home.resolve("projects/voice-bridge"));
+        Files.writeString(project.resolve("voice-bridge-bot.jar"), "old");
+        Files.writeString(project.resolve("config.properties"), "мои настройки");
+        Files.writeString(home.resolve("voice-bridge-bot.jar"), "new");
+        Files.writeString(home.resolve("config.properties.example"), "образец");
 
-        assertEquals(1, Projects.copyInto(target, List.of(source), false));
-        assertEquals("2", Files.readString(target.resolve("src/deep/two.txt")));
+        new Projects(home).moveBot(supervisor());
 
-        // Уже есть и заменять не просили — пропускаем
-        assertEquals(0, Projects.copyInto(target, List.of(source), false));
-
-        assertThrows(IOException.class, () -> Projects.copyInto(source.resolve("deep"), List.of(source), true));
-
-        Projects.deleteTree(target.resolve("src"));
-        assertFalse(Files.exists(target.resolve("src")));
+        assertEquals("new", Files.readString(project.resolve("voice-bridge-bot.jar")));
+        assertEquals("мои настройки", Files.readString(project.resolve("config.properties")));
+        assertFalse(Files.exists(home.resolve("voice-bridge-bot.jar")));
     }
 }

@@ -43,8 +43,11 @@ final class ProcessDialog extends JDialog {
 
     private Result result = new Cancelled();
 
+    private final ProcessSpec existing;
+
     private ProcessDialog(JFrame owner, ProcessSpec existing) {
         super(owner, existing == null ? "Новый процесс" : "Процесс: " + existing.name(), true);
+        this.existing = existing;
 
         var body = new JPanel();
         body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
@@ -64,7 +67,7 @@ final class ProcessDialog extends JDialog {
         body.add(field("Имя", "", name));
         body.add(field("Короткое имя", "латиница, цифры и дефис — для файлов, потом не меняется", id));
         body.add(field("Команда", "{java} — та же Java, {home} — папка V.I.R.U.S.", command));
-        body.add(field("Папка запуска", "пусто — папка V.I.R.U.S.", workdir));
+        body.add(field("Папка запуска", "пусто — projects/<короткое имя>", workdir));
 
         for (var box : new JCheckBox[] { autostart, restart, supervised }) {
             box.setAlignmentX(LEFT_ALIGNMENT);
@@ -141,12 +144,23 @@ final class ProcessDialog extends JDialog {
     private void save() {
         try {
             result = new Saved(new ProcessSpec(id.getText().strip(), name.getText().strip(),
-                    ProcessSpec.split(command.getText()), workdir.getText().strip(),
+                    ProcessSpec.split(command.getText()), folder(),
                     autostart.isSelected(), restart.isSelected(), supervised.isSelected()));
             dispose();
         } catch (IllegalArgumentException e) {
             JOptionPane.showMessageDialog(this, e.getMessage(), "V.I.R.U.S.", JOptionPane.WARNING_MESSAGE);
         }
+    }
+
+    /** Новый процесс без папки получает свою папку проекта; старому оставляем как было. */
+    private String folder() {
+        var typed = workdir.getText().strip();
+
+        if (!typed.isEmpty() || (existing != null && existing.workdir().isBlank())) {
+            return typed;
+        }
+
+        return "projects/" + id.getText().strip();
     }
 
     static Result ask(JFrame owner, ProcessSpec existing) {

@@ -1,12 +1,9 @@
 package ru.virus.manager;
 
 import java.io.IOException;
-import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -26,6 +23,12 @@ final class Projects {
 
     /** Файл, по которому видно, что бот ещё лежит прямо в папке V.I.R.U.S. */
     static final String BOT_JAR = "voice-bridge-bot.jar";
+
+    /**
+     * Файлы новой версии бота: распаковал обновление поверх папки V.I.R.U.S. —
+     * они заменят старые в папке проекта. Настройки и данные так не заменяются.
+     */
+    static final Set<String> UPDATES = Set.of(BOT_JAR, "run.bat", "config.properties.example", "worker.js");
 
     /** Своё V.I.R.U.S. — при переезде бота остаётся на месте. */
     private static final Set<String> OWN = Set.of("virus.jar", "virus.bat", "processes.json",
@@ -94,7 +97,8 @@ final class Projects {
 
         // Сначала проверяем всё, потом трогаем: застрять на полпути хуже, чем не начать
         for (var source : sources) {
-            if (Files.exists(target.resolve(source.getFileName().toString()))) {
+            if (!UPDATES.contains(source.getFileName().toString())
+                    && Files.exists(target.resolve(source.getFileName().toString()))) {
                 throw new IOException("в папке проекта уже есть " + source.getFileName()
                         + " — разберись с ним и попробуй снова");
             }
@@ -121,7 +125,12 @@ final class Projects {
         try {
             for (var source : sources) {
                 var destination = target.resolve(source.getFileName().toString());
-                Files.move(source, destination);
+                if (UPDATES.contains(source.getFileName().toString())) {
+                    Files.move(source, destination, StandardCopyOption.REPLACE_EXISTING);
+                } else {
+                    Files.move(source, destination);
+                }
+
                 moved.add(new Path[] { source, destination });
             }
         } catch (IOException e) {
@@ -147,77 +156,5 @@ final class Projects {
 
         wasRunning.forEach(ManagedProcess::start);
         return moved.size();
-    }
-
-    /**
-     * Копирует файлы и папки в папку проекта.
-     *
-     * @param replace заменять ли то, что уже есть с тем же именем
-     * @return сколько скопировано верхнего уровня
-     */
-    static int copyInto(Path folder, List<Path> sources, boolean replace) throws IOException {
-        var count = 0;
-
-        for (var source : sources) {
-            var destination = folder.resolve(source.getFileName().toString());
-
-            // Папку саму в себя не копируем — это бесконечная матрёшка
-            if (destination.toAbsolutePath().normalize().startsWith(source.toAbsolutePath().normalize())) {
-                throw new IOException("нельзя положить папку саму в себя: " + source.getFileName());
-            }
-
-            if (Files.exists(destination) && !replace) {
-                continue;
-            }
-
-            if (Files.isDirectory(source)) {
-                copyTree(source, destination);
-            } else {
-                Files.copy(source, destination, StandardCopyOption.REPLACE_EXISTING);
-            }
-
-            count++;
-        }
-
-        return count;
-    }
-
-    private static void copyTree(Path source, Path destination) throws IOException {
-        Files.walkFileTree(source, new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-                Files.createDirectories(destination.resolve(source.relativize(dir).toString()));
-                return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                Files.copy(file, destination.resolve(source.relativize(file).toString()),
-                        StandardCopyOption.REPLACE_EXISTING);
-                return FileVisitResult.CONTINUE;
-            }
-        });
-    }
-
-    /** Удаляет файл или папку целиком — когда корзины нет. */
-    static void deleteTree(Path path) throws IOException {
-        if (!Files.isDirectory(path)) {
-            Files.deleteIfExists(path);
-            return;
-        }
-
-        Files.walkFileTree(path, new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                Files.delete(file);
-                return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult postVisitDirectory(Path dir, IOException failure) throws IOException {
-                Files.delete(dir);
-                return FileVisitResult.CONTINUE;
-            }
-        });
     }
 }

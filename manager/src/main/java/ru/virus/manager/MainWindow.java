@@ -58,8 +58,6 @@ final class MainWindow extends JFrame {
     private final Map<String, ProcessRow> rows = new LinkedHashMap<>();
     private final ProcessPage processPage;
     private final ConfigPage configPage;
-    private final FilesPage filesPage;
-    private final NavRow filesRow;
     private final TasksPage tasksPage;
     private final NavRow tasksRow;
     private final CardLayout pages = new CardLayout();
@@ -92,10 +90,6 @@ final class MainWindow extends JFrame {
         processPage = new ProcessPage(background, worker, this::editProcess);
         configPage = new ConfigPage(background, config, this::toast, this::configSaved);
         tasksPage = new TasksPage(background, tasks, this::toast, this::projectNames);
-        filesPage = new FilesPage(background, supervisor, worker, this::toast, () -> {
-            refresh();
-            refreshMissing();
-        });
 
         // Фон — всё окно; поверх него карточки с отступами, чтобы между ними
         // оставалось место для кода и волн
@@ -177,7 +171,6 @@ final class MainWindow extends JFrame {
         add.addActionListener(e -> editProcess(null));
 
         configRow = new NavRow(Icons.of(Icons.Kind.GEAR, Theme.ACCENT), "Конфиг ботов", () -> show("config"));
-        filesRow = new NavRow(Icons.of(Icons.Kind.FOLDER, Theme.ACCENT), "Файлы проектов", () -> show("files"));
         tasksRow = new NavRow(Icons.of(Icons.Kind.TASKS, Theme.ACCENT), "Задачи", () -> show("tasks"));
 
         side.add(indent(Ui.caption("Процессы")));
@@ -193,8 +186,6 @@ final class MainWindow extends JFrame {
         side.add(indent(Ui.caption("Настройка")));
         side.add(Box.createVerticalStrut(8));
         side.add(configRow);
-        side.add(Box.createVerticalStrut(4));
-        side.add(filesRow);
         side.add(Box.createVerticalGlue());
         side.add(indent(Ui.label("Кликни по фону — пойдёт волна", Theme.ui.deriveFont(11.5f), Theme.DIM)));
 
@@ -213,7 +204,6 @@ final class MainWindow extends JFrame {
         center.add(empty, "");
         center.add(processPage, "process");
         center.add(configPage, "config");
-        center.add(filesPage, "files");
         center.add(tasksPage, "tasks");
 
         var body = Ui.transparent(new BorderLayout(16, 0));
@@ -360,16 +350,12 @@ final class MainWindow extends JFrame {
         } else if (next.equals("tasks")) {
             tasksPage.reload();
             pages.show(center, "tasks");
-        } else if (next.equals("files")) {
-            filesPage.reload();
-            pages.show(center, "files");
         } else {
             pages.show(center, "");
         }
 
         rows.forEach((id, row) -> row.setSelected(view.equals("process:" + id)));
         configRow.setSelected(view.equals("config"));
-        filesRow.setSelected(view.equals("files"));
         tasksRow.setSelected(view.equals("tasks"));
     }
 

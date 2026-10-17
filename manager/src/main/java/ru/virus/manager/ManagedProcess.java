@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
@@ -128,6 +129,8 @@ final class ManagedProcess {
         Process started;
 
         try {
+            // Папка проекта ещё не заведена — заводим: пустой процесс тоже где-то живёт
+            Files.createDirectories(workdir());
             started = new ProcessBuilder(command)
                     .directory(workdir().toFile())
                     .redirectErrorStream(true)

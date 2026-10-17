@@ -37,6 +37,7 @@ final class ProcessPage extends Ui.Card {
     private final JButton restart = Ui.button("Перезапустить");
     private final JButton stop = Ui.danger("Остановить");
     private final JButton edit = Ui.button("Изменить");
+    private final JButton files = Ui.button("Файлы");
     private final JTextField filter = new JTextField();
     private final ConsoleView console = new ConsoleView();
     private final ExecutorService worker;
@@ -64,8 +65,9 @@ final class ProcessPage extends Ui.Card {
         restart.setIcon(Icons.of(Icons.Kind.RESTART, Theme.TEXT));
         stop.setIcon(Icons.of(Icons.Kind.STOP, Theme.ERROR));
         edit.setIcon(Icons.of(Icons.Kind.EDIT, Theme.MUTED));
+        files.setIcon(Icons.of(Icons.Kind.FOLDER, Theme.ACCENT));
 
-        for (var button : new JButton[] { start, restart, stop, edit }) {
+        for (var button : new JButton[] { start, restart, stop, edit, files }) {
             button.setIconTextGap(8);
         }
 
@@ -74,6 +76,9 @@ final class ProcessPage extends Ui.Card {
         buttons.add(stop);
         edit.setToolTipText("Изменить процесс");
         buttons.add(edit);
+        files.setToolTipText("Открыть папку процесса в Проводнике — туда можно докинуть файлы");
+        files.addActionListener(e -> openFolder());
+        buttons.add(files);
         head.add(buttons, BorderLayout.SOUTH);
 
         start.addActionListener(e -> act(ManagedProcess::start));
@@ -157,6 +162,28 @@ final class ProcessPage extends Ui.Card {
 
         add(top, BorderLayout.NORTH);
         add(body, BorderLayout.CENTER);
+    }
+
+    /** Папка процесса в Проводнике; нет её ещё — заводим. */
+    private void openFolder() {
+        if (process == null) {
+            return;
+        }
+
+        var folder = process.workdir();
+
+        try {
+            java.nio.file.Files.createDirectories(folder);
+
+            if (System.getProperty("os.name", "").toLowerCase().contains("win")) {
+                new ProcessBuilder("explorer.exe", folder.toString()).start();
+            } else {
+                java.awt.Desktop.getDesktop().open(folder.toFile());
+            }
+        } catch (java.io.IOException | RuntimeException e) {
+            javax.swing.JOptionPane.showMessageDialog(this, "Папка не открылась: " + e.getMessage()
+                    + "\n" + folder, Virus.NAME, javax.swing.JOptionPane.WARNING_MESSAGE);
+        }
     }
 
     private void act(Consumer<ManagedProcess> action) {

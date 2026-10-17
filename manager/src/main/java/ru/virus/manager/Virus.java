@@ -63,6 +63,22 @@ public final class Virus {
             return;
         }
 
+        // Бот лежит прямо в папке V.I.R.U.S. (первый запуск или распаковали
+        // обновление поверх) — раскладываем по проекту, пока ничего не запущено
+        String moveProblem = null;
+        var projects = new Projects(home);
+
+        if (projects.botInHome()) {
+            try {
+                var moved = projects.moveBot(supervisor);
+                say("Файлы бота перенесены в projects/" + Projects.BOT + ": " + moved);
+            } catch (Exception e) {
+                moveProblem = e.getMessage();
+            }
+        }
+
+        var moveWarning = moveProblem;
+
         // Задачи — до процессов: их запись быстрая, а выключение ПК ждать не станет
         var tasks = new TaskStore(home.resolve("tasks.json"));
         String tasksProblem = null;
@@ -128,6 +144,12 @@ public final class Virus {
             // Без значка в трее спрятанное окно было бы не найти
             if (!background || trayIcon == null) {
                 window.reveal();
+            }
+
+            if (moveWarning != null) {
+                JOptionPane.showMessageDialog(window, "Не получилось перенести бота в папку projects/"
+                        + Projects.BOT + ": " + moveWarning + "\nПока он работает из папки V.I.R.U.S.",
+                        NAME, JOptionPane.WARNING_MESSAGE);
             }
 
             if (tasksWarning != null) {

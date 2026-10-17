@@ -546,22 +546,40 @@ public final class VoiceBridgeBot {
         var state = new ParodyState(configPath.toAbsolutePath().resolveSibling("parody-state.json"));
         state.load();
 
-        if (!settings.importFile().isBlank() && !state.isImported()) {
-            if (samples.size() == 0) {
-                try {
-                    var export = configPath.toAbsolutePath().resolveSibling(settings.importFile());
-                    log.info("Из экспорта взято сообщений участника: {}.",
-                            samples.importExport(export, settings.target()));
-                    state.markImported();
-                } catch (IOException | RuntimeException e) {
-                    log.error("Не прочитался экспорт «{}»: {}. Пародия работает и без него — "
-                            + "сообщения участника наберутся сами.", settings.importFile(), e.getMessage());
-                }
-            } else {
-                // Образцы уже есть — значит, экспорт забирали до того, как это
-                // стало отмечаться. Второй раз те же сообщения не нужны
-                state.markImported();
+        var memory = configPath.toAbsolutePath().resolveSibling("parody-memory");
+        var previous = state.target();
+
+        if (previous != 0 && previous != settings.target()) {
+            // Образцы и прозвища — того, кого пародировали раньше; новому они чужие
+            log.info("Участник сменился ({} → {}): его прежние образцы и память имён стираю, "
+                    + "экспорт прочитаю заново.", previous, settings.target());
+            samples.clear();
+
+            try {
+                java.nio.file.Files.deleteIfExists(memory.resolve("names.json"));
+            } catch (IOException e) {
+                log.warn("Не стёрлась память имён прежнего участника: {}", e.getMessage());
             }
+        }
+
+        state.setTarget(settings.target());
+
+        // Образцов нет (первый запуск, новый участник или файл очистили руками) —
+        // читаем экспорт. Кроме случая, когда участник сам велел забыть его
+        if (!settings.importFile().isBlank() && samples.size() == 0 && !state.isForgotten()) {
+            try {
+                var export = configPath.toAbsolutePath().resolveSibling(settings.importFile());
+                log.info("Читаю экспорт {} — для большого файла это может занять минуту.", export.getFileName());
+                log.info("Из экспорта взято сообщений участника: {}.",
+                        samples.importExport(export, settings.target()));
+                state.markImported();
+            } catch (IOException | RuntimeException e) {
+                log.error("Не прочитался экспорт «{}»: {}. Пародия работает и без него — "
+                        + "сообщения участника наберутся сами.", settings.importFile(), e.getMessage());
+            }
+        } else if (samples.size() == 0 && state.isForgotten()) {
+            log.info("Участник стёр свои сообщения командой /parody_forget — экспорт заново не читаю. "
+                    + "Передумал — удали parody-state.json и перезапусти.");
         }
 
         log.info("Образцов речи участника: {}. Пародировать начну с {}.",
@@ -597,7 +615,7 @@ public final class VoiceBridgeBot {
         }
 
         // Своя папка памяти: кого как называть — и что ещё появится потом
-        var names = new ParodyNames(configPath.toAbsolutePath().resolveSibling("parody-memory").resolve("names.json"));
+        var names = new ParodyNames(memory.resolve("names.json"));
         names.load();
 
         var parody = new Parody(settings, telegram, llm, samples, state, names);

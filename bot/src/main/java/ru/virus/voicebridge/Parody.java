@@ -497,6 +497,7 @@ public final class Parody {
             }
             case "/parody_forget" -> {
                 var count = samples.clear();
+                state.markForgotten();
                 log.info("{} стёр образцы речи: {}.", message.author(), count);
                 answer(message, "Стёрто сообщений: " + count + ". Пока не наберётся "
                         + settings.minSamples() + " новых, бот молчит. Чтобы он и новых не "

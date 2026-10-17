@@ -26,6 +26,8 @@ final class ParodyState {
 
     private boolean paused;
     private boolean imported;
+    private boolean forgotten;
+    private long target;
     private String day = "";
     private int sentToday;
 
@@ -42,6 +44,8 @@ final class ParodyState {
             var json = DataObject.fromJson(Files.readString(file, StandardCharsets.UTF_8));
             paused = json.getBoolean("paused", false);
             imported = json.getBoolean("imported", false);
+            forgotten = json.getBoolean("forgotten", false);
+            target = json.getLong("target", 0);
             day = json.getString("day", "");
             sentToday = json.getInt("sentToday", 0);
         } catch (IOException | RuntimeException e) {
@@ -62,10 +66,7 @@ final class ParodyState {
         save();
     }
 
-    /**
-     * Забран ли уже экспорт истории. Отмечается раз и навсегда: иначе после
-     * /parody_forget перезапуск вернул бы стёртое из того же экспорта.
-     */
+    /** Забран ли уже экспорт истории. */
     synchronized boolean isImported() {
         return imported;
     }
@@ -73,6 +74,37 @@ final class ParodyState {
     synchronized void markImported() {
         imported = true;
         save();
+    }
+
+    /**
+     * Участник сам стёр свои сообщения командой /parody_forget. Тогда экспорт
+     * заново не читается: перезапуск не должен возвращать стёртое.
+     */
+    synchronized boolean isForgotten() {
+        return forgotten;
+    }
+
+    synchronized void markForgotten() {
+        forgotten = true;
+        save();
+    }
+
+    /** Кого пародировали в прошлый раз; 0 — неизвестно (старый файл). */
+    synchronized long target() {
+        return target;
+    }
+
+    /** Новый участник — для него ни экспорт не читан, ни «забудь» не говорено. */
+    synchronized void setTarget(long id) {
+        if (target != id) {
+            if (target != 0) {
+                imported = false;
+                forgotten = false;
+            }
+
+            target = id;
+            save();
+        }
     }
 
     synchronized int sentToday(LocalDate today) {
@@ -99,6 +131,8 @@ final class ParodyState {
         var json = DataObject.empty()
                 .put("paused", paused)
                 .put("imported", imported)
+                .put("forgotten", forgotten)
+                .put("target", target)
                 .put("day", day)
                 .put("sentToday", sentToday);
 

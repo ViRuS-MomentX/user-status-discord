@@ -74,6 +74,28 @@ class ParodySamplesTest {
     }
 
     @Test
+    void forgetIsRememberedAndNewTargetStartsClean() {
+        var file = dir.resolve("state.json");
+        var state = new ParodyState(file);
+        state.load();
+        state.setTarget(42);
+        state.markImported();
+        state.markForgotten();
+
+        var again = new ParodyState(file);
+        again.load();
+        org.junit.jupiter.api.Assertions.assertTrue(again.isForgotten());
+        assertEquals(42, again.target());
+
+        // Тот же участник — «забудь» в силе; другой — чистый лист
+        again.setTarget(42);
+        org.junit.jupiter.api.Assertions.assertTrue(again.isForgotten());
+        again.setTarget(7);
+        org.junit.jupiter.api.Assertions.assertFalse(again.isForgotten());
+        org.junit.jupiter.api.Assertions.assertFalse(again.isImported());
+    }
+
+    @Test
     void unreadableStateMeansSilence() throws Exception {
         var file = dir.resolve("state.json");
         Files.writeString(file, "мусор");

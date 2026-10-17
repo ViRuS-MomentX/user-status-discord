@@ -126,6 +126,55 @@ final class ParodyStyle {
         return String.join("\n", lines);
     }
 
+    /** В скольких процентах его сообщений есть эмодзи. */
+    static int emojiShare(List<String> samples) {
+        if (samples.isEmpty()) {
+            return 0;
+        }
+
+        var with = 0;
+
+        for (var sample : samples) {
+            if (!emojis(sample).isEmpty()) {
+                with++;
+            }
+        }
+
+        return percent(with, samples.size());
+    }
+
+    /**
+     * Снимает эмодзи с конца реплики — вместе с невидимыми спутниками: оттенком
+     * кожи, склейкой и знаком «показать картинкой».
+     */
+    static String stripTrailingEmoji(String text) {
+        var end = text.length();
+
+        while (end > 0) {
+            var point = text.codePointBefore(end);
+
+            if (isEmoji(point) || point == 0xFE0F || point == 0x200D || (point >= 0x1F3FB && point <= 0x1F3FF)
+                    || Character.isWhitespace(point)) {
+                end -= Character.charCount(point);
+            } else {
+                break;
+            }
+        }
+
+        return text.substring(0, end);
+    }
+
+    private static boolean isEmoji(int point) {
+        var block = Character.UnicodeBlock.of(point);
+        return block == Character.UnicodeBlock.EMOTICONS
+                || block == Character.UnicodeBlock.MISCELLANEOUS_SYMBOLS_AND_PICTOGRAPHS
+                || block == Character.UnicodeBlock.SUPPLEMENTAL_SYMBOLS_AND_PICTOGRAPHS
+                || block == Character.UnicodeBlock.TRANSPORT_AND_MAP_SYMBOLS
+                || block == Character.UnicodeBlock.SYMBOLS_AND_PICTOGRAPHS_EXTENDED_A
+                || block == Character.UnicodeBlock.DINGBATS
+                || block == Character.UnicodeBlock.MISCELLANEOUS_SYMBOLS;
+    }
+
     private static int percent(int part, int whole) {
         return whole == 0 ? 0 : Math.round(part * 100f / whole);
     }

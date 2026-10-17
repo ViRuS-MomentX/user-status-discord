@@ -70,6 +70,7 @@ class ParodyTest {
 
     ParodySamples store;
     ParodyState state;
+    ParodyNames names;
 
     void start(ParodySettings settings, Llm llm, String... samples) throws Exception {
         start(settings, llm, null, samples);
@@ -85,7 +86,9 @@ class ParodyTest {
         state = new ParodyState(dir.resolve("parody-state.json"));
         state.load();
 
-        parody = new Parody(settings, new Telegram("T", "", telegram.url()), llm, store, state);
+        names = new ParodyNames(dir.resolve("parody-memory/names.json"));
+        names.load();
+        parody = new Parody(settings, new Telegram("T", "", telegram.url()), llm, store, state, names);
 
         if (clock != null) {
             parody.setClock(clock);
@@ -154,6 +157,78 @@ class ParodyTest {
 
         assertNull(telegram.awaitSent(1, 1500));
         assertEquals(1, prompts.size());
+    }
+
+    @Test
+    void mentionIsAnsweredEvenIfModelFirstStaysSilent() throws Exception {
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        start(settings(0, 60, 1), llm(p -> calls.incrementAndGet() == 1 ? "-" : "да тут я"), "образец");
+
+        telegram.say(7, "Петя", "@parody_bot ты где");
+
+        var sent = telegram.awaitSent(1, 3000);
+        assertNotNull(sent, "на обращение бот обязан ответить");
+        assertEquals(Parody.MARK + "да тут я", sent.get("text"));
+        assertTrue(prompts.get(1).contains("Прошлый вариант не подошёл"), prompts.get(1));
+    }
+
+    @Test
+    void trailingEmojiIsDroppedWhenHeRarelyUsesThem() throws Exception {
+        start(settings(100, 0, 1), llm(p -> "ну го катку 😂🔥"), "ну го", "да", "ок", "кто тут");
+
+        telegram.say(7, "Петя", "раз");
+
+        var sent = telegram.awaitSent(1, 3000);
+        assertNotNull(sent);
+        assertEquals(Parody.MARK + "ну го катку", sent.get("text"));
+    }
+
+    @Test
+    void emojiStaysWhenThatIsHisStyle() throws Exception {
+        start(settings(100, 0, 1), llm(p -> "го 😂"), "ахах 😂", "го 🔥", "да 😎", "ок");
+
+        telegram.say(7, "Петя", "раз");
+
+        var sent = telegram.awaitSent(1, 3000);
+        assertNotNull(sent);
+        assertEquals(Parody.MARK + "го 😂", sent.get("text"));
+    }
+
+    @Test
+    void learnsNicknamesFromHisAddressesAndUsesThem() throws Exception {
+        start(settings(0, 0, 1), llm(p -> "ок"), "образец");
+
+        for (var i = 0; i < 2; i++) {
+            var question = telegram.say(7, "Пётр Иванов", "кто идёт?");
+            telegram.say(FakeTelegram.CHAT, TARGET, "Вася", false, "Петька, я иду",
+                    FakeTelegram.original(question, 7, "Пётр Иванов", false, "кто идёт?"));
+        }
+
+        Thread.sleep(800);
+        assertEquals(java.util.List.of("Петька"), names.nicknames(7));
+
+        telegram.say(OWNER, "Хозяин", "/parody_say");
+        assertNotNull(telegram.awaitSent(1, 3000));
+        assertTrue(prompts.getLast().contains("Пётр Иванов — Петька"), prompts.getLast());
+    }
+
+    @Test
+    void nicknameCanBeTaughtByCommand() throws Exception {
+        start(settings(0, 0, 1), llm(p -> "ок"), "образец");
+
+        var message = telegram.say(9, "Александр", "привет");
+        telegram.say(FakeTelegram.CHAT, OWNER, "Хозяин", false, "/parody_name Санёк",
+                FakeTelegram.original(message, 9, "Александр", false, "привет"));
+
+        var answer = telegram.awaitSent(1, 3000);
+        assertNotNull(answer);
+        assertTrue(answer.get("text").contains("Санёк"), answer.get("text"));
+        assertEquals(java.util.List.of("Санёк"), names.nicknames(9));
+
+        // И переживает перезапуск
+        var again = new ParodyNames(dir.resolve("parody-memory/names.json"));
+        again.load();
+        assertEquals(java.util.List.of("Санёк"), again.nicknames(9));
     }
 
     @Test
@@ -358,7 +433,7 @@ class ParodyTest {
 
         var menu = net.dv8tion.jda.api.utils.data.DataArray.fromJson(telegram.commands);
         assertEquals("parody_say", menu.getObject(0).getString("command"));
-        assertEquals(6, menu.length());
+        assertEquals(8, menu.length());
     }
 
     @Test

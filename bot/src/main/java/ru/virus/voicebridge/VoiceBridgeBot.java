@@ -593,7 +593,11 @@ public final class VoiceBridgeBot {
             log.info("Пародия выключена командой /parody_off — молчу, пока не включат /parody_on.");
         }
 
-        var parody = new Parody(settings, telegram, llm, samples, state);
+        // Своя папка памяти: кого как называть — и что ещё появится потом
+        var names = new ParodyNames(configPath.toAbsolutePath().resolveSibling("parody-memory").resolve("names.json"));
+        names.load();
+
+        var parody = new Parody(settings, telegram, llm, samples, state, names);
         parody.start();
         return parody;
     }

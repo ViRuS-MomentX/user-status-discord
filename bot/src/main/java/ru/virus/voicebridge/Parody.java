@@ -46,6 +46,8 @@ public final class Parody {
         commands.put("parody_off", "выключить пародию");
         commands.put("parody_on", "включить пародию");
         commands.put("parody_forget", "стереть собранные сообщения");
+        commands.put("parody_name", "ответом на сообщение: как называть этого человека");
+        commands.put("parody_names", "кого как называть");
         commands.put("parody_status", "как дела");
         COMMANDS = java.util.Collections.unmodifiableMap(commands);
     }
@@ -79,6 +81,10 @@ public final class Parody {
     private final Llm llm;
     private final ParodySamples samples;
     private final ParodyState state;
+    private final ParodyNames names;
+
+    /** Кто недавно писал — их прозвища показываем ИИ в первую очередь. */
+    private final Deque<Long> activeIds = new ArrayDeque<>();
     private final Random random = new Random();
 
     /** Часы подменяются в тестах: тихие часы и счёт за сутки зависят от них. */
@@ -114,12 +120,13 @@ public final class Parody {
     private String mention = "";
 
     public Parody(ParodySettings settings, Telegram telegram, Llm llm, ParodySamples samples,
-                  ParodyState state) {
+                  ParodyState state, ParodyNames names) {
         this.settings = settings;
         this.telegram = telegram;
         this.llm = llm;
         this.samples = samples;
         this.state = state;
+        this.names = names;
     }
 
     void setClock(Clock clock) {
@@ -260,6 +267,15 @@ public final class Parody {
 
         remember(line(message));
 
+        if (message.authorId() != 0 && !message.fromBot()) {
+            names.seen(message.authorId(), message.author());
+            noteActive(message.authorId());
+        }
+
+        if (message.replyToAuthorId() != 0) {
+            names.seen(message.replyToAuthorId(), message.replyToAuthor());
+        }
+
         // Выключенный бот не копит и речь участника: раз попросили остановиться,
         // собирать его сообщения дальше тоже незачем
         if (state.isPaused()) {
@@ -270,6 +286,11 @@ public final class Parody {
             // Пересланное и присланное через инлайн-бота — не его слова
             if (!message.forwarded()) {
                 samples.add(message.text());
+
+                // Ответил кому-то и начал с обращения — так он этого человека и зовёт
+                if (message.replyToAuthorId() != 0 && message.replyToAuthorId() != settings.target()) {
+                    names.learn(message.replyToAuthorId(), message.text());
+                }
             }
 
             // Самому участнику не отвечаем: разговор с собой выглядел бы странно
@@ -349,7 +370,7 @@ public final class Parody {
         }
 
         handle(new TelegramMessage(0, 0, 0, chat, 0, author + " (из Discord)", text,
-                "", "", false, "", "", false));
+                "", "", false, "", "", false, 0));
     }
 
     private static String attachment(String fileName) {
@@ -454,6 +475,13 @@ public final class Parody {
                     });
                 }
             }
+            case "/parody_name" -> nameCommand(message);
+            case "/parody_names" -> {
+                var report = names.report();
+                answer(message, report.isEmpty()
+                        ? "Пока никого. Ответь на сообщение человека: /parody_name Санёк"
+                        : "Кого как называть:\n" + report);
+            }
             case "/parody_status" -> answer(message, status());
             default -> answer(message, """
                     /parody_say — сказать что-нибудь сейчас
@@ -461,10 +489,60 @@ public final class Parody {
                     /parody_off — выключить
                     /parody_on — включить
                     /parody_forget — стереть собранные сообщения
+                    /parody_name Санёк — ответом на сообщение: так называть этого человека
+                    /parody_name -Санёк — забыть это прозвище
+                    /parody_names — кого как называть
                     /parody_status — как дела""");
         }
 
         return true;
+    }
+
+    /** «/parody_name Санёк» ответом на сообщение — запомнить, как зовут его автора. */
+    private void nameCommand(TelegramMessage message) {
+        var parts = message.text().trim().split("\\s+", 2);
+        var who = message.replyToAuthorId();
+
+        if (who == 0) {
+            answer(message, "Ответь этой командой на сообщение человека: /parody_name Санёк");
+            return;
+        }
+
+        if (parts.length < 2 || parts[1].isBlank()) {
+            var known = names.nicknames(who);
+            answer(message, known.isEmpty()
+                    ? "Про " + message.replyToAuthor() + " пока ничего не знаю."
+                    : message.replyToAuthor() + " — " + String.join(", ", known));
+            return;
+        }
+
+        var nick = parts[1].strip();
+
+        if (nick.length() > 40) {
+            answer(message, "Слишком длинно для прозвища.");
+            return;
+        }
+
+        names.seen(who, message.replyToAuthor());
+
+        if (nick.startsWith("-")) {
+            var forgotten = names.forget(who, nick.substring(1).strip());
+            answer(message, forgotten ? "Забыл." : "Такого прозвища и не было.");
+        } else {
+            names.teach(who, nick);
+            answer(message, "Запомнил: " + message.replyToAuthor() + " — «" + nick + "».");
+        }
+    }
+
+    private void noteActive(long id) {
+        synchronized (activeIds) {
+            activeIds.remove(id);
+            activeIds.addFirst(id);
+
+            while (activeIds.size() > 12) {
+                activeIds.removeLast();
+            }
+        }
     }
 
     private String status() {
@@ -591,17 +669,35 @@ public final class Parody {
             log.debug("«Печатает» не показалось: {}", e.getMessage());
         }
 
-        String text;
+        // К нему обратились — промолчать нельзя: вторая попытка, если первая не годится
+        var must = direct || preview != null;
+        var attempts = must ? 2 : 1;
+        var text = "";
+        var why = "";
 
-        try {
-            text = clean(llm.complete(system(), prompt(context, direct), 300));
-            llmFailures = 0;
-            llmHealth = "отвечает";
-        } catch (Exception e) {
-            var pause = failed(e);
-            log.warn("ИИ не ответил: {}. Следующая попытка не раньше чем через {} мин.",
-                    e.getMessage(), pause / 60_000);
-            return;
+        for (var attempt = 1; attempt <= attempts; attempt++) {
+            var ask = prompt(context, direct)
+                    + (attempt > 1 ? "\n\nПрошлый вариант не подошёл (" + why + "). Напиши другую короткую реплику." : "");
+
+            try {
+                text = polish(clean(llm.complete(system(must), ask, 300)));
+                llmFailures = 0;
+                llmHealth = "отвечает";
+            } catch (Exception e) {
+                var pause = failed(e);
+                log.warn("ИИ не ответил: {}. Следующая попытка не раньше чем через {} мин.",
+                        e.getMessage(), pause / 60_000);
+                return;
+            }
+
+            why = text.isBlank() ? "пусто — ИИ промолчал или сработал фильтр"
+                    : repeats(text) ? "повтор недавней реплики" : "";
+
+            if (why.isEmpty()) {
+                break;
+            }
+
+            log.info("Пародия промолчала бы: {}{}.", why, attempt < attempts ? " — пробую ещё раз" : "");
         }
 
         if (preview != null) {
@@ -614,7 +710,7 @@ public final class Parody {
             return;
         }
 
-        if (text.isBlank() || repeats(text)) {
+        if (!why.isEmpty()) {
             return;
         }
 
@@ -667,17 +763,35 @@ public final class Parody {
         return text.toLowerCase(java.util.Locale.ROOT).replaceAll("[\\p{P}\\p{S}\\s]+", " ").trim();
     }
 
-    private String system() {
+    /**
+     * Последняя доводка: эмодзи в конце, если сам участник ими почти не
+     * пользуется, — модели любят ставить их от себя.
+     */
+    private String polish(String text) {
+        if (text.isBlank() || ParodyStyle.emojiShare(samples.all()) >= 10) {
+            return text;
+        }
+
+        return ParodyStyle.stripTrailingEmoji(text).strip();
+    }
+
+    /** @param must обратились к нему — молчать нельзя */
+    private String system(boolean must) {
         var name = settings.name();
+        var emoji = ParodyStyle.emojiShare(samples.all()) >= 10
+                ? "Эмодзи — только как у него в образцах. "
+                : "Эмодзи не ставь: он ими почти не пользуется. ";
         return "Ты пишешь пародийные реплики для группового чата в Telegram в манере участника "
                 + "по имени " + name + ". Он сам попросил об этой пародии, и каждая реплика "
                 + "публикуется с пометкой, что это пародия. Перенимай его манеру по образцам: словарь, "
-                + "сленг, длину фраз, пунктуацию, регистр, эмодзи, юмор, типичные словечки. "
+                + "сленг, длину фраз, пунктуацию, регистр, юмор, типичные словечки. " + emoji
                 + "Пиши так, как он ответил бы на последние сообщения чата: обычно одна короткая "
                 + "реплика. Выводи только текст реплики — без имени, кавычек, пометок и пояснений. "
                 + "Не выдумывай о нём личных фактов, событий, признаний и мнений о реальных людях, "
                 + "которых нет в образцах. Без угроз, травли и оскорблений участников. "
-                + "Если сказать нечего, ответь одним символом «-».";
+                + "Людей называй так, как называет их он, — список ниже. "
+                + (must ? "К тебе обратились — обязательно ответь хотя бы короткой репликой."
+                        : "Если вставить в разговор нечего, ответь одним символом «-».");
     }
 
     private String prompt(String context, boolean direct) {
@@ -697,7 +811,16 @@ public final class Parody {
 
         var style = ParodyStyle.describe(samples.all());
 
+        List<Long> active;
+
+        synchronized (activeIds) {
+            active = List.copyOf(activeIds);
+        }
+
+        var known = names.describe(active, 15);
+
         return (style.isEmpty() ? "" : "Его манера в цифрах — держись её:\n" + style + "\n\n")
+                + (known.isEmpty() ? "" : "Как он называет людей в чате:\n" + known + "\n\n")
                 + "Образцы его настоящих сообщений:\n" + examples
                 + (recentOwn.isEmpty() ? ""
                     : "\nТвои недавние реплики-пародии — не повторяй их и не пересказывай:\n" + recentOwn)

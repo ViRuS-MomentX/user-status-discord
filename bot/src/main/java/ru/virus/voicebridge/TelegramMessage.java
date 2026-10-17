@@ -17,11 +17,13 @@ import net.dv8tion.jda.api.utils.data.DataObject;
  * @param replyToAuthor кому отвечают; пустая строка — это не ответ
  * @param replyToText что было в сообщении, на которое отвечают
  * @param forwarded пересланное или присланное через инлайн-бота — не свои слова автора
+ * @param replyToAuthorId номер того, кому отвечают; 0 — не ответ или автор неизвестен
  */
 public record TelegramMessage(long updateId, long messageId, long replyToId, String chat,
                               long authorId, String author, String text, String fileId,
                               String fileName, boolean fromBot,
-                              String replyToAuthor, String replyToText, boolean forwarded) {
+                              String replyToAuthor, String replyToText, boolean forwarded,
+                              long replyToAuthorId) {
 
     /**
      * Разбирает одно обновление.
@@ -42,6 +44,7 @@ public record TelegramMessage(long updateId, long messageId, long replyToId, Str
         // На что отвечают. Свои же пересланные сообщения бот узнаёт по этому номеру
         var replyToId = 0L;
         var replyToAuthor = "";
+        var replyToAuthorId = 0L;
         var replyToText = "";
 
         if (message.hasKey("reply_to_message")) {
@@ -49,6 +52,7 @@ public record TelegramMessage(long updateId, long messageId, long replyToId, Str
             replyToId = original.getLong("message_id", 0);
             replyToText = original.getString("text", original.getString("caption", ""));
             replyToAuthor = original.hasKey("from") ? name(original.getObject("from")) : "Кто-то";
+            replyToAuthorId = original.hasKey("from") ? original.getObject("from").getLong("id", 0) : 0;
         }
 
         var author = "Кто-то";
@@ -100,7 +104,8 @@ public record TelegramMessage(long updateId, long messageId, long replyToId, Str
                 authorId, author, text, fileId, fileName, fromBot, replyToAuthor, replyToText,
                 message.hasKey("forward_origin") || message.hasKey("forward_from")
                         || message.hasKey("forward_from_chat") || message.hasKey("forward_sender_name")
-                        || message.hasKey("via_bot"));
+                        || message.hasKey("via_bot"),
+                replyToAuthorId);
     }
 
     /** Как показывать человека: имя с фамилией, а без них — юзернейм. */

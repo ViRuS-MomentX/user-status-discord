@@ -143,7 +143,8 @@ public final class GigaChatLlm implements Llm {
         // Сработал фильтр: вместо реплики пришла заготовка вроде «Не люблю менять
         // тему разговора». От лица участника она звучала бы нелепо — молчим
         if ("blacklist".equals(choice.getString("finish_reason", ""))) {
-            log.debug("GigaChat ответил заготовкой фильтра — пропускаю.");
+            log.info("GigaChat ответил заготовкой фильтра («{}») — такое в чат не отправляю.",
+                    choice.getObject("message").getString("content", "").strip());
             return "";
         }
 

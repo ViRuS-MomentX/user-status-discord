@@ -42,12 +42,15 @@ class DeviceTest {
         var out = new Out();
         out.i32(type);
         out.str(name).str("описание").str("1.0").str("SN").str("USB");
-        out.u16(1).i32(0);                              // один режим, активный 0
+        out.u16(2).i32(0);                              // два режима, активный 0
         out.str("Direct");
         for (var i = 0; i < 9; i++) {
             out.i32(i);
         }
         out.u16(2).i32(0xFF).i32(0xFF00);               // у режима два цвета
+        out.str("Static");
+        out.i32(7).i32(0).i32(0).i32(0).i32(1).i32(1).i32(0).i32(0).i32(OpenRgb.COLORS_MODE_SPECIFIC);
+        out.u16(1).i32(0);
         out.u16(1);                                     // одна зона
         out.str("Keys").i32(1).i32(leds).i32(leds).i32(leds);
         out.u16(8).i32(1).i32(1);                       // матрица 1×1 без ячеек — 8 байт
@@ -114,9 +117,10 @@ class DeviceTest {
                     got.add(new Packet(device, id, body));
 
                     byte[] reply = switch (id) {
-                        case OpenRgb.CONTROLLER_COUNT -> ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(2).array();
+                        case OpenRgb.CONTROLLER_COUNT -> ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(3).array();
                         case OpenRgb.CONTROLLER_DATA -> device == 0 ? controller("JONSBO CR-1000", 3, 12)
-                                : controller("Attack Shark X98", 5, 98);
+                                : device == 1 ? controller("Attack Shark X98", 5, 98)
+                                : controller("MSI MYSTIC LIGHT", 0, 0);
                         default -> null;
                     };
 
@@ -151,13 +155,19 @@ class DeviceTest {
 
         try (var rgb = new OpenRgb("127.0.0.1", rgbServer.getLocalPort())) {
             var devices = rgb.devices();
-            assertEquals(2, devices.size());
+            assertEquals(3, devices.size());
             assertEquals("JONSBO CR-1000", devices.get(0).name());
             assertEquals("охлаждение", devices.get(0).kind());
             assertEquals(98, devices.get(1).leds());
             assertEquals("клавиатура", devices.get(1).kind());
 
             rgb.paint(devices.get(1), new Color(10, 20, 30));
+
+            // Светодиодов нет — красится режимом «Static»
+            var board = devices.get(2);
+            assertEquals(0, board.leds());
+            assertEquals("Static", board.solid().name());
+            rgb.paint(board, new Color(200, 0, 100));
         }
 
         var deadline = System.currentTimeMillis() + 3000;
@@ -176,6 +186,23 @@ class DeviceTest {
         assertEquals(10, body.get());
         assertEquals(20, body.get());
         assertEquals(30, body.get());
+
+        deadline = System.currentTimeMillis() + 3000;
+        while (got.stream().noneMatch(p -> p.id() == OpenRgb.UPDATE_MODE) && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+
+        var mode = got.stream().filter(p -> p.id() == OpenRgb.UPDATE_MODE).findFirst().orElseThrow();
+        assertEquals(2, mode.device());
+        var m = ByteBuffer.wrap(mode.body()).order(ByteOrder.LITTLE_ENDIAN);
+        assertEquals(mode.body().length, m.getInt());
+        assertEquals(1, m.getInt(), "номер режима Static");
+        var nameLength = m.getShort();
+        m.position(m.position() + nameLength);
+        assertEquals(7, m.getInt(), "значение режима — как прислал OpenRGB");
+        m.position(m.position() + 8 * 4);
+        assertEquals(1, m.getShort());
+        assertEquals((byte) 200, m.get());
     }
 
     @Test

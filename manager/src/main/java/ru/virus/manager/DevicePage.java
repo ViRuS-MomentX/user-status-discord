@@ -653,14 +653,32 @@ final class DevicePage extends Ui.Card {
             row.setBorder(BorderFactory.createEmptyBorder(8, 2, 8, 2));
             row.setAlignmentX(LEFT_ALIGNMENT);
             row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
+            var how = device.leds() > 0 ? "светодиодов: " + device.leds()
+                    : device.solid() != null ? "цвет режимом «" + device.solid().name() + "»"
+                    : "OpenRGB не даёт задать цвет — см. подсказку ниже";
             var name = Ui.label("<html><b>" + ConfigPage.escape(device.name()) + "</b> <font color='#7C8C84'>· "
-                    + device.kind() + " · светодиодов: " + device.leds() + "</font></html>", Theme.ui, Theme.TEXT);
+                    + device.kind() + " · " + ConfigPage.escape(how) + "</font></html>", Theme.ui, Theme.TEXT);
             row.add(name, BorderLayout.CENTER);
             var paint = Ui.button("Покрасить");
+            paint.setEnabled(device.paintable());
             paint.addActionListener(e -> paint(List.of(device), lit()));
             row.add(paint, BorderLayout.EAST);
             rgbDevices.add(row);
         }
+
+        var hint = Ui.muted("<html><body style='width:640px'><b>Нет клавиатуры, вентиляторов или памяти?</b><br>"
+                + "1. Запусти OpenRGB <b>от имени администратора</b> — без этого он не видит память и часть "
+                + "платы.<br>"
+                + "2. В OpenRGB: Settings → <b>Supported Devices</b> — проверь, что нужные устройства включены, "
+                + "и нажми Rescan.<br>"
+                + "3. Вентиляторы, подключённые к ARGB-разъёму платы (часто так подключают JONSBO), — это зона "
+                + "«MSI Mystic Light»: выбери её в OpenRGB, нажми <b>Resize</b> и укажи число светодиодов, затем "
+                + "сохрани профиль.<br>"
+                + "4. Устройства, которых OpenRGB не знает (возможно, Attack Shark X98), красятся только "
+                + "программой производителя — она ниже.</body></html>", 12.5f);
+        hint.setBorder(BorderFactory.createEmptyBorder(12, 2, 4, 2));
+        hint.setAlignmentX(LEFT_ALIGNMENT);
+        rgbDevices.add(hint);
 
         rgbDevices.revalidate();
         rgbDevices.repaint();
@@ -673,13 +691,11 @@ final class DevicePage extends Ui.Card {
                 try (var rgb = new OpenRgb(settings.host, OpenRgb.PORT)) {
                     var found = rgb.devices();
 
-                    for (var device : found) {
-                        rgb.paint(device, color);
-                    }
+                    var painted = paintEach(rgb, found, color);
 
                     SwingUtilities.invokeLater(() -> {
                         showDevices(found);
-                        toast.accept("Покрашено устройств: " + found.size());
+                        toast.accept("Покрашено устройств: " + painted + " из " + found.size());
                     });
                 } catch (IOException | RuntimeException e) {
                     SwingUtilities.invokeLater(() -> {
@@ -697,15 +713,26 @@ final class DevicePage extends Ui.Card {
     private void paint(List<OpenRgb.Device> which, Color color) {
         worker.submit(() -> {
             try (var rgb = new OpenRgb(settings.host, OpenRgb.PORT)) {
-                for (var device : which) {
-                    rgb.paint(device, color);
-                }
-
-                SwingUtilities.invokeLater(() -> toast.accept("Покрашено устройств: " + which.size()));
+                var painted = paintEach(rgb, which, color);
+                SwingUtilities.invokeLater(() -> toast.accept("Покрашено устройств: " + painted + " из " + which.size()));
             } catch (IOException | RuntimeException e) {
                 SwingUtilities.invokeLater(() -> toast.accept("Не покрасилось: " + e.getMessage()));
             }
         });
+    }
+
+    /** Красит, что красится; одно упрямое устройство не мешает остальным. */
+    static int paintEach(OpenRgb rgb, List<OpenRgb.Device> which, Color color) throws IOException {
+        var painted = 0;
+
+        for (var device : which) {
+            if (device.paintable()) {
+                rgb.paint(device, color);
+                painted++;
+            }
+        }
+
+        return painted;
     }
 
     private void launchOpenRgb() {
@@ -781,8 +808,14 @@ final class DevicePage extends Ui.Card {
 
     private void start(Path program, String... args) {
         try {
-            if (program.toString().toLowerCase().endsWith(".lnk") || !SystemInfo.isWindows()) {
+            if (!SystemInfo.isWindows()) {
                 java.awt.Desktop.getDesktop().open(program.toFile());
+                return;
+            }
+
+            // Ярлык Java открыть не умеет — его открывает Проводник, как по двойному клику
+            if (program.toString().toLowerCase().endsWith(".lnk")) {
+                new ProcessBuilder("explorer.exe", program.toString()).start();
                 return;
             }
 
@@ -819,10 +852,7 @@ final class DevicePage extends Ui.Card {
                 try (var rgb = new OpenRgb(saved.host, OpenRgb.PORT)) {
                     var color = dim(saved.color, saved.brightness);
 
-                    for (var device : rgb.devices()) {
-                        rgb.paint(device, color);
-                    }
-
+                    paintEach(rgb, rgb.devices(), color);
                     return;
                 } catch (IOException | RuntimeException e) {
                     try {

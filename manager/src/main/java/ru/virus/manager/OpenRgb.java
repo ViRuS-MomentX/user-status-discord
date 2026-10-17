@@ -32,9 +32,44 @@ final class OpenRgb implements AutoCloseable {
     static final int SET_CLIENT_NAME = 50;
     static final int UPDATE_LEDS = 1050;
     static final int SET_CUSTOM_MODE = 1100;
+    static final int UPDATE_MODE = 1101;
 
-    /** Устройство: номер у OpenRGB, имя, сколько светодиодов. */
-    record Device(int index, String name, String kind, int leds) {
+    /** У режима цвета свои — задаются вместе с режимом, а не по светодиодам. */
+    static final int COLORS_MODE_SPECIFIC = 2;
+
+    /** Устройство: номер у OpenRGB, имя, сколько светодиодов, его режимы. */
+    record Device(int index, String name, String kind, int leds, List<Mode> modes) {
+
+        Device(int index, String name, String kind, int leds) {
+            this(index, name, kind, leds, List.of());
+        }
+
+        /**
+         * Режим «один цвет», если покрасить по светодиодам нельзя: у MSI Mystic
+         * Light и подобных светодиоды не перечислены, а цвет задаётся режимом.
+         */
+        Mode solid() {
+            for (var wanted : List.of("static", "steady", "direct", "fixed", "solid")) {
+                for (var mode : modes) {
+                    if (mode.name().toLowerCase().contains(wanted) && mode.colorMode() == COLORS_MODE_SPECIFIC
+                            && mode.colorsMax() >= 1) {
+                        return mode;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        /** Можно ли покрасить хоть как-то. */
+        boolean paintable() {
+            return leds > 0 || solid() != null;
+        }
+    }
+
+    /** Режим подсветки — все поля, потому что OpenRGB ждёт его обратно целиком. */
+    record Mode(int index, String name, int value, int flags, int speedMin, int speedMax,
+                int colorsMin, int colorsMax, int speed, int direction, int colorMode) {
     }
 
     private final Socket socket;
@@ -73,6 +108,11 @@ final class OpenRgb implements AutoCloseable {
 
     /** Красит все светодиоды устройства в один цвет. */
     void paint(Device device, Color color) throws IOException {
+        if (device.leds() == 0) {
+            paintMode(device, color);
+            return;
+        }
+
         // Свой режим: иначе поверх нашего цвета продолжит играть встроенный эффект
         send(device.index(), SET_CUSTOM_MODE, new byte[0]);
 
@@ -85,6 +125,33 @@ final class OpenRgb implements AutoCloseable {
         }
 
         send(device.index(), UPDATE_LEDS, body.array());
+    }
+
+    /** Красит режимом «один цвет» — для устройств без перечисленных светодиодов. */
+    private void paintMode(Device device, Color color) throws IOException {
+        var mode = device.solid();
+
+        if (mode == null) {
+            throw new IOException(device.name() + ": OpenRGB не даёт задать ему цвет — "
+                    + "проверь в самом OpenRGB, можно ли его покрасить там");
+        }
+
+        var count = Math.max(1, mode.colorsMin());
+        var name = (mode.name() + "\0").getBytes(StandardCharsets.UTF_8);
+        var body = le(ByteBuffer.allocate(4 + 4 + 2 + name.length + 9 * 4 + 2 + 4 * count));
+        body.putInt(body.capacity());
+        body.putInt(mode.index());
+        body.putShort((short) name.length).put(name);
+        body.putInt(mode.value()).putInt(mode.flags()).putInt(mode.speedMin()).putInt(mode.speedMax())
+                .putInt(mode.colorsMin()).putInt(mode.colorsMax()).putInt(mode.speed()).putInt(mode.direction())
+                .putInt(mode.colorMode());
+        body.putShort((short) count);
+
+        for (var i = 0; i < count; i++) {
+            body.put((byte) color.getRed()).put((byte) color.getGreen()).put((byte) color.getBlue()).put((byte) 0);
+        }
+
+        send(device.index(), UPDATE_MODE, body.array());
     }
 
     /**
@@ -105,10 +172,13 @@ final class OpenRgb implements AutoCloseable {
         var modes = Short.toUnsignedInt(buffer.getShort());
         buffer.getInt(); // активный режим
 
+        var modeList = new ArrayList<Mode>();
+
         for (var i = 0; i < modes; i++) {
-            string(buffer);
+            var modeName = string(buffer);
             // значение, флаги, скорость мин/макс, цветов мин/макс, скорость, направление, режим цвета
-            buffer.position(buffer.position() + 9 * 4);
+            modeList.add(new Mode(i, modeName, buffer.getInt(), buffer.getInt(), buffer.getInt(), buffer.getInt(),
+                    buffer.getInt(), buffer.getInt(), buffer.getInt(), buffer.getInt(), buffer.getInt()));
             var colors = Short.toUnsignedInt(buffer.getShort());
             buffer.position(buffer.position() + colors * 4);
         }
@@ -130,7 +200,7 @@ final class OpenRgb implements AutoCloseable {
         }
 
         var colors = Short.toUnsignedInt(buffer.getShort());
-        return new Device(index, name, kind(type), colors);
+        return new Device(index, name, kind(type), colors, List.copyOf(modeList));
     }
 
     private static String kind(int type) {

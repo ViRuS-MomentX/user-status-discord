@@ -248,15 +248,56 @@ public final class BotConfig {
         Properties props = new Properties();
 
         if (Files.isRegularFile(file)) {
-            try (InputStream in = Files.newInputStream(file);
-                 Reader reader = new InputStreamReader(in, StandardCharsets.UTF_8)) {
-                props.load(reader);
+            try {
+                var text = Files.readString(file, StandardCharsets.UTF_8);
+                props.load(new java.io.StringReader(keepWindowsPaths(text)));
             } catch (IOException e) {
                 throw new ConfigException("Не удалось прочитать " + file.toAbsolutePath() + ": " + e.getMessage());
             }
         }
 
         return props;
+    }
+
+    /** Строка, значение которой — путь Windows: «C:\...» или сетевой «\\сервер\...». */
+    private static final java.util.regex.Pattern WINDOWS_PATH = java.util.regex.Pattern.compile(
+            "^(\\s*[^#!\\s][^=:\\s]*\\s*[=:]\\s*)([A-Za-z]:\\\\.*|\\\\\\\\[^\\\\].*)$");
+
+    /**
+     * Сохраняет обратные косые в путях Windows.
+     *
+     * <p>В .properties обратная косая — служебный знак: «C:\Users\bot\result.json»
+     * Java прочла бы как «C:Usersbot» с невидимым возвратом каретки вместо «\r».
+     * Но писать пути Windows как есть естественно, поэтому такие значения мы
+     * экранируем сами. Кто уже удвоил косые, как требует формат, — того не трогаем.
+     */
+    static String keepWindowsPaths(String text) {
+        var lines = text.split("\n", -1);
+        var out = new StringBuilder(text.length() + 16);
+
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            var tail = line.endsWith("\r") ? "\r" : "";
+            var matcher = WINDOWS_PATH.matcher(line.substring(0, line.length() - tail.length()));
+
+            if (matcher.matches()) {
+                var value = matcher.group(2);
+                // Сетевой путь сам начинается с двух косых — удвоенность ищем после них
+                var rest = value.startsWith("\\\\") ? value.substring(2) : value;
+
+                if (!rest.contains("\\\\")) {
+                    line = matcher.group(1) + value.replace("\\", "\\\\") + tail;
+                }
+            }
+
+            out.append(line);
+
+            if (i < lines.length - 1) {
+                out.append('\n');
+            }
+        }
+
+        return out.toString();
     }
 
     /**

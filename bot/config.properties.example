@@ -368,6 +368,7 @@ parody.daily=30
 parody.minsamples=20
 
 # Чтобы не ждать: экспорт истории группы из Telegram Desktop
-# (группа → ⋮ → Экспорт истории чата → формат JSON). Путь к result.json
-# от папки с этим файлом. Забирается один раз, пока parody-samples.json пуст.
+# (группа → ⋮ → Экспорт истории чата → формат JSON). Путь к result.json:
+# просто result.json, если он лежит рядом с этим файлом, или полный путь —
+# C:\Users\имя\Desktop\result.json. Забирается один раз.
 parody.import=

@@ -548,14 +548,14 @@ public final class VoiceBridgeBot {
 
         if (!settings.importFile().isBlank() && !state.isImported()) {
             if (samples.size() == 0) {
-                var export = configPath.toAbsolutePath().resolveSibling(settings.importFile());
-
                 try {
+                    var export = configPath.toAbsolutePath().resolveSibling(settings.importFile());
                     log.info("Из экспорта взято сообщений участника: {}.",
                             samples.importExport(export, settings.target()));
                     state.markImported();
                 } catch (IOException | RuntimeException e) {
-                    log.error("Не прочитался экспорт {}: {}", export, e.getMessage());
+                    log.error("Не прочитался экспорт «{}»: {}. Пародия работает и без него — "
+                            + "сообщения участника наберутся сами.", settings.importFile(), e.getMessage());
                 }
             } else {
                 // Образцы уже есть — значит, экспорт забирали до того, как это
@@ -570,8 +570,15 @@ public final class VoiceBridgeBot {
         Llm llm;
 
         if (settings.isGigaChat()) {
-            var cert = settings.llmCert().isBlank() ? null
-                    : configPath.toAbsolutePath().resolveSibling(settings.llmCert());
+            java.nio.file.Path cert = null;
+
+            if (!settings.llmCert().isBlank()) {
+                try {
+                    cert = configPath.toAbsolutePath().resolveSibling(settings.llmCert());
+                } catch (java.nio.file.InvalidPathException e) {
+                    log.error("parody.llm.cert «{}» — не путь к файлу: {}", settings.llmCert(), e.getMessage());
+                }
+            }
             llm = new GigaChatLlm(settings.llmKey(), settings.llmScope(), settings.llmModel(),
                     settings.llmUrl(), settings.llmProxy(), cert);
         } else {

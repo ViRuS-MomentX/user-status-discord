@@ -100,6 +100,25 @@ class ParodyConfigTest {
     }
 
     @Test
+    void windowsPathsAreReadAsWritten() throws Exception {
+        // Ровно как пишут в Блокноте: одинарные обратные косые, \r посреди пути
+        assertEquals("C:\\Users\\bzczf\\Desktop\\voice-bridge\\result.json",
+                load("parody.import=C:\\Users\\bzczf\\Desktop\\voice-bridge\\result.json\r\n").importFile());
+        assertEquals("\\\\nas\\share\\result.json",
+                load("parody.import=\\\\nas\\share\\result.json\n").importFile());
+        // Кто уже удвоил, как требует формат, — получает то же самое
+        assertEquals("C:\\bot\\cert.cer",
+                load("parody.llm.cert=C:\\\\bot\\\\cert.cer\n").llmCert());
+        assertEquals("result.json", load("parody.import=result.json\n").importFile());
+    }
+
+    @Test
+    void otherBackslashesKeepTheirMeaning() {
+        assertEquals("a=x\\u0041\nb=C:\\\\x", BotConfig.keepWindowsPaths("a=x\\u0041\nb=C:\\x"));
+        assertEquals("# C:\\x\n", BotConfig.keepWindowsPaths("# C:\\x\n"), "комментарии не трогаем");
+    }
+
+    @Test
     void offByDefault() throws Exception {
         assertFalse(load("").enabled());
     }

@@ -26,13 +26,16 @@ package ru.virus.voicebridge;
  * @param quiet тихие часы «с-до» по часам компьютера, например «23-8»; пусто — без них
  * @param daily сколько реплик в сутки самое большее; 0 — без предела
  * @param mark с чего начинается каждая реплика, с пробелом на конце
+ * @param character описание своего персонажа; пусто — режим пародии на участника.
+ *                  Персонаж никого не изображает: у него свои имя и характер, а
+ *                  {@code target} — лишь чью манеру письма (не мнения) он берёт
  */
 public record ParodySettings(boolean enabled, String token, String chat, long target, String name,
                              String llmProvider, String llmKey, String llmModel,
                              String llmScope, String llmCert, String llmUrl, String llmProxy,
                              int chance, int cooldownMinutes, int minSamples, String importFile,
                              String proxy, String api,
-                             long owner, String quiet, int daily, String mark) {
+                             long owner, String quiet, int daily, String mark, String character) {
 
     /** Пометка по умолчанию. */
     public static final String DEFAULT_MARK = "пародия: ";
@@ -108,12 +111,17 @@ public record ParodySettings(boolean enabled, String token, String chat, long ta
         return "ollama".equals(llmProvider);
     }
 
+    /** Свой персонаж, а не пародия на участника. */
+    public boolean isCharacter() {
+        return !character.isBlank();
+    }
+
     public boolean isGigaChat() {
         return "gigachat".equals(llmProvider);
     }
 
     public boolean isUsable() {
-        return enabled && !token.isBlank() && !chat.isBlank() && target != 0
+        return enabled && !token.isBlank() && !chat.isBlank() && (target != 0 || isCharacter())
                 && (isOllama() || !llmKey.isBlank()) && !llmModel.isBlank();
     }
 }

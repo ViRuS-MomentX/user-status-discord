@@ -373,12 +373,28 @@ public final class BotConfig {
 
         var scope = props.getProperty("parody.llm.scope", "").trim();
 
+        var mode = props.getProperty("parody.mode", "parody").trim().toLowerCase();
+        var character = props.getProperty("parody.character", "").strip();
+        var characterMode = mode.equals("character");
+
+        if (characterMode && character.isEmpty()) {
+            log.error("parody.mode=character, но parody.character пуст — опиши характер персонажа. "
+                    + "Пока работаю как пародия.");
+            characterMode = false;
+        } else if (!characterMode && !mode.equals("parody")) {
+            log.error("parody.mode должен быть parody или character, а не «{}». Беру parody.", mode);
+        }
+
+        // У персонажа пометка своя и по желанию: он никого не изображает, подменять некого
+        var mark = characterMode ? characterMark(props.getProperty("parody.character.mark", ""))
+                : mark(props.getProperty("parody.mark", ""));
+
         return new ParodySettings(
                 Boolean.parseBoolean(props.getProperty("parody.enabled", "false").trim()),
                 pick(props, "parody.telegram.token", "VOICEBRIDGE_PARODY_TOKEN"),
                 props.getProperty("parody.telegram.chat", "").trim(),
                 number(props, "parody.telegram.user", 0),
-                name.isEmpty() ? "участник" : name,
+                name.isEmpty() ? (characterMode ? "Бот" : "участник") : name,
                 provider,
                 pick(props, "parody.llm.key", "VOICEBRIDGE_LLM_KEY"),
                 model,
@@ -395,7 +411,20 @@ public final class BotConfig {
                 number(props, "parody.telegram.owner", 0),
                 quiet(props.getProperty("parody.quiet", "").trim()),
                 bounded(props, "parody.daily", 30, 0, 10_000),
-                mark(props.getProperty("parody.mark", "")));
+                mark,
+                characterMode ? character : "");
+    }
+
+    /** Пометка персонажа: любая короткая или никакой. */
+    private static String characterMark(String raw) {
+        var trimmed = raw.strip();
+
+        if (trimmed.length() > 40) {
+            log.error("parody.character.mark длиннее 40 знаков — пометки не будет.");
+            return "";
+        }
+
+        return trimmed.isEmpty() ? "" : trimmed + " ";
     }
 
     /** Пометка реплик пародии; негодная заменяется стандартной. */

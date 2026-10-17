@@ -65,7 +65,7 @@ class ParodyTest {
         return new ParodySettings(true, "T", "@grp", TARGET, "Вася",
                 "anthropic", "KEY", "model", "", "", "", "",
                 chance, cooldown, minSamples, "", "", "", OWNER, quiet, daily,
-                ParodySettings.DEFAULT_MARK);
+                ParodySettings.DEFAULT_MARK, "");
     }
 
     ParodySamples store;
@@ -678,5 +678,35 @@ class ParodyTest {
         assertTrue(Parody.copies("я сегодня опять не выспался короче)", samples));
         assertTrue(!Parody.copies("ахах", samples), "короткие словечки повторять можно");
         assertTrue(!Parody.copies("сегодня как раз выспался, го катку", samples));
+    }
+
+    static ParodySettings character(long styleUser) {
+        return new ParodySettings(true, "T", "@grp", styleUser, "Дед",
+                "anthropic", "KEY", "model", "", "", "", "",
+                100, 0, 50, "", "", "", OWNER, "", 0, "", "ворчливый дед, всех зовёт обезьянами");
+    }
+
+    @Test
+    void characterTalksWithoutMarkAndWithoutSamples() throws Exception {
+        start(character(0), llm(p -> "эх вы обезьяны"));
+
+        telegram.say(7, "Петя", "кто в доту");
+
+        var sent = telegram.awaitSent(1, 3000);
+        assertNotNull(sent, "персонажу образцы не нужны");
+        assertEquals("эх вы обезьяны", sent.get("text"), "у персонажа пометки нет — он никого не изображает");
+        assertTrue(prompts.getFirst().contains("как Дед"), prompts.getFirst());
+    }
+
+    @Test
+    void characterAnswersStyleUserAndLearnsOnlyForm() throws Exception {
+        start(character(TARGET), llm(p -> "ну и чё"), "пишу вот так мелко");
+
+        telegram.say(TARGET, "Лантри", "всем привет");
+
+        var sent = telegram.awaitSent(1, 3000);
+        assertNotNull(sent, "для персонажа автор образцов — обычный собеседник");
+        assertTrue(prompts.getFirst().contains("пишу вот так мелко"), prompts.getFirst());
+        assertTrue(prompts.getFirst().contains("только для манеры письма"), prompts.getFirst());
     }
 }

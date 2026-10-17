@@ -566,7 +566,8 @@ public final class VoiceBridgeBot {
 
         // Образцов нет (первый запуск, новый участник или файл очистили руками) —
         // читаем экспорт. Кроме случая, когда участник сам велел забыть его
-        if (!settings.importFile().isBlank() && samples.size() == 0 && !state.isForgotten()) {
+        if (!settings.importFile().isBlank() && settings.target() != 0 && samples.size() == 0
+                && !state.isForgotten()) {
             try {
                 var export = configPath.toAbsolutePath().resolveSibling(settings.importFile());
                 log.info("Читаю экспорт {} — для большого файла это может занять минуту.", export.getFileName());
@@ -582,8 +583,15 @@ public final class VoiceBridgeBot {
                     + "Передумал — удали parody-state.json и перезапусти.");
         }
 
-        log.info("Образцов речи участника: {}. Пародировать начну с {}.",
-                samples.size(), settings.minSamples());
+        if (settings.isCharacter()) {
+            log.info("Режим персонажа «{}»{}. Пометка: {}.", settings.name(),
+                    settings.target() == 0 ? "" : ", манера письма — по " + samples.size() + " сообщениям участника "
+                            + settings.target(),
+                    settings.mark().isBlank() ? "нет" : "«" + settings.mark().strip() + "»");
+        } else {
+            log.info("Образцов речи участника: {}. Пародировать начну с {}.",
+                    samples.size(), settings.minSamples());
+        }
 
         Llm llm;
 

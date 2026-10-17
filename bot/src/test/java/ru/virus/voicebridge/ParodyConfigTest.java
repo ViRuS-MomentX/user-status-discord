@@ -148,4 +148,29 @@ class ParodyConfigTest {
         assertEquals(OllamaLlm.DEFAULT_MODEL, settings.llmModel());
         assertTrue(settings.isUsable(), "Ollama работает без ключа");
     }
+
+    @Test
+    void characterModeNeedsNoTargetAndHasNoParodyMark() throws Exception {
+        var settings = load("""
+                parody.enabled=true
+                parody.telegram.token=T
+                parody.telegram.chat=@g
+                parody.llm.provider=ollama
+                parody.mode=character
+                parody.name=Дед Макар
+                parody.character=ворчливый дед
+                parody.mark=пародия:
+                """);
+        assertTrue(settings.isCharacter());
+        assertTrue(settings.isUsable());
+        assertEquals("", settings.mark());
+        assertEquals("Дед Макар", settings.name());
+    }
+
+    @Test
+    void characterModeWithoutDescriptionStaysParody() throws Exception {
+        var settings = load("parody.mode=character\n");
+        assertFalse(settings.isCharacter());
+        assertEquals(ParodySettings.DEFAULT_MARK, settings.mark());
+    }
 }

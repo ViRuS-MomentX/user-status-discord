@@ -331,8 +331,11 @@ public final class Parody {
                 }
             }
 
-            // Самому участнику не отвечаем: разговор с собой выглядел бы странно
-            return;
+            // Самому участнику не отвечаем: разговор с собой выглядел бы странно.
+            // Персонаж — не он, для персонажа это обычный собеседник
+            if (!settings.isCharacter()) {
+                return;
+            }
         }
 
         // Ботов только слушаем: иначе два бота заговорят друг друга до бесконечности
@@ -357,7 +360,8 @@ public final class Parody {
             return;
         }
 
-        if (samples.size() < settings.minSamples()) {
+        // Персонажу образцы не обязательны: манера письма — лишь приправа к характеру
+        if (!settings.isCharacter() && samples.size() < settings.minSamples()) {
             log.debug("Образцов пока {} из {} — молчу.", samples.size(), settings.minSamples());
             return;
         }
@@ -506,7 +510,7 @@ public final class Parody {
             case "/parody_say" -> {
                 if (state.isPaused()) {
                     answer(message, "Пародия выключена — сначала /parody_on.");
-                } else if (samples.size() == 0) {
+                } else if (samples.size() == 0 && !settings.isCharacter()) {
                     answer(message, "Пока не по чему пародировать: нет ни одного сообщения "
                             + settings.name() + ".");
                 } else if (busy.compareAndSet(false, true)) {
@@ -523,7 +527,7 @@ public final class Parody {
                 }
             }
             case "/parody_try" -> {
-                if (samples.size() == 0) {
+                if (samples.size() == 0 && !settings.isCharacter()) {
                     answer(message, "Пока не по чему пародировать: нет ни одного сообщения "
                             + settings.name() + ".");
                 } else if (message.chat().equals(chatId)) {
@@ -614,9 +618,14 @@ public final class Parody {
     private String status() {
         var lines = new ArrayList<String>();
         lines.add(state.isPaused() ? "Выключена." : "Включена.");
-        lines.add("Сообщений " + settings.name() + " собрано: " + samples.size()
-                + (samples.size() < settings.minSamples()
-                    ? " (начну с " + settings.minSamples() + ")" : "") + ".");
+        if (settings.isCharacter()) {
+            lines.add("Персонаж: " + settings.name() + (settings.target() == 0 ? ""
+                    : ", образцов манеры письма: " + samples.size()) + ".");
+        } else {
+            lines.add("Сообщений " + settings.name() + " собрано: " + samples.size()
+                    + (samples.size() < settings.minSamples()
+                        ? " (начну с " + settings.minSamples() + ")" : "") + ".");
+        }
         lines.add("Встреваю с вероятностью " + settings.chance() + "%, не чаще раза в "
                 + settings.cooldownMinutes() + " мин.");
         lines.add("Сегодня реплик: " + state.sentToday(LocalDate.now(clock))
@@ -875,6 +884,10 @@ public final class Parody {
 
     /** @param must обратились к нему — молчать нельзя */
     private String system(boolean must) {
+        if (settings.isCharacter()) {
+            return characterSystem(must);
+        }
+
         var name = settings.name();
         var emoji = ParodyStyle.emojiShare(samples.all()) >= 10
                 ? "Эмодзи — только внутри фразы и только как у него в образцах, в конце реплики их не ставь. "
@@ -895,7 +908,41 @@ public final class Parody {
                         : "Если вставить в разговор нечего, ответь одним символом «-».");
     }
 
+    /**
+     * Свой персонаж: характер задаёт хозяин, а рамки — здесь. Грубить и
+     * материться персонажу можно, это стёб между друзьями; травить людей за
+     * то, кто они есть, угрожать и сочинять о них небылицы — нет.
+     */
+    private String characterSystem(boolean must) {
+        var name = settings.name();
+        var hasStyle = settings.target() != 0 && samples.size() > 0;
+        return "Ты — " + name + ", персонаж-бот в групповом чате друзей в Telegram. Ты никого из "
+                + "участников не изображаешь и не выдаёшь себя за реального человека. "
+                + "Твой характер:\n" + settings.character() + "\n\n"
+                + "Держись этого характера в каждой реплике. "
+                + (hasStyle
+                    ? "Форму сообщений — длину, пунктуацию, регистр, опечатки, сленг — бери из "
+                      + "образцов ниже. Это сообщения другого человека: бери у него только то, КАК "
+                      + "он пишет, а не что — не его мнения, не факты о нём и не его фразы. "
+                      + "Не копируй образцы и не склеивай реплику из их кусков. "
+                    : "")
+                + "Пиши как в чате: обычно одна короткая реплика, по теме последних сообщений, "
+                + "каждый раз новая. Эмодзи в конце не ставь. Выводи только текст реплики — "
+                + "без имени, кавычек и пояснений. "
+                + "Грубость, подколки и мат — в духе характера, как дружеский стёб. Но без "
+                + "оскорблений за национальность, веру, ориентацию, здоровье и внешность, без угроз, "
+                + "без оскорблений чьих-то родных, не доводи одного человека — не повторяй ему одну "
+                + "и ту же подколку. Небылицы рассказывай смешные и про себя; о реальных участниках "
+                + "фактов не выдумывай и вредных советов не давай. "
+                + (must ? "К тебе обратились — обязательно ответь хотя бы короткой репликой."
+                        : "Если вставить в разговор нечего, ответь одним символом «-».");
+    }
+
     private String prompt(String context, boolean direct) {
+        if (settings.isCharacter()) {
+            return characterPrompt(context, direct);
+        }
+
         var examples = new StringBuilder();
 
         for (var sample : examples(samples.all())) {
@@ -930,6 +977,35 @@ public final class Parody {
                     ? "Последнее сообщение — ответ на его реплику. Ответь так, как ответил бы "
                     : "Встрянь в разговор одной репликой — так, как написал бы ")
                 + settings.name() + ".";
+    }
+
+    private String characterPrompt(String context, boolean direct) {
+        var examples = new StringBuilder();
+
+        if (settings.target() != 0) {
+            for (var sample : examples(samples.all())) {
+                examples.append("- ").append(sample.replace('\n', ' ')).append('\n');
+            }
+        }
+
+        var recentOwn = new StringBuilder();
+
+        synchronized (said) {
+            for (var line : said) {
+                recentOwn.append("- ").append(line.replace('\n', ' ')).append('\n');
+            }
+        }
+
+        var style = settings.target() == 0 ? "" : ParodyStyle.describe(samples.all());
+        return (style.isEmpty() ? "" : "Форма сообщений в цифрах — держись её:\n" + style + "\n\n")
+                + (examples.isEmpty() ? ""
+                    : "Образцы формы сообщений (чужие — только для манеры письма, не копировать):\n" + examples)
+                + (recentOwn.isEmpty() ? ""
+                    : "\nТвои недавние реплики — не повторяй их и не пересказывай:\n" + recentOwn)
+                + "\nПоследние сообщения в чате (снизу — самое новое):\n" + context + "\n\n"
+                + (direct
+                    ? "Последнее сообщение обращено к тебе. Ответь как " + settings.name() + "."
+                    : "Встрянь в разговор одной репликой как " + settings.name() + ".");
     }
 
     /**

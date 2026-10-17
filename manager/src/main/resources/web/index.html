@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="virus-token" content="__VIRUS_TOKEN__">
+  <title>V.I.R.U.S.</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <img src="favicon.svg" alt="" class="brand-mark">
+      <div>
+        <div class="brand-name">V.I.R.U.S.</div>
+        <div class="brand-sub">Versatile Instance Runner &amp; Unified Supervisor</div>
+      </div>
+    </div>
+    <div class="top-actions">
+      <label class="switch" id="autostart-wrap" title="Запускать V.I.R.U.S. при входе в Windows">
+        <input type="checkbox" id="autostart">
+        <span class="track"><span class="thumb"></span></span>
+        <span class="switch-label">Автозапуск</span>
+      </label>
+      <button class="btn ghost danger" id="quit" title="Остановить все процессы и закрыть V.I.R.U.S.">Выключить всё</button>
+    </div>
+  </header>
+
+  <div id="banners"></div>
+
+  <div class="layout">
+    <nav class="side">
+      <div class="side-title">Процессы</div>
+      <ul id="process-list" class="process-list"></ul>
+      <button class="btn ghost add" id="add-process">+ Добавить процесс</button>
+
+      <div class="side-title">Настройка</div>
+      <button class="nav-item" id="open-config">
+        <span class="nav-icon">⚙</span> Конфиг ботов
+        <span class="pill hidden" id="missing-pill"></span>
+      </button>
+    </nav>
+
+    <main id="main">
+      <section id="process-view" class="view hidden">
+        <div class="view-head">
+          <div>
+            <h1 id="p-name"></h1>
+            <div class="meta" id="p-meta"></div>
+          </div>
+          <div class="actions">
+            <button class="btn primary" id="p-start">▶ Запустить</button>
+            <button class="btn" id="p-restart">↻ Перезапустить</button>
+            <button class="btn danger" id="p-stop">■ Остановить</button>
+            <button class="btn ghost icon" id="p-edit" title="Изменить процесс">✎</button>
+          </div>
+        </div>
+        <div class="note hidden" id="p-note"></div>
+
+        <div class="console-bar">
+          <input type="search" id="filter" placeholder="Фильтр по тексту…">
+          <div class="seg" role="group" aria-label="Что показывать">
+            <button class="seg-btn on" data-level="all">Всё</button>
+            <button class="seg-btn" data-level="warn">Предупреждения</button>
+            <button class="seg-btn" data-level="error">Ошибки</button>
+          </div>
+          <button class="btn ghost small" id="clear">Очистить</button>
+        </div>
+        <div class="console-wrap">
+          <pre id="console" class="console" tabindex="0"></pre>
+          <button class="to-bottom hidden" id="to-bottom">↓ к новым</button>
+        </div>
+      </section>
+
+      <section id="config-view" class="view hidden">
+        <div class="view-head">
+          <div>
+            <h1>Конфиг ботов</h1>
+            <div class="meta" id="c-path"></div>
+          </div>
+          <div class="actions">
+            <input type="search" id="c-search" placeholder="Найти настройку…">
+            <button class="btn ghost" id="c-raw-toggle">Текстом</button>
+          </div>
+        </div>
+
+        <div id="c-banners"></div>
+
+        <div class="config-body" id="c-form-wrap">
+          <aside class="config-nav" id="c-nav"></aside>
+          <div class="config-form" id="c-form"></div>
+        </div>
+
+        <div class="raw hidden" id="c-raw-wrap">
+          <textarea id="c-raw" spellcheck="false"></textarea>
+        </div>
+
+        <div class="savebar hidden" id="savebar">
+          <span id="save-count"></span>
+          <button class="btn ghost" id="discard">Отменить</button>
+          <button class="btn" id="save">Сохранить</button>
+          <button class="btn primary" id="save-restart">Сохранить и перезапустить ботов</button>
+        </div>
+      </section>
+
+      <section id="empty-view" class="view empty">
+        <div class="empty-mark">V</div>
+        <p>Выбери процесс слева или открой конфиг ботов.</p>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="edit-dialog">
+    <form method="dialog" id="edit-form">
+      <h2 id="edit-title">Процесс</h2>
+      <label>Имя
+        <input name="name" required maxlength="60">
+      </label>
+      <label>Короткое имя (латиница) <span class="hint">— для файлов и адресов, потом не меняется</span>
+        <input name="id" required pattern="[a-z0-9][a-z0-9-]{0,31}">
+      </label>
+      <label>Команда <span class="hint">— {java} это та же Java, {home} это папка V.I.R.U.S.</span>
+        <input name="command" required class="mono">
+      </label>
+      <label>Папка запуска <span class="hint">— пусто: папка V.I.R.U.S.</span>
+        <input name="workdir" class="mono">
+      </label>
+      <div class="checks">
+        <label class="check"><input type="checkbox" name="autostart"> Запускать вместе с V.I.R.U.S.</label>
+        <label class="check"><input type="checkbox" name="restart" checked> Поднимать, если упал</label>
+        <label class="check"><input type="checkbox" name="supervised"> Понимает «stop» на вход (наши боты)</label>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="btn ghost danger" id="edit-delete">Удалить</button>
+        <span class="grow"></span>
+        <button type="button" class="btn ghost" id="edit-cancel">Отмена</button>
+        <button type="submit" class="btn primary">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

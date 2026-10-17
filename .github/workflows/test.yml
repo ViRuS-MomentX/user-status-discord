@@ -7,9 +7,13 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Бот и V.I.R.U.S. собираются по отдельности: у каждого свой pom
+        module: [bot, manager]
     defaults:
       run:
-        working-directory: bot
+        working-directory: ${{ matrix.module }}
     steps:
       - uses: actions/checkout@v4
 

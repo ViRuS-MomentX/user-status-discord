@@ -312,13 +312,16 @@ parody.mark=пародия:
 # перезапуск: оно хранится в parody-state.json.
 parody.telegram.owner=
 
-# Чья модель сочиняет реплики: gigachat или anthropic.
+# Чья модель сочиняет реплики: ollama, gigachat или anthropic.
 #
+# ollama — модель на этом же компьютере (https://ollama.com): бесплатно, без
+#   ключа и лимитов, переписка никуда не уходит. Нужна запущенная Ollama и
+#   скачанная модель: ollama pull gemma3:12b
 # gigachat — работает из России без прокси, у физлиц есть бесплатный лимит.
 # anthropic — пишет живее, но платный и из России отвечает только через прокси.
 parody.llm.provider=gigachat
 
-# Ключ. Можно задать переменной VOICEBRIDGE_LLM_KEY.
+# Ключ. Можно задать переменной VOICEBRIDGE_LLM_KEY. Для ollama не нужен.
 #
 # GigaChat: https://developers.sber.ru/studio → войти через Сбер ID → создать
 # проект GigaChat API → «Получить ключ». Нужен «Ключ авторизации»
@@ -327,7 +330,9 @@ parody.llm.provider=gigachat
 # Anthropic: https://console.anthropic.com → API Keys.
 parody.llm.key=
 
-# Имя модели. Для GigaChat можно оставить пустым — возьмётся GigaChat
+# Имя модели. Для Ollama пусто — gemma3:12b (нужно ~10 ГБ видеопамяти; при
+# 6–8 ГБ — qwen2.5:7b, при 4 ГБ или без видеокарты — gemma3:4b).
+# Для GigaChat можно оставить пустым — возьмётся GigaChat
 # (бесплатный лимит — на неё; ещё бывают GigaChat-Pro и GigaChat-Max).
 # Для Anthropic — список на https://docs.anthropic.com/en/docs/about-claude/models
 parody.llm.model=
@@ -343,6 +348,7 @@ parody.llm.scope=GIGACHAT_API_PERS
 parody.llm.cert=russian_trusted_root_ca.cer
 
 # Свой адрес API вместо официального. Пусто — официальный.
+# Для Ollama пусто — эта же машина (http://127.0.0.1:11434).
 parody.llm.url=
 
 # HTTP-прокси до API: «хост:порт» или «логин:пароль@хост:порт».

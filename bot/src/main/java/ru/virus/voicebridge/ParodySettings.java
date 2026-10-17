@@ -7,7 +7,7 @@ package ru.virus.voicebridge;
  * @param chat группа, где бот читает и пишет: @имя или числовой ID
  * @param target номер участника в Telegram, чью манеру бот перенимает
  * @param name как участника называть в подсказке для ИИ
- * @param llmProvider чья модель: anthropic или gigachat
+ * @param llmProvider чья модель: ollama, gigachat или anthropic
  * @param llmKey ключ API Anthropic или ключ авторизации GigaChat
  * @param llmModel имя модели
  * @param llmScope к какому тарифу GigaChat относится ключ
@@ -103,12 +103,17 @@ public record ParodySettings(boolean enabled, String token, String chat, long ta
         return userId != 0 && (userId == target || userId == owner);
     }
 
+    /** Модель на этом же компьютере — ей ключ не нужен. */
+    public boolean isOllama() {
+        return "ollama".equals(llmProvider);
+    }
+
     public boolean isGigaChat() {
         return "gigachat".equals(llmProvider);
     }
 
     public boolean isUsable() {
         return enabled && !token.isBlank() && !chat.isBlank() && target != 0
-                && !llmKey.isBlank() && !llmModel.isBlank();
+                && (isOllama() || !llmKey.isBlank()) && !llmModel.isBlank();
     }
 }

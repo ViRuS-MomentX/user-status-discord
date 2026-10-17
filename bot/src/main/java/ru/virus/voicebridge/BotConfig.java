@@ -356,8 +356,8 @@ public final class BotConfig {
         var name = props.getProperty("parody.name", "").trim();
         var provider = props.getProperty("parody.llm.provider", "anthropic").trim().toLowerCase();
 
-        if (!provider.equals("anthropic") && !provider.equals("gigachat")) {
-            log.error("parody.llm.provider должен быть anthropic или gigachat, а не «{}». "
+        if (!provider.equals("anthropic") && !provider.equals("gigachat") && !provider.equals("ollama")) {
+            log.error("parody.llm.provider должен быть ollama, gigachat или anthropic, а не «{}». "
                     + "Беру anthropic.", provider);
             provider = "anthropic";
         }
@@ -367,6 +367,8 @@ public final class BotConfig {
         if (model.isEmpty() && provider.equals("gigachat")) {
             // У GigaChat базовая модель так и называется, и бесплатный лимит — на неё
             model = "GigaChat";
+        } else if (model.isEmpty() && provider.equals("ollama")) {
+            model = OllamaLlm.DEFAULT_MODEL;
         }
 
         var scope = props.getProperty("parody.llm.scope", "").trim();

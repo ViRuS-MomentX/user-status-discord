@@ -503,7 +503,7 @@ public final class VoiceBridgeBot {
         if (!settings.isUsable()) {
             if (settings.enabled()) {
                 log.error("Пародия включена, но не задан parody.telegram.token, "
-                        + "parody.telegram.chat, parody.telegram.user, parody.llm.key "
+                        + "parody.telegram.chat, parody.telegram.user, parody.llm.key (кроме ollama) "
                         + "или parody.llm.model.");
             }
             return null;
@@ -569,7 +569,9 @@ public final class VoiceBridgeBot {
 
         Llm llm;
 
-        if (settings.isGigaChat()) {
+        if (settings.isOllama()) {
+            llm = new OllamaLlm(settings.llmModel(), settings.llmUrl());
+        } else if (settings.isGigaChat()) {
             java.nio.file.Path cert = null;
 
             if (!settings.llmCert().isBlank()) {
@@ -587,7 +589,8 @@ public final class VoiceBridgeBot {
         }
 
         log.info("Реплики сочиняет {}, модель {}.",
-                settings.isGigaChat() ? "GigaChat" : "Anthropic", settings.llmModel());
+                settings.isOllama() ? "Ollama на этом ПК" : settings.isGigaChat() ? "GigaChat" : "Anthropic",
+                settings.llmModel());
 
         if (state.isPaused()) {
             log.info("Пародия выключена командой /parody_off — молчу, пока не включат /parody_on.");

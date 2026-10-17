@@ -134,4 +134,18 @@ class ParodyConfigTest {
         org.junit.jupiter.api.Assertions.assertThrows(BotConfig.ConfigException.class,
                 () -> load("bridge.telegram.api=tg-bridge.workers.dev\n"));
     }
+
+    @Test
+    void ollamaNeedsNoKey() throws Exception {
+        var settings = load("""
+                parody.enabled=true
+                parody.telegram.token=T
+                parody.telegram.chat=@g
+                parody.telegram.user=5
+                parody.llm.provider=ollama
+                """);
+        assertTrue(settings.isOllama());
+        assertEquals(OllamaLlm.DEFAULT_MODEL, settings.llmModel());
+        assertTrue(settings.isUsable(), "Ollama работает без ключа");
+    }
 }

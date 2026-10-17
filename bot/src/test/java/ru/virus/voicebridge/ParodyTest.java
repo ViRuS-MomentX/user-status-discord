@@ -709,4 +709,16 @@ class ParodyTest {
         assertTrue(prompts.getFirst().contains("пишу вот так мелко"), prompts.getFirst());
         assertTrue(prompts.getFirst().contains("только для манеры письма"), prompts.getFirst());
     }
+
+    @Test
+    void characterNeverStartsWithParodyMark() throws Exception {
+        assertEquals("ну чё, обезьяны", Parody.clean("пародия: Дед: ну чё, обезьяны", "Дед", ""));
+        start(character(0), llm(p -> "пародия: ну чё, обезьяны"));
+
+        telegram.say(7, "Петя", "привет");
+
+        var sent = telegram.awaitSent(1, 3000);
+        assertNotNull(sent);
+        assertEquals("ну чё, обезьяны", sent.get("text"));
+    }
 }

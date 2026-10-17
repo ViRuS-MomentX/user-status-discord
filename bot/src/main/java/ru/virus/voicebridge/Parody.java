@@ -1058,11 +1058,17 @@ public final class Parody {
 
         var ownMark = mark.trim().toLowerCase(java.util.Locale.ROOT);
 
-        if (lower.startsWith(ownMark)) {
+        // Пустая пометка (у персонажа) — не пометка: иначе «начинается с пустоты»
+        // совпадало бы всегда, и дописанную моделью «пародия:» никто бы не срезал
+        if (!ownMark.isEmpty() && lower.startsWith(ownMark)) {
             result = result.substring(ownMark.length()).trim();
         } else if (lower.startsWith(MARK.trim())) {
             result = result.substring(MARK.trim().length()).trim();
-        } else if (!name.isBlank() && lower.startsWith(name.toLowerCase(java.util.Locale.ROOT) + ":")) {
+        }
+
+        lower = result.toLowerCase(java.util.Locale.ROOT);
+
+        if (!name.isBlank() && lower.startsWith(name.toLowerCase(java.util.Locale.ROOT) + ":")) {
             result = result.substring(name.length() + 1).trim();
         }
 

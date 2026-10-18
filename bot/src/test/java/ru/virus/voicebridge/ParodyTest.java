@@ -739,6 +739,7 @@ class ParodyTest {
     void ownerListOfNamesAndJokesReachesPrompt() throws Exception {
         var file = dir.resolve("parody-people.json");
         Files.writeString(file, "{\"people\":[{\"id\":\"7\",\"name\":\"Петруха\",\"jokes\":\"про то, что он вечно опаздывает\"},"
+                + "{\"id\":\"8\",\"name\":\"Колян\",\"jokes\":\"про кота\"},"
                 + "{\"id\":\"0\",\"name\":\"никто\"}]}");
         start(character(0), llm(p -> "ну"));
         parody.setPeople(new PeopleBook(file));
@@ -749,6 +750,7 @@ class ParodyTest {
         var prompt = prompts.getFirst();
         assertTrue(prompt.contains("«Петя»: называй «Петруха». Шутить над ним можно так: про то, что он вечно опаздывает"), prompt);
         assertTrue(!prompt.contains("никто"), "строки без ID пропускаются");
+        assertTrue(!prompt.contains("Колян"), "кто не писал — того в подсказке нет, чтобы ИИ его не звал");
     }
 
     @Test
@@ -765,5 +767,21 @@ class ParodyTest {
         var own = telegram.awaitSent(2, 3000);
         assertNotNull(own);
         assertTrue(own.get("text").contains("Твой ID: 7"), own.get("text"));
+    }
+
+    @Test
+    void addressToSomeoneWhoIsNotTalkingIsRewritten() throws Exception {
+        var file = dir.resolve("parody-people.json");
+        Files.writeString(file, "{\"people\":[{\"id\":\"555\",\"name\":\"Санёк\",\"jokes\":\"\"}]}");
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        start(character(0), llm(p -> calls.incrementAndGet() == 1 ? "Санёк, ты где пропал" : "ну и чё, обезьяны"));
+        parody.setPeople(new PeopleBook(file));
+
+        telegram.say(7, "Петя", "кто в доту");
+
+        var sent = telegram.awaitSent(1, 3000);
+        assertNotNull(sent);
+        assertEquals("ну и чё, обезьяны", sent.get("text"));
+        assertTrue(prompts.get(1).contains("в разговоре не участвует"), prompts.get(1));
     }
 }

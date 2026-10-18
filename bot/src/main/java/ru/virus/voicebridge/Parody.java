@@ -86,6 +86,16 @@ public final class Parody {
 
     /** Кто недавно писал — их прозвища показываем ИИ в первую очередь. */
     private final Deque<Long> activeIds = new ArrayDeque<>();
+
+    /** Когда человек писал в последний раз: «в разговоре» — кто писал за последние полчаса. */
+    private final java.util.Map<Long, Long> lastSeen = new java.util.HashMap<>();
+
+    static final long ACTIVE_MS = 30 * 60_000L;
+
+    /** Чтобы ИИ не путал людей и не звал тех, кто молчит. */
+    static final String ADDRESS_RULE = "Обращайся только к тем, кто есть в последних сообщениях чата ниже, — "
+            + "чаще всего к автору самого нового. Не называй и не упоминай людей, которых в этих сообщениях нет, "
+            + "и не путай, кто что сказал. ";
     private final Random random = new Random();
 
     /** Часы подменяются в тестах: тихие часы и счёт за сутки зависят от них. */
@@ -629,6 +639,7 @@ public final class Parody {
 
     private void noteActive(long id) {
         synchronized (activeIds) {
+            lastSeen.put(id, clock.millis());
             activeIds.remove(id);
             activeIds.addFirst(id);
 
@@ -636,6 +647,48 @@ public final class Parody {
                 activeIds.removeLast();
             }
         }
+    }
+
+    /** Кто сейчас в разговоре: писал за последние полчаса, сначала самые свежие. */
+    private List<Long> active() {
+        var now = clock.millis();
+
+        synchronized (activeIds) {
+            return activeIds.stream()
+                    .filter(id -> now - lastSeen.getOrDefault(id, 0L) < ACTIVE_MS)
+                    .toList();
+        }
+    }
+
+    /**
+     * Начинается ли реплика с обращения к тому, кого в разговоре нет: «Санёк,
+     * …», когда Санёк не писал. Так ИИ путает людей — такое переписываем.
+     */
+    String addressesAbsent(String text) {
+        var start = text.strip();
+        var comma = start.indexOf(',');
+
+        if (comma <= 0 || comma > 30) {
+            return null;
+        }
+
+        var address = start.substring(0, comma).strip().toLowerCase(java.util.Locale.ROOT);
+        var present = new java.util.HashSet<>(active());
+        var book = people;
+
+        for (var entry : names.allNames(book == null ? List.of() : book.entries()).entrySet()) {
+            if (present.contains(entry.getKey())) {
+                continue;
+            }
+
+            for (var name : entry.getValue()) {
+                if (!name.isBlank() && address.equals(name.toLowerCase(java.util.Locale.ROOT))) {
+                    return name;
+                }
+            }
+        }
+
+        return null;
     }
 
     private String status() {
@@ -723,7 +776,9 @@ public final class Parody {
     /** Блок подсказки со списком хозяина; пусто — списка нет. */
     private String peopleBlock() {
         var book = people;
-        var lines = book == null ? "" : book.describe(names::name);
+        // Только тех, кто сейчас в разговоре: остальные имена сбивали ИИ, и он
+        // обращался к людям, которые ничего не писали
+        var lines = book == null ? "" : book.describe(names::name, new java.util.HashSet<>(active()));
         return lines.isEmpty() ? "" : "Кого как называть и как над кем можно шутить — это задал хозяин, держись "
                 + "этого (по-дружески, в рамках правил выше):\n" + lines + "\n\n";
     }
@@ -843,7 +898,9 @@ public final class Parody {
             why = text.isBlank() ? "пусто — ИИ промолчал или сработал фильтр"
                     : repeats(text) ? "повтор недавней реплики"
                     : copies(text, samples.all()) ? "это слово в слово его старое сообщение, а нужна новая "
-                        + "фраза в его манере по теме разговора" : "";
+                        + "фраза в его манере по теме разговора"
+                    : addressesAbsent(text) != null ? "обращение к «" + addressesAbsent(text) + "», а он в "
+                        + "разговоре не участвует — обращайся только к тем, кто писал выше" : "";
 
             // Промолчать без обращения — можно: тогда и переспрашивать незачем
             if (why.isEmpty() || (text.isBlank() && !must)) {
@@ -977,7 +1034,7 @@ public final class Parody {
                 + "реплика. Выводи только текст реплики — без имени, кавычек, пометок и пояснений. "
                 + "Не выдумывай о нём личных фактов, событий, признаний и мнений о реальных людях, "
                 + "которых нет в образцах. Без угроз, травли и оскорблений участников. "
-                + "Людей называй так, как называет их он, — список ниже. "
+                + "Людей называй так, как называет их он, — список ниже. " + ADDRESS_RULE
                 + (must ? "К тебе обратились — обязательно ответь хотя бы короткой репликой."
                         : "Если вставить в разговор нечего, ответь одним символом «-».");
     }
@@ -993,7 +1050,7 @@ public final class Parody {
         return "Ты — " + name + ", персонаж-бот в групповом чате друзей в Telegram. Ты никого из "
                 + "участников не изображаешь и не выдаёшь себя за реального человека. "
                 + "Твой характер:\n" + settings.character() + "\n\n"
-                + "Держись этого характера в каждой реплике. "
+                + "Держись этого характера в каждой реплике. " + ADDRESS_RULE
                 + (hasStyle
                     ? "Форму сообщений — длину, пунктуацию, регистр, опечатки, сленг — бери из "
                       + "образцов ниже. Это сообщения другого человека: бери у него только то, КАК "
@@ -1039,6 +1096,7 @@ public final class Parody {
             active = List.copyOf(activeIds);
         }
 
+        active = active();
         var known = names.describe(active, 15);
 
         return (style.isEmpty() ? "" : "Его манера в цифрах — держись её:\n" + style + "\n\n")

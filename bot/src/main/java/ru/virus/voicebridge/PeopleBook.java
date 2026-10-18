@@ -89,11 +89,20 @@ final class PeopleBook {
      * @return пусто — список пуст
      */
     String describe(LongFunction<String> seen) {
+        return describe(seen, null);
+    }
+
+    /** @param only кого показывать; null — всех */
+    String describe(LongFunction<String> seen, java.util.Set<Long> only) {
         var lines = new ArrayList<String>();
 
         for (var entry : entries()) {
             if (lines.size() >= LIMIT) {
                 break;
+            }
+
+            if (only != null && !only.contains(entry.id())) {
+                continue;
             }
 
             var shown = seen.apply(entry.id());

@@ -204,8 +204,8 @@ final class ParodyNames {
      */
     synchronized String describe(Collection<Long> active, int limit) {
         var lines = new ArrayList<String>();
+        // Только те, кто сейчас в разговоре: имена остальных сбивали ИИ
         var order = new LinkedHashSet<>(active);
-        order.addAll(people.keySet());
 
         for (var id : order) {
             var person = people.get(id);
@@ -226,6 +226,27 @@ final class ParodyNames {
         }
 
         return String.join("\n", lines);
+    }
+
+    /**
+     * Все имена каждого: как его видно в Telegram, его прозвища и как его
+     * велел звать хозяин. Нужно, чтобы узнать обращение к человеку.
+     */
+    synchronized java.util.Map<Long, List<String>> allNames(List<PeopleBook.Entry> book) {
+        var result = new java.util.LinkedHashMap<Long, List<String>>();
+
+        people.forEach((id, person) -> {
+            var list = new ArrayList<String>();
+            list.add(person.name);
+            list.addAll(person.nicknames());
+            result.put(id, list);
+        });
+
+        for (var entry : book) {
+            result.computeIfAbsent(entry.id(), id -> new ArrayList<>()).add(entry.name());
+        }
+
+        return result;
     }
 
     /** Для /parody_names: все, о ком что-то известно. */

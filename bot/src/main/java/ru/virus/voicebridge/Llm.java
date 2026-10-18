@@ -15,4 +15,8 @@ public interface Llm {
      * @return ответ модели; пустая строка, если она промолчала
      */
     String complete(String system, String prompt, int maxTokens) throws IOException;
+
+    /** Бот останавливается — отпустить, что держит. Облачным моделям отпускать нечего. */
+    default void release() {
+    }
 }

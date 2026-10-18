@@ -183,4 +183,17 @@ class LlmTest {
         assertEquals("http://pc:11434/api/chat", OllamaLlm.chatUrl("http://pc:11434/"));
         assertEquals("http://pc:11434/api/chat", OllamaLlm.chatUrl("http://pc:11434/api/chat"));
     }
+
+    @Test
+    void ollamaReleasesVideoMemoryOnStop() throws Exception {
+        var url = serve(path -> "200 {}");
+
+        new OllamaLlm("gemma3:4b", url).release();
+
+        var call = calls.getFirst();
+        assertEquals("/api/generate", call.path());
+        var body = DataObject.fromJson(call.body());
+        assertEquals("gemma3:4b", body.getString("model"));
+        assertEquals(0, body.getInt("keep_alive"));
+    }
 }

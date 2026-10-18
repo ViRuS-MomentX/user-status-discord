@@ -159,6 +159,8 @@ public final class Parody {
         if (worker != null) {
             worker.interrupt();
         }
+
+        llm.release();
     }
 
     private void loop() {

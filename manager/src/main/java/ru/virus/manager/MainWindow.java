@@ -61,6 +61,7 @@ final class MainWindow extends JFrame {
     private final TasksPage tasksPage;
     private final NavRow tasksRow;
     private final DevicePage devicePage;
+
     private final NavRow deviceRow;
     private final CardLayout pages = new CardLayout();
     private final JPanel center = Ui.transparent(pages);
@@ -173,6 +174,15 @@ final class MainWindow extends JFrame {
         add.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
         add.addActionListener(e -> editProcess(null));
 
+        var duplicates = Ui.ghost("Убрать дубли");
+        duplicates.setIcon(Icons.of(Icons.Kind.TRASH, Theme.MUTED));
+        duplicates.setIconTextGap(10);
+        duplicates.setHorizontalAlignment(JLabel.LEFT);
+        duplicates.setAlignmentX(LEFT_ALIGNMENT);
+        duplicates.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
+        duplicates.setToolTipText("Найти копии ботов, запущенные мимо V.I.R.U.S., и остановить их");
+        duplicates.addActionListener(e -> findDuplicates(false));
+
         configRow = new NavRow(Icons.of(Icons.Kind.GEAR, Theme.ACCENT), "Конфиг ботов", () -> show("config"));
         tasksRow = new NavRow(Icons.of(Icons.Kind.TASKS, Theme.ACCENT), "Задачи", () -> show("tasks"));
         deviceRow = new NavRow(Icons.of(Icons.Kind.DEVICE, Theme.ACCENT), "Устройство", () -> show("device"));
@@ -182,6 +192,7 @@ final class MainWindow extends JFrame {
         side.add(processList);
         side.add(Box.createVerticalStrut(6));
         side.add(add);
+        side.add(duplicates);
         side.add(Box.createVerticalStrut(20));
         side.add(indent(Ui.caption("Работа")));
         side.add(Box.createVerticalStrut(8));
@@ -264,6 +275,9 @@ final class MainWindow extends JFrame {
             }
         });
 
+        // Лишние копии ботов — когда наши уже запустились, чтобы не принять их за чужие
+        new Timer(20_000, e -> findDuplicates(true)) {{ setRepeats(false); }}.start();
+
         refresh();
         var first = supervisor.all().isEmpty() ? "" : "process:" + supervisor.all().getFirst().spec().id();
         show(first);
@@ -312,6 +326,77 @@ final class MainWindow extends JFrame {
 
     void onDiscord(Runnable action) {
         onDiscord = action;
+    }
+
+    /**
+     * Ищет лишние копии ботов. При запуске V.I.R.U.S. — тихо: найдутся —
+     * плашка; по кнопке — с ответом в любом случае.
+     */
+    private void findDuplicates(boolean quiet) {
+        worker.submit(() -> {
+            var copies = Duplicates.find(supervisor);
+            var oldTask = Autostart.oldTaskExists();
+
+            SwingUtilities.invokeLater(() -> {
+                if (copies.isEmpty()) {
+                    if (!quiet) {
+                        toast("Лишних копий нет.");
+                    }
+                    return;
+                }
+
+                if (quiet) {
+                    showDuplicatesBanner(copies.size());
+                    return;
+                }
+
+                var list = new StringBuilder();
+
+                for (var copy : copies) {
+                    list.append("<br>• <b>").append(ConfigPage.escape(copy.what())).append("</b> (PID ")
+                            .append(copy.pid()).append(")<br><font color='#7C8C84'>")
+                            .append(ConfigPage.escape(shorten(copy.commandLine()))).append("</font>");
+                }
+
+                var answer = JOptionPane.showConfirmDialog(this, "<html><body style='width:520px'>"
+                                + "Найдены копии ботов, запущенные мимо V.I.R.U.S.:" + list
+                                + "<br><br>Остановить их? Свои процессы V.I.R.U.S. не тронет."
+                                + (oldTask ? "<br><br>Похоже, их запускает старая задача автозапуска "
+                                        + "<b>VoiceBridgeBot</b> — убери её, иначе после перезагрузки копия вернётся."
+                                        : "")
+                                + "</body></html>",
+                        Virus.NAME, JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
+
+                if (answer == JOptionPane.OK_OPTION) {
+                    worker.submit(() -> {
+                        var killed = Duplicates.kill(copies);
+                        SwingUtilities.invokeLater(() -> {
+                            toast("Остановлено лишних копий: " + killed + ".");
+                            banners.removeAll();
+                            banners.revalidate();
+                            banners.repaint();
+                        });
+                    });
+                }
+            });
+        });
+    }
+
+    private static String shorten(String line) {
+        return line == null ? "" : line.length() > 160 ? line.substring(0, 157) + "…" : line;
+    }
+
+    private void showDuplicatesBanner(int count) {
+        var banner = new Ui.Card(new BorderLayout(12, 0), Theme.alpha(Theme.WARN, 26));
+        banner.setBorder(BorderFactory.createEmptyBorder(10, 14, 10, 10));
+        banner.add(Ui.label("<html>Работают лишние копии ботов мимо V.I.R.U.S.: <b>" + count + "</b>. Из-за них "
+                + "бот может отвечать через раз или дважды.</html>", Theme.ui.deriveFont(13f),
+                new Color(0xFF, 0xD7, 0x9A)), BorderLayout.CENTER);
+        var fix = Ui.button("Разобраться");
+        fix.addActionListener(e -> findDuplicates(false));
+        banner.add(fix, BorderLayout.EAST);
+        banners.add(banner);
+        banners.revalidate();
     }
 
     /** Свой адрес Bot API из настроек бота — его тоже проверяем на связь. */

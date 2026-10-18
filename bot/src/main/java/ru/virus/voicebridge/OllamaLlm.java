@@ -42,6 +42,30 @@ public final class OllamaLlm implements Llm {
         this.chatUrl = chatUrl(url);
     }
 
+    /**
+     * Выгружает модель из видеопамяти сразу, не дожидаясь keep_alive:
+     * пародию остановили — играм и прочему память нужнее.
+     */
+    @Override
+    public void release() {
+        var body = DataObject.empty().put("model", model).put("keep_alive", 0);
+
+        try {
+            http.send(HttpRequest.newBuilder(URI.create(chatUrl.replace("/api/chat", "/api/generate")))
+                            .timeout(Duration.ofSeconds(5))
+                            .header("Content-Type", "application/json")
+                            .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
+                            .build(),
+                    HttpResponse.BodyHandlers.discarding());
+            org.slf4j.LoggerFactory.getLogger(OllamaLlm.class)
+                    .info("Модель {} выгружена из Ollama — видеопамять свободна.", model);
+        } catch (IOException e) {
+            // Ollama уже не работает — и выгружать нечего
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     static String chatUrl(String url) {
         var base = url == null || url.isBlank() ? DEFAULT_URL : url.trim();
 

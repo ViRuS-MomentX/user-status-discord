@@ -252,7 +252,11 @@ final class TasksPage extends Ui.Card {
         var notesBlock = Ui.transparent(new BorderLayout(0, 6));
         notesBlock.add(Ui.caption("Заметки"), BorderLayout.NORTH);
         notesBlock.add(notesScroll, BorderLayout.CENTER);
-        notesBlock.add(notesFoot, BorderLayout.SOUTH);
+        var under = Ui.transparent(new BorderLayout(0, 8));
+        under.add(notesFoot, BorderLayout.NORTH);
+        under.add(photoBlock(), BorderLayout.SOUTH);
+        notesBlock.add(under, BorderLayout.SOUTH);
+        pasteImages(notes);
 
         var headLine = Ui.transparent(new BorderLayout(12, 0));
         headLine.add(number, BorderLayout.WEST);
@@ -295,6 +299,270 @@ final class TasksPage extends Ui.Card {
         editor.add(empty, "empty");
         editor.add(form, "task");
         return editor;
+    }
+
+    // ----------------------------------------------------------------- фото
+
+    private final JPanel photos = Ui.transparent(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 8, 4));
+    private final java.util.concurrent.ExecutorService thumbs = java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+        var thread = new Thread(r, "virus-thumbs");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    private JComponent photoBlock() {
+        var scroll = new JScrollPane(photos, JScrollPane.VERTICAL_SCROLLBAR_NEVER,
+                JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.setOpaque(false);
+        scroll.getViewport().setOpaque(false);
+        scroll.setPreferredSize(new Dimension(10, 104));
+
+        var block = Ui.transparent(new BorderLayout(0, 4));
+        block.add(Ui.caption("Фото — кнопкой, перетаскиванием или Ctrl+V в заметках"), BorderLayout.NORTH);
+        block.add(scroll, BorderLayout.CENTER);
+
+        // Файлы картинок можно бросить прямо на полоску
+        var drop = new javax.swing.TransferHandler() {
+            @Override
+            public boolean canImport(TransferSupport support) {
+                return current != null && support.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.javaFileListFlavor);
+            }
+
+            @Override
+            @SuppressWarnings("unchecked")
+            public boolean importData(TransferSupport support) {
+                try {
+                    var files = (List<java.io.File>) support.getTransferable()
+                            .getTransferData(java.awt.datatransfer.DataFlavor.javaFileListFlavor);
+                    attachFiles(files.stream().map(java.io.File::toPath).toList());
+                    return true;
+                } catch (Exception e) {
+                    return false;
+                }
+            }
+        };
+        photos.setTransferHandler(drop);
+        scroll.setTransferHandler(drop);
+        block.setTransferHandler(drop);
+        return block;
+    }
+
+    static final String[] IMAGE_TYPES = { "png", "jpg", "jpeg", "gif", "bmp", "webp" };
+
+    private void choosePhotos() {
+        if (current == null) {
+            return;
+        }
+
+        attachFiles(NativeFiles.open(this, "Фото к задаче #" + current.number, "task-photos", true, IMAGE_TYPES));
+    }
+
+    private void attachFiles(List<java.nio.file.Path> files) {
+        var task = current;
+
+        if (task == null) {
+            return;
+        }
+
+        var added = 0;
+
+        for (var file : files) {
+            if (NativeFiles.fits(file, IMAGE_TYPES)) {
+                try {
+                    store.attach(task, file);
+                    added++;
+                } catch (java.io.IOException e) {
+                    toast.accept("Фото не прикрепилось: " + e.getMessage());
+                }
+            }
+        }
+
+        if (added == 0 && !files.isEmpty()) {
+            toast.accept("Это не картинки — подходят png, jpg, gif, bmp, webp.");
+        }
+
+        showPhotos();
+        list.repaint();
+    }
+
+    /** Ctrl+V в заметках: картинка из буфера — в фото задачи, текст — как обычно. */
+    private void pasteImages(JTextArea area) {
+        var paste = area.getActionMap().get("paste");
+        area.getActionMap().put("paste", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                var clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+
+                try {
+                    if (current != null && clipboard.isDataFlavorAvailable(java.awt.datatransfer.DataFlavor.imageFlavor)) {
+                        var picture = (java.awt.Image) clipboard.getData(java.awt.datatransfer.DataFlavor.imageFlavor);
+                        store.attach(current, toBuffered(picture));
+                        showPhotos();
+                        list.repaint();
+                        toast.accept("Картинка из буфера прикреплена к #" + current.number);
+                        return;
+                    }
+                } catch (Exception ex) {
+                    toast.accept("Картинка не вставилась: " + ex.getMessage());
+                    return;
+                }
+
+                if (paste != null) {
+                    paste.actionPerformed(e);
+                }
+            }
+        });
+    }
+
+    private static java.awt.image.BufferedImage toBuffered(java.awt.Image image) {
+        if (image instanceof java.awt.image.BufferedImage buffered) {
+            return buffered;
+        }
+
+        var copy = new java.awt.image.BufferedImage(Math.max(1, image.getWidth(null)), Math.max(1, image.getHeight(null)),
+                java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        var g = copy.createGraphics();
+        g.drawImage(image, 0, 0, null);
+        g.dispose();
+        return copy;
+    }
+
+    private void showPhotos() {
+        photos.removeAll();
+        var task = current;
+
+        if (task != null) {
+            for (var name : List.copyOf(task.images)) {
+                photos.add(new Thumb(task, name));
+            }
+        }
+
+        var add = Ui.button("Фото");
+        add.setIcon(Icons.of(Icons.Kind.PLUS, Theme.ACCENT));
+        add.setToolTipText("Прикрепить фото — откроется Проводник");
+        add.addActionListener(e -> choosePhotos());
+        add.setPreferredSize(new Dimension(96, 84));
+        photos.add(add);
+        photos.revalidate();
+        photos.repaint();
+    }
+
+    /** Миниатюра фото: клик — открыть, крестик в углу — убрать. */
+    private final class Thumb extends JComponent {
+        private final TaskStore.Task task;
+        private final String name;
+        private java.awt.Image picture;
+        private boolean hover;
+
+        Thumb(TaskStore.Task task, String name) {
+            this.task = task;
+            this.name = name;
+            setPreferredSize(new Dimension(112, 84));
+            setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+            setToolTipText(name + " — открыть");
+
+            var file = store.image(task, name);
+            thumbs.submit(() -> {
+                try {
+                    var full = javax.imageio.ImageIO.read(file.toFile());
+
+                    if (full != null) {
+                        var scale = Math.max(112.0 / full.getWidth(), 84.0 / full.getHeight());
+                        var scaled = full.getScaledInstance((int) Math.ceil(full.getWidth() * scale),
+                                (int) Math.ceil(full.getHeight() * scale), java.awt.Image.SCALE_SMOOTH);
+                        var ready = toBuffered(scaled);
+                        SwingUtilities.invokeLater(() -> {
+                            picture = ready;
+                            repaint();
+                        });
+                    }
+                } catch (Exception ignored) {
+                    // не картинка или нет файла — останется рамка с именем
+                }
+            });
+
+            addMouseListener(new java.awt.event.MouseAdapter() {
+                @Override
+                public void mouseClicked(java.awt.event.MouseEvent e) {
+                    if (e.getX() > getWidth() - 24 && e.getY() < 24) {
+                        remove();
+                    } else {
+                        open();
+                    }
+                }
+
+                @Override
+                public void mouseEntered(java.awt.event.MouseEvent e) {
+                    hover = true;
+                    repaint();
+                }
+
+                @Override
+                public void mouseExited(java.awt.event.MouseEvent e) {
+                    hover = false;
+                    repaint();
+                }
+            });
+        }
+
+        private void open() {
+            try {
+                java.awt.Desktop.getDesktop().open(store.image(task, name).toFile());
+            } catch (Exception e) {
+                toast.accept("Фото не открылось: " + e.getMessage());
+            }
+        }
+
+        private void remove() {
+            if (JOptionPane.showConfirmDialog(TasksPage.this, "Убрать это фото из задачи #" + task.number + "?",
+                    Virus.NAME, JOptionPane.OK_CANCEL_OPTION) != JOptionPane.OK_OPTION) {
+                return;
+            }
+
+            try {
+                store.detach(task, name);
+            } catch (java.io.IOException e) {
+                toast.accept("Фото не удалилось: " + e.getMessage());
+            }
+
+            showPhotos();
+            list.repaint();
+        }
+
+        @Override
+        protected void paintComponent(Graphics graphics) {
+            var g = (Graphics2D) graphics.create();
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            var clip = new java.awt.geom.RoundRectangle2D.Double(0, 0, getWidth() - 1, getHeight() - 1, 10, 10);
+            g.setColor(Theme.RAISED);
+            g.fill(clip);
+
+            if (picture != null) {
+                g.setClip(clip);
+                g.drawImage(picture, (getWidth() - picture.getWidth(null)) / 2,
+                        (getHeight() - picture.getHeight(null)) / 2, null);
+                g.setClip(null);
+            } else {
+                g.setColor(Theme.MUTED);
+                g.setFont(Theme.ui.deriveFont(11f));
+                g.drawString("загрузка…", 10, getHeight() / 2 + 4);
+            }
+
+            g.setColor(hover ? Theme.ACCENT : Theme.LINE_2);
+            g.draw(clip);
+
+            if (hover) {
+                g.setColor(new Color(0, 0, 0, 170));
+                g.fillOval(getWidth() - 22, 4, 18, 18);
+                g.setColor(Color.WHITE);
+                g.setStroke(new java.awt.BasicStroke(1.8f));
+                g.drawLine(getWidth() - 17, 9, getWidth() - 9, 17);
+                g.drawLine(getWidth() - 9, 9, getWidth() - 17, 17);
+            }
+
+            g.dispose();
+        }
     }
 
     private static JComponent labelled(String caption, JComponent field) {
@@ -438,6 +706,7 @@ final class TasksPage extends Ui.Card {
         notes.setText(task.notes);
         notes.setCaretPosition(0);
         loading = false;
+        showPhotos();
         showProgress();
         editorCards.show(editor, "task");
     }
@@ -742,6 +1011,10 @@ final class TasksPage extends Ui.Card {
 
             if (checklist[1] > 0) {
                 parts.add("☑ " + checklist[0] + "/" + checklist[1]);
+            }
+
+            if (!task.images.isEmpty()) {
+                parts.add("фото: " + task.images.size());
             }
 
             meta.setText("<html>" + String.join(" · ", parts) + "</html>");

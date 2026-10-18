@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -140,5 +141,32 @@ class TaskStoreTest {
         task.notes = "первое\n\nвторое";
         task.priority = TaskStore.Priority.HIGH;
         assertEquals("#5 [Идея] [!] Идея\n    первое\n    второе\n", TaskStore.asText(List.of(task)));
+    }
+
+    @Test
+    void photosAreKeptWithTaskAndGoneWithIt() throws Exception {
+        var store = new TaskStore(file());
+        var task = store.add();
+        var picture = new java.awt.image.BufferedImage(4, 4, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        var source = dir.resolve("shot.jpg");
+        javax.imageio.ImageIO.write(picture, "jpg", source.toFile());
+
+        var fromFile = store.attach(task, source);
+        var fromClipboard = store.attach(task, picture);
+        store.saveNow();
+
+        assertTrue(fromFile.endsWith(".jpg"));
+        assertTrue(fromClipboard.endsWith(".png"));
+        assertTrue(Files.isRegularFile(store.image(task, fromFile)));
+
+        var again = new TaskStore(file());
+        again.load();
+        assertEquals(List.of(fromFile, fromClipboard), again.all().getFirst().images);
+
+        store.detach(task, fromFile);
+        assertFalse(Files.exists(store.image(task, fromFile)));
+
+        store.remove(task);
+        assertFalse(Files.exists(store.imagesOf(task)), "папка фото удалённой задачи стирается");
     }
 }

@@ -329,25 +329,12 @@ final class MainWindow extends JFrame {
 
     /** Обновление из присланного архива: разложить, закрыться, перенести, запуститься. */
     private void chooseUpdate() {
-        var chooser = new javax.swing.JFileChooser();
-        chooser.setDialogTitle("Присланное обновление V.I.R.U.S.");
-        chooser.setMultiSelectionEnabled(true);
-        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-                "Архив или файлы V.I.R.U.S. (*.zip, *.jar, *.bat)", "zip", "jar", "bat", "example", "js", "png"));
-        var last = prefs.get("update-dir", "");
+        var chosen = NativeFiles.open(this, "Присланное обновление V.I.R.U.S.", "update", true,
+                "zip", "jar", "bat", "example", "js");
 
-        if (last.isEmpty()) {
-            chooser.setCurrentDirectory(new java.io.File(System.getProperty("user.home"), "Downloads"));
-        } else {
-            chooser.setCurrentDirectory(new java.io.File(last));
-        }
-
-        if (chooser.showOpenDialog(this) != javax.swing.JFileChooser.APPROVE_OPTION) {
+        if (chosen.isEmpty()) {
             return;
         }
-
-        var chosen = java.util.Arrays.stream(chooser.getSelectedFiles()).map(java.io.File::toPath).toList();
-        prefs.put("update-dir", chosen.getFirst().getParent().toString());
 
         worker.submit(() -> {
             try {

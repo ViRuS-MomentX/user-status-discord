@@ -7,7 +7,6 @@ import javax.swing.ButtonGroup;
 import javax.swing.JButton;
 import javax.swing.JColorChooser;
 import javax.swing.JComponent;
-import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
@@ -799,11 +798,8 @@ final class DevicePage extends Ui.Card {
     }
 
     private String choose(String title) {
-        var chooser = new JFileChooser();
-        chooser.setDialogTitle(title);
-        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Программы (*.exe, *.lnk)", "exe", "lnk"));
-        return chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION
-                ? chooser.getSelectedFile().getAbsolutePath() : null;
+        var chosen = NativeFiles.open(this, title, "device-programs", false, "exe", "lnk");
+        return chosen.isEmpty() ? null : chosen.getFirst().toString();
     }
 
     private void start(Path program, String... args) {

@@ -5,7 +5,6 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
 import javax.swing.JButton;
-import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import javax.swing.JLabel;
@@ -384,22 +383,13 @@ final class ProcessPage extends Ui.Card {
             return;
         }
 
-        var chooser = new JFileChooser();
-        chooser.setDialogTitle("Новая сборка плагина");
-        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Плагины (*.jar)", "jar"));
-        var memory = java.util.prefs.Preferences.userNodeForPackage(ProcessPage.class);
-        var lastDir = memory.get("plugin-dir", "");
+        var picked = NativeFiles.open(this, "Новая сборка плагина", "plugin-jar", false, "jar");
 
-        if (!lastDir.isEmpty()) {
-            chooser.setCurrentDirectory(new java.io.File(lastDir));
-        }
-
-        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
+        if (picked.isEmpty()) {
             return;
         }
 
-        var chosen = chooser.getSelectedFile().toPath();
-        memory.put("plugin-dir", chosen.getParent().toString());
+        var chosen = picked.getFirst();
 
         withServerStopped("замена плагина", false, folder -> {
             var removed = ServerTools.replacePlugin(folder, chosen);

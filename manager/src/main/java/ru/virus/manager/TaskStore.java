@@ -87,6 +87,8 @@ final class TaskStore {
         Priority priority = Priority.NORMAL;
         final long created;
         long updated;
+        /** Прикреплённые фото — имена файлов в task-files/<номер>/. */
+        final List<String> images = new ArrayList<>();
 
         Task(int number, long created) {
             this.number = number;
@@ -209,6 +211,11 @@ final class TaskStore {
             var task = new Task(number(map.get("number")), millis(map.get("created")));
             task.title = string(map.get("title"));
             task.notes = string(map.get("notes"));
+
+            if (map.get("images") instanceof List<?> images) {
+                images.forEach(image -> task.images.add(String.valueOf(image)));
+            }
+
             task.project = string(map.get("project"));
             task.status = Status.of(map.get("status"));
             task.priority = Priority.of(map.get("priority"));
@@ -247,6 +254,70 @@ final class TaskStore {
     synchronized void remove(Task task) {
         tasks.remove(task);
         changed();
+
+        // Фото удалённой задачи больше никому не нужны
+        try {
+            deleteFolder(imagesOf(task));
+        } catch (IOException e) {
+            onError.accept("Фото задачи #" + task.number + " не удалились: " + e.getMessage());
+        }
+    }
+
+    /** Папка с фото задачи. */
+    Path imagesOf(Task task) {
+        return file.resolveSibling("task-files").resolve(String.valueOf(task.number));
+    }
+
+    Path image(Task task, String name) {
+        return imagesOf(task).resolve(name);
+    }
+
+    /** Копирует картинку к задаче. @return имя файла у задачи */
+    String attach(Task task, Path source) throws IOException {
+        var name = source.getFileName().toString();
+        var dot = name.lastIndexOf('.');
+        var target = unique(task, dot > 0 ? name.substring(dot).toLowerCase() : ".png");
+        Files.createDirectories(target.getParent());
+        Files.copy(source, target);
+        edit(task, t -> t.images.add(target.getFileName().toString()));
+        return target.getFileName().toString();
+    }
+
+    /** Картинка из буфера обмена — в png. */
+    String attach(Task task, java.awt.image.BufferedImage picture) throws IOException {
+        var target = unique(task, ".png");
+        Files.createDirectories(target.getParent());
+        javax.imageio.ImageIO.write(picture, "png", target.toFile());
+        edit(task, t -> t.images.add(target.getFileName().toString()));
+        return target.getFileName().toString();
+    }
+
+    void detach(Task task, String name) throws IOException {
+        edit(task, t -> t.images.remove(name));
+        Files.deleteIfExists(image(task, name));
+    }
+
+    private Path unique(Task task, String extension) {
+        var stamp = new java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss").format(new java.util.Date());
+        var target = imagesOf(task).resolve(stamp + extension);
+
+        for (var i = 2; Files.exists(target); i++) {
+            target = imagesOf(task).resolve(stamp + "-" + i + extension);
+        }
+
+        return target;
+    }
+
+    private static void deleteFolder(Path folder) throws IOException {
+        if (!Files.isDirectory(folder)) {
+            return;
+        }
+
+        try (var walk = Files.walk(folder)) {
+            for (var path : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.delete(path);
+            }
+        }
     }
 
     /** Правка задачи: всё меняется под замком, чтобы запись не поймала половину. */
@@ -313,6 +384,7 @@ final class TaskStore {
             map.put("number", task.number);
             map.put("title", task.title);
             map.put("notes", task.notes);
+            map.put("images", List.copyOf(task.images));
             map.put("project", task.project);
             map.put("status", task.status.name().toLowerCase());
             map.put("priority", task.priority.name().toLowerCase());

@@ -4,7 +4,6 @@ import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;
 import javax.swing.JCheckBox;
 import javax.swing.JDialog;
-import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -17,7 +16,6 @@ import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
-import java.io.File;
 import java.net.URI;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -91,13 +89,12 @@ final class PresenceDialog {
 
         var savePng = Ui.button("Сохранить значок PNG…");
         savePng.addActionListener(e -> {
-            var chooser = new JFileChooser();
-            chooser.setSelectedFile(new File("virus.png"));
+            var target = NativeFiles.save(dialog, "Сохранить значок", "presence-png", "virus.png");
 
-            if (chooser.showSaveDialog(dialog) == JFileChooser.APPROVE_OPTION) {
+            if (target != null) {
                 try {
-                    ImageIO.write(AppIcon.image(512), "png", chooser.getSelectedFile());
-                    toast.accept("Значок сохранён: " + chooser.getSelectedFile().getName());
+                    ImageIO.write(AppIcon.image(512), "png", target.toFile());
+                    toast.accept("Значок сохранён: " + target.getFileName());
                 } catch (Exception ex) {
                     toast.accept("Не сохранился: " + ex.getMessage());
                 }

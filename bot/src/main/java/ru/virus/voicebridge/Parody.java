@@ -101,7 +101,11 @@ public final class Parody {
     /** Часы подменяются в тестах: тихие часы и счёт за сутки зависят от них. */
     private Clock clock = Clock.systemDefaultZone();
 
-    private final Deque<String> recent = new ArrayDeque<>();
+    private final Deque<Line> recent = new ArrayDeque<>();
+
+    /** Строка переписки и когда она прозвучала. */
+    private record Line(long at, String text) {
+    }
     private final SequencedSet<Long> own = new LinkedHashSet<>();
     private final Deque<String> said = new ArrayDeque<>();
 
@@ -814,7 +818,7 @@ public final class Parody {
         var cut = line.length() > LINE_LIMIT ? line.substring(0, LINE_LIMIT) + "…" : line;
 
         synchronized (recent) {
-            recent.addLast(cut);
+            recent.addLast(new Line(clock.millis(), cut));
 
             while (recent.size() > CONTEXT) {
                 recent.removeFirst();
@@ -822,10 +826,39 @@ public final class Parody {
         }
     }
 
+    /**
+     * Разговор, который идёт сейчас: сообщения за последние полчаса. Старые
+     * строки из утихшего чата ИИ принимал за текущие и звал давно ушедших.
+     * Если за полчаса никто не писал — три последних, чтобы было к чему ответить.
+     */
     private String context() {
+        var now = clock.millis();
+
         synchronized (recent) {
-            return String.join("\n", recent);
+            var fresh = recent.stream().filter(line -> now - line.at() < ACTIVE_MS).map(Line::text).toList();
+
+            if (fresh.isEmpty()) {
+                fresh = recent.stream().skip(Math.max(0, recent.size() - 3)).map(Line::text).toList();
+            }
+
+            return String.join("\n", fresh);
         }
+    }
+
+    /** Кто написал самое новое сообщение разговора — к нему чаще всего и обращаемся. */
+    static String lastAuthor(String context) {
+        var lines = context.split("\n");
+        var last = lines[lines.length - 1];
+        var colon = last.indexOf(": ");
+        var reply = last.indexOf(" (в ответ ");
+        var end = reply > 0 && (colon < 0 || reply < colon) ? reply : colon;
+        return end > 0 ? last.substring(0, end).strip() : "";
+    }
+
+    /** Подсказка, кому отвечаем. */
+    private static String addressee(String context) {
+        var author = lastAuthor(context);
+        return author.isEmpty() ? "" : "Самое новое сообщение написал «" + author + "». ";
     }
 
 
@@ -1105,7 +1138,7 @@ public final class Parody {
                 + "Образцы его настоящих сообщений — для манеры, не для копирования:\n" + examples
                 + (recentOwn.isEmpty() ? ""
                     : "\nТвои недавние реплики-пародии — не повторяй их и не пересказывай:\n" + recentOwn)
-                + "\nПоследние сообщения в чате (снизу — самое новое):\n" + context + "\n\n"
+                + "\nПоследние сообщения в чате (снизу — самое новое):\n" + context + "\n\n" + addressee(context)
                 + (direct
                     ? "Последнее сообщение — ответ на его реплику. Ответь так, как ответил бы "
                     : "Встрянь в разговор одной репликой — так, как написал бы ")
@@ -1136,7 +1169,7 @@ public final class Parody {
                     : "Образцы формы сообщений (чужие — только для манеры письма, не копировать):\n" + examples)
                 + (recentOwn.isEmpty() ? ""
                     : "\nТвои недавние реплики — не повторяй их и не пересказывай:\n" + recentOwn)
-                + "\nПоследние сообщения в чате (снизу — самое новое):\n" + context + "\n\n"
+                + "\nПоследние сообщения в чате (снизу — самое новое):\n" + context + "\n\n" + addressee(context)
                 + (direct
                     ? "Последнее сообщение обращено к тебе. Ответь как " + settings.name() + "."
                     : "Встрянь в разговор одной репликой как " + settings.name() + ".");
@@ -1148,7 +1181,10 @@ public final class Parody {
      * («ок», «ахах») убираются: десять одинаковых строк манеры не прибавят.
      */
     List<String> examples(List<String> all) {
+        // Образцы с обращениями («Санёк, …», «@vasya») прочь: имена из них ИИ
+        // переносил в свои реплики и звал людей, которых в разговоре нет
         var distinct = new ArrayList<>(new LinkedHashSet<>(all.reversed()));
+        distinct.removeIf(Parody::namesSomeone);
 
         if (distinct.size() <= EXAMPLES) {
             Collections.shuffle(distinct, random);
@@ -1162,6 +1198,20 @@ public final class Parody {
         Collections.shuffle(chosen, random);
         return chosen;
     }
+
+    /** Обращение в начале («Санёк, …») или упоминание @ника. */
+    static boolean namesSomeone(String sample) {
+        if (sample.contains("@")) {
+            return true;
+        }
+
+        var matcher = ADDRESS.matcher(sample);
+        return matcher.find()
+                && !ParodyNames.NOT_NAMES.contains(matcher.group(1).toLowerCase(java.util.Locale.ROOT));
+    }
+
+    private static final java.util.regex.Pattern ADDRESS = java.util.regex.Pattern.compile(
+            "^\\s*([\\p{L}][\\p{L}\\-]{1,20}),\\s");
 
     /** Строка, которая начинается чужой репликой: «Петя: …», «Коля (из Discord): …». */
     private static final java.util.regex.Pattern SPEAKER = java.util.regex.Pattern.compile(

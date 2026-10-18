@@ -784,4 +784,34 @@ class ParodyTest {
         assertEquals("ну и чё, обезьяны", sent.get("text"));
         assertTrue(prompts.get(1).contains("в разговоре не участвует"), prompts.get(1));
     }
+
+    @Test
+    void samplesWithAddressesAreNotShownAndOldChatIsForgotten() throws Exception {
+        assertTrue(Parody.namesSomeone("санёк, го в доту"));
+        assertTrue(Parody.namesSomeone("ты где @vasya"));
+        assertTrue(!Parody.namesSomeone("ну, я хз"));
+        assertTrue(!Parody.namesSomeone("го в доту"));
+        assertEquals("Петя", Parody.lastAuthor("Коля: ку\nПетя (в ответ Коля на «ку»): привет"));
+
+        var now = new java.util.concurrent.atomic.AtomicLong(LocalDateTime.of(2026, 1, 1, 12, 0)
+                .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli());
+        var clock = new Clock() {
+            @Override public ZoneId getZone() { return ZoneId.systemDefault(); }
+            @Override public Clock withZone(ZoneId zone) { return this; }
+            @Override public java.time.Instant instant() { return java.time.Instant.ofEpochMilli(now.get()); }
+        };
+        var replies = new java.util.concurrent.atomic.AtomicInteger();
+        start(character(TARGET), llm(p -> "ну " + replies.incrementAndGet()), clock, "санёк, го в доту", "пишу вот так");
+
+        telegram.say(8, "Колян", "давно это было");
+        assertNotNull(telegram.awaitSent(1, 3000));
+        now.addAndGet(2 * 60 * 60_000L);
+        telegram.say(7, "Петя", "кто тут");
+
+        assertNotNull(telegram.awaitSent(2, 3000));
+        var prompt = prompts.getLast();
+        assertTrue(!prompt.contains("санёк"), "образец с обращением не показывается");
+        assertTrue(!prompt.contains("Колян"), "сообщение двухчасовой давности — уже не разговор");
+        assertTrue(prompt.contains("Самое новое сообщение написал «Петя»"), prompt);
+    }
 }

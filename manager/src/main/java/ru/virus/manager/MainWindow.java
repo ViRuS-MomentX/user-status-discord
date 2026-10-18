@@ -61,6 +61,8 @@ final class MainWindow extends JFrame {
     private final TasksPage tasksPage;
     private final NavRow tasksRow;
     private final DevicePage devicePage;
+    private final Ui.Card side;
+    private final java.util.prefs.Preferences prefs = java.util.prefs.Preferences.userNodeForPackage(MainWindow.class);
 
     private final NavRow deviceRow;
     private final CardLayout pages = new CardLayout();
@@ -110,6 +112,11 @@ final class MainWindow extends JFrame {
         titles.add(name, BorderLayout.NORTH);
         titles.add(sub, BorderLayout.CENTER);
         var brand = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 12, 0));
+        var menu = Ui.ghost("");
+        menu.setIcon(new Icons(Icons.Kind.MENU, Theme.MUTED, 18));
+        menu.setToolTipText("Скрыть или показать меню слева");
+        menu.addActionListener(e -> toggleSide());
+        brand.add(menu);
         brand.add(logo);
         brand.add(titles);
 
@@ -143,6 +150,13 @@ final class MainWindow extends JFrame {
             actions.add(Box.createHorizontalStrut(10));
         }
 
+        var update = Ui.button("Обновить");
+        update.setIcon(Icons.of(Icons.Kind.UP, Theme.ACCENT));
+        update.setIconTextGap(8);
+        update.setToolTipText("Выбрать присланный архив V.I.R.U.S.zip — V.I.R.U.S. обновится и перезапустится сам");
+        update.addActionListener(e -> chooseUpdate());
+
+        actions.add(update);
         actions.add(discord);
         actions.add(report);
         actions.add(quitButton);
@@ -157,7 +171,7 @@ final class MainWindow extends JFrame {
         top.add(banners, BorderLayout.CENTER);
 
         // Боковая панель
-        var side = new Ui.Card(null);
+        side = new Ui.Card(null);
         side.setLayout(new BoxLayout(side, BoxLayout.Y_AXIS));
         side.setBorder(BorderFactory.createEmptyBorder(16, 12, 16, 12));
         side.setPreferredSize(new Dimension(280, 10));
@@ -226,6 +240,7 @@ final class MainWindow extends JFrame {
 
         var body = Ui.transparent(new BorderLayout(16, 0));
         body.add(side, BorderLayout.WEST);
+        side.setVisible(!prefs.getBoolean("side-hidden", false));
         body.add(center, BorderLayout.CENTER);
 
         background.add(top, BorderLayout.NORTH);
@@ -275,6 +290,10 @@ final class MainWindow extends JFrame {
             }
         });
 
+        if (Updater.justUpdated(supervisor.home())) {
+            new Timer(1500, e -> toast("V.I.R.U.S. обновлён.")) {{ setRepeats(false); }}.start();
+        }
+
         // Лишние копии ботов — когда наши уже запустились, чтобы не принять их за чужие
         new Timer(20_000, e -> findDuplicates(true)) {{ setRepeats(false); }}.start();
 
@@ -299,6 +318,61 @@ final class MainWindow extends JFrame {
         toFront();
         requestFocus();
         background.start();
+    }
+
+    private void toggleSide() {
+        side.setVisible(!side.isVisible());
+        prefs.putBoolean("side-hidden", !side.isVisible());
+        revalidate();
+        repaint();
+    }
+
+    /** Обновление из присланного архива: разложить, закрыться, перенести, запуститься. */
+    private void chooseUpdate() {
+        var chooser = new javax.swing.JFileChooser();
+        chooser.setDialogTitle("Присланное обновление V.I.R.U.S.");
+        chooser.setMultiSelectionEnabled(true);
+        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                "Архив или файлы V.I.R.U.S. (*.zip, *.jar, *.bat)", "zip", "jar", "bat", "example", "js", "png"));
+        var last = prefs.get("update-dir", "");
+
+        if (last.isEmpty()) {
+            chooser.setCurrentDirectory(new java.io.File(System.getProperty("user.home"), "Downloads"));
+        } else {
+            chooser.setCurrentDirectory(new java.io.File(last));
+        }
+
+        if (chooser.showOpenDialog(this) != javax.swing.JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+
+        var chosen = java.util.Arrays.stream(chooser.getSelectedFiles()).map(java.io.File::toPath).toList();
+        prefs.put("update-dir", chosen.getFirst().getParent().toString());
+
+        worker.submit(() -> {
+            try {
+                var files = Updater.stage(supervisor.home(), chosen);
+
+                SwingUtilities.invokeLater(() -> {
+                    if (JOptionPane.showConfirmDialog(this, "<html>Обновлю: <b>" + String.join(", ", files)
+                                    + "</b>.<br><br>V.I.R.U.S. остановит процессы, закроется и через пару секунд "
+                                    + "запустится уже новым. Настройки и данные не трогаются.</html>",
+                            Virus.NAME, JOptionPane.OK_CANCEL_OPTION) != JOptionPane.OK_OPTION) {
+                        return;
+                    }
+
+                    try {
+                        Updater.launch(supervisor.home());
+                        setVisible(false);
+                        new Thread(quit, "virus-update").start();
+                    } catch (java.io.IOException e) {
+                        toast("Обновление не запустилось: " + e.getMessage());
+                    }
+                });
+            } catch (java.io.IOException e) {
+                SwingUtilities.invokeLater(() -> toast("Не обновить: " + e.getMessage()));
+            }
+        });
     }
 
     private void close() {

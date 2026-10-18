@@ -78,6 +78,11 @@ final class ConsoleView extends JPanel {
         add(scroll, BorderLayout.CENTER);
     }
 
+    /** Без своей рамки — когда консоль лежит в карточке, у которой рамка уже есть. */
+    void frameless() {
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+    }
+
     void setFilter(String filter) {
         this.filter = filter.trim().toLowerCase(Locale.ROOT);
         rerender();

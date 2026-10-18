@@ -721,4 +721,17 @@ class ParodyTest {
         assertNotNull(sent);
         assertEquals("ну чё, обезьяны", sent.get("text"));
     }
+
+    @Test
+    void ownerTypesInConsoleAndItGoesToGroup() throws Exception {
+        start(character(0), llm(p -> "ну"));
+
+        parody.sayFromConsole("всем привет из консоли");
+
+        var sent = telegram.awaitSent(1, 3000);
+        assertNotNull(sent);
+        assertEquals("всем привет из консоли", sent.get("text"), "у персонажа без пометки — как есть");
+        // Группа — числом, если бот уже узнал её, или по @имени, как в настройках
+        assertTrue(List.of(String.valueOf(FakeTelegram.CHAT), "@grp").contains(sent.get("chat_id")));
+    }
 }

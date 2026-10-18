@@ -691,6 +691,30 @@ public final class Parody {
         return line.append(": ").append(message.text()).toString();
     }
 
+    /**
+     * Сообщение хозяина из консоли V.I.R.U.S. — в группу от имени бота, с той
+     * же пометкой, что у реплик. Ответы на него бот подхватит, как на свои.
+     */
+    public void sayFromConsole(String text) {
+        var chat = chatId != null ? chatId : settings.chat();
+
+        try {
+            var id = telegram.sendText(chat, settings.mark() + text, 0);
+            log.info("Отправил в чат {} из консоли: {}", settings.chat(), text);
+            remember(settings.name() + ": " + text);
+
+            synchronized (own) {
+                own.add(id);
+
+                while (own.size() > OWN_LIMIT) {
+                    own.removeFirst();
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Сообщение из консоли в чат не ушло: {}", reason(e));
+        }
+    }
+
     /** Длиннее строку переписки не держим: простыня вытеснила бы из подсказки весь разговор. */
     private static final int LINE_LIMIT = 300;
 

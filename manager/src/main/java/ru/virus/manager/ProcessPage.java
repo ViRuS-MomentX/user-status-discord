@@ -47,6 +47,7 @@ final class ProcessPage extends Ui.Card {
     /** Кнопки сервера Minecraft — отдельным рядом: в одну строку с остальными не влезают. */
     private final javax.swing.JPanel serverButtons = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
     private final JTextField commandLine = new JTextField();
+    private final JLabel inputHint = Ui.muted("", 12f);
     private final JTextField filter = new JTextField();
     private final ConsoleView console = new ConsoleView();
     private final ExecutorService worker;
@@ -83,11 +84,12 @@ final class ProcessPage extends Ui.Card {
         buttons.add(start);
         buttons.add(restart);
         buttons.add(stop);
+        var secondary = Ui.transparent(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         edit.setToolTipText("Изменить процесс");
-        buttons.add(edit);
+        secondary.add(edit);
         files.setToolTipText("Открыть папку процесса в Проводнике — туда можно докинуть файлы");
         files.addActionListener(e -> openFolder());
-        buttons.add(files);
+        secondary.add(files);
 
         // Только у сервера Minecraft
         newWorld.setIcon(Icons.of(Icons.Kind.RESTART, Theme.WARN));
@@ -96,10 +98,17 @@ final class ProcessPage extends Ui.Card {
         plugin.setIcon(Icons.of(Icons.Kind.PLUS, Theme.ACCENT));
         plugin.setToolTipText("Выбрать jar — прошлая сборка VirusSwords удалится, сервер перезапустится");
         plugin.addActionListener(e -> replacePlugin());
+        var serverCaption = Ui.caption("Сервер");
+        serverCaption.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 6));
+        serverButtons.add(serverCaption);
         serverButtons.add(newWorld);
         serverButtons.add(plugin);
-        var allButtons = Ui.transparent(new BorderLayout(0, 8));
-        allButtons.add(buttons, BorderLayout.NORTH);
+        var mainRow = Ui.transparent(new BorderLayout(12, 0));
+        mainRow.add(buttons, BorderLayout.WEST);
+        mainRow.add(secondary, BorderLayout.EAST);
+        var allButtons = Ui.transparent(new BorderLayout(0, 10));
+        allButtons.setBorder(BorderFactory.createEmptyBorder(6, 0, 0, 0));
+        allButtons.add(mainRow, BorderLayout.NORTH);
         allButtons.add(serverButtons, BorderLayout.SOUTH);
         head.add(allButtons, BorderLayout.SOUTH);
 
@@ -178,25 +187,45 @@ final class ProcessPage extends Ui.Card {
         right.add(clear);
         bar.add(right, BorderLayout.EAST);
 
-        // Строка команд — серверу «op ник», «gamemode creative ник» и прочее
-        commandLine.putClientProperty("JTextField.placeholderText", "Команда в консоль процесса и Enter — например: op Steve");
-        commandLine.setFont(Theme.mono);
-        commandLine.addActionListener(e -> {
-            var text = commandLine.getText().strip();
+        // Строка ввода: серверу — команды и чат, ботам — сообщения в их чат
+        commandLine.setFont(Theme.mono.deriveFont(13.5f));
+        commandLine.setBorder(BorderFactory.createEmptyBorder(6, 4, 6, 4));
+        commandLine.setOpaque(false);
+        commandLine.addActionListener(e -> submit());
+        var prompt = Ui.label("›", Theme.mono.deriveFont(Font.BOLD, 18f), Theme.ACCENT);
+        var send = Ui.button("Отправить");
+        send.addActionListener(e -> submit());
 
-            if (process != null && !text.isEmpty()) {
-                if (process.send(text)) {
-                    commandLine.setText("");
-                } else {
-                    Toolkit.getDefaultToolkit().beep();
-                }
-            }
-        });
+        var inputRow = Ui.transparent(new BorderLayout(8, 0));
+        inputRow.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, Theme.LINE),
+                BorderFactory.createEmptyBorder(8, 12, 4, 8)));
+        inputRow.add(prompt, BorderLayout.WEST);
+        inputRow.add(commandLine, BorderLayout.CENTER);
+        inputRow.add(send, BorderLayout.EAST);
 
-        var body = Ui.transparent(new BorderLayout(0, 10));
-        body.add(bar, BorderLayout.NORTH);
-        body.add(console, BorderLayout.CENTER);
-        body.add(commandLine, BorderLayout.SOUTH);
+        var hintRow = Ui.transparent(new BorderLayout());
+        hintRow.setBorder(BorderFactory.createEmptyBorder(0, 14, 8, 12));
+        hintRow.add(inputHint, BorderLayout.CENTER);
+
+        var inputBlock = Ui.transparent(new BorderLayout());
+        inputBlock.add(inputRow, BorderLayout.CENTER);
+        inputBlock.add(hintRow, BorderLayout.SOUTH);
+
+        bar.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.LINE),
+                BorderFactory.createEmptyBorder(10, 12, 10, 12)));
+        console.frameless();
+
+        // Консоль, её панель и строка ввода — одна карточка
+        var consoleCard = new Ui.Card(new BorderLayout(), new java.awt.Color(0x05, 0x07, 0x06, 235));
+        consoleCard.setBorder(BorderFactory.createLineBorder(Theme.LINE));
+        consoleCard.add(bar, BorderLayout.NORTH);
+        consoleCard.add(console, BorderLayout.CENTER);
+        consoleCard.add(inputBlock, BorderLayout.SOUTH);
+
+        var body = Ui.transparent(new BorderLayout());
+        body.add(consoleCard, BorderLayout.CENTER);
 
         add(top, BorderLayout.NORTH);
         add(body, BorderLayout.CENTER);
@@ -221,6 +250,70 @@ final class ProcessPage extends Ui.Card {
         } catch (java.io.IOException | RuntimeException e) {
             javax.swing.JOptionPane.showMessageDialog(this, "Папка не открылась: " + e.getMessage()
                     + "\n" + folder, Virus.NAME, javax.swing.JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    /** Что это за процесс — от этого зависит, куда уходит набранное. */
+    private enum Kind { SERVER, PARODY, BOT, OTHER }
+
+    private Kind kind() {
+        var spec = process.spec();
+
+        if (ServerTools.isServer(spec)) {
+            return Kind.SERVER;
+        }
+
+        if (spec.command().stream().anyMatch(part -> part.toLowerCase().endsWith(Projects.BOT_JAR))) {
+            return spec.command().contains("--parody-only") ? Kind.PARODY : Kind.BOT;
+        }
+
+        return Kind.OTHER;
+    }
+
+    private void showInputHint() {
+        var kind = kind();
+        inputHint.setText(switch (kind) {
+            case SERVER -> "Команда серверу (op Steve). Русский текст уходит в чат игры, «/» в начале — точно команда.";
+            case PARODY -> "Сообщение уйдёт в группу Telegram от имени бота. stop — остановить процесс.";
+            case BOT -> "Сообщение уйдёт в канал Discord и, если мост включён, в группу Telegram. stop — остановить.";
+            case OTHER -> "Строка уходит процессу, как если бы её набрали в его окне.";
+        });
+        commandLine.putClientProperty("JTextField.placeholderText", switch (kind) {
+            case SERVER -> "Команда или сообщение в чат игры…";
+            case PARODY, BOT -> "Сообщение в чат…";
+            case OTHER -> "Ввод для процесса…";
+        });
+        commandLine.repaint();
+    }
+
+    /** Есть ли в строке русские буквы — тогда у сервера это сообщение, а не команда. */
+    static boolean hasCyrillic(String text) {
+        return text.codePoints().anyMatch(c -> Character.UnicodeBlock.of(c) == Character.UnicodeBlock.CYRILLIC);
+    }
+
+    /** Что на самом деле отправить серверу. */
+    static String forServer(String text) {
+        if (text.startsWith("/")) {
+            return text.substring(1);
+        }
+
+        return hasCyrillic(text) ? "say " + text : text;
+    }
+
+    private void submit() {
+        var text = commandLine.getText().strip();
+
+        if (process == null || text.isEmpty()) {
+            return;
+        }
+
+        var line = kind() == Kind.SERVER ? forServer(text) : text;
+
+        if (process.send(line)) {
+            commandLine.setText("");
+        } else {
+            Toolkit.getDefaultToolkit().beep();
+            notice("Процесс не запущен — отправлять некому.");
         }
     }
 
@@ -370,6 +463,7 @@ final class ProcessPage extends Ui.Card {
         var state = process.state();
 
         title.setText(process.spec().name());
+        showInputHint();
         var server = ServerTools.isServer(process.spec());
         serverButtons.setVisible(server);
         badge.set(STATE_NAMES.get(state), Ui.Dot.color(state));

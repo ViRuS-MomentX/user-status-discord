@@ -325,6 +325,42 @@ public final class VoiceBridgeBot {
             toTelegram.listen(parody::hearDiscord);
         }
 
+        // Строка из консоли V.I.R.U.S. — в Discord-канал моста и, если мост к
+        // Telegram работает, в группу Telegram: от имени бота, обеим сторонам сразу
+        var consoleTelegram = telegram;
+        var consoleJda = jda;
+        console = text -> {
+            var sent = new ArrayList<String>();
+            var channelId = config.getBridge().channel();
+
+            if (channelId != 0) {
+                var channel = consoleJda.getChannelById(
+                        net.dv8tion.jda.api.entities.channel.middleman.GuildMessageChannel.class, channelId);
+
+                if (channel != null) {
+                    channel.sendMessage(text).queue(ok -> { }, failure ->
+                            log.warn("В Discord сообщение из консоли не ушло: {}", failure.getMessage()));
+                    sent.add("Discord #" + channel.getName());
+                }
+            }
+
+            if (consoleTelegram != null) {
+                try {
+                    consoleTelegram.sendText(config.getBridge().chat(), text, 0);
+                    sent.add("Telegram " + config.getBridge().chat());
+                } catch (IOException e) {
+                    log.warn("В Telegram сообщение из консоли не ушло: {}", e.getMessage());
+                }
+            }
+
+            if (sent.isEmpty()) {
+                log.info("Сообщению из консоли некуда идти: задай bridge.channel (канал Discord) "
+                        + "или включи мост с Telegram.");
+            } else {
+                log.info("Отправил в {}: {}", String.join(" и ", sent), text);
+            }
+        };
+
         var runningToTelegram = toTelegram;
         var runningFromTelegram = fromTelegram;
         var runningLibrary = libraryChannel;
@@ -424,6 +460,9 @@ public final class VoiceBridgeBot {
      * и мы тоже уходим: иначе после его перезапуска работали бы две копии бота
      * с одним токеном и растаскивали бы сообщения друг у друга.
      */
+    /** Куда девать строку, набранную в консоли V.I.R.U.S.; null — пока некуда. */
+    private static volatile java.util.function.Consumer<String> console;
+
     private static void listenToSupervisor() {
         var listener = new Thread(() -> {
             try (var in = new java.io.BufferedReader(
@@ -431,9 +470,30 @@ public final class VoiceBridgeBot {
                 String line;
 
                 while ((line = in.readLine()) != null) {
-                    if (line.trim().equalsIgnoreCase("stop")) {
+                    var text = line.strip();
+
+                    if (text.equalsIgnoreCase("stop")) {
                         log.info("V.I.R.U.S. просит остановиться.");
                         System.exit(0);
+                    }
+
+                    if (text.isEmpty()) {
+                        continue;
+                    }
+
+                    // Всё остальное набрал хозяин в консоли — это сообщение в чат
+                    var handler = console;
+
+                    if (handler == null) {
+                        log.info("Сообщение из консоли пока некуда отправить — бот ещё запускается.");
+                    } else if (text.startsWith("/")) {
+                        log.info("Команд, кроме stop, у бота нет. Без «/» строка уходит в чат.");
+                    } else {
+                        try {
+                            handler.accept(text);
+                        } catch (RuntimeException e) {
+                            log.warn("Сообщение из консоли не ушло: {}", e.getMessage());
+                        }
                     }
                 }
 
@@ -468,6 +528,10 @@ public final class VoiceBridgeBot {
         }
 
         var parody = startParody(settings.parody(), settings.bridgeToken(), configPath);
+
+        if (parody != null) {
+            console = parody::sayFromConsole;
+        }
 
         if (parody == null) {
             System.exit(2);

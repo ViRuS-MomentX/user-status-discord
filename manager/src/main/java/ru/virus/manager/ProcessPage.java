@@ -5,6 +5,9 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
 import javax.swing.JButton;
+import javax.swing.JFileChooser;
+import javax.swing.JOptionPane;
+import javax.swing.SwingUtilities;
 import javax.swing.JLabel;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
@@ -13,6 +16,7 @@ import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.Toolkit;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Consumer;
@@ -38,6 +42,11 @@ final class ProcessPage extends Ui.Card {
     private final JButton stop = Ui.danger("Остановить");
     private final JButton edit = Ui.button("Изменить");
     private final JButton files = Ui.button("Файлы");
+    private final JButton newWorld = Ui.button("Пересоздать мир");
+    private final JButton plugin = Ui.button("Заменить плагин");
+    /** Кнопки сервера Minecraft — отдельным рядом: в одну строку с остальными не влезают. */
+    private final javax.swing.JPanel serverButtons = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
+    private final JTextField commandLine = new JTextField();
     private final JTextField filter = new JTextField();
     private final ConsoleView console = new ConsoleView();
     private final ExecutorService worker;
@@ -79,7 +88,20 @@ final class ProcessPage extends Ui.Card {
         files.setToolTipText("Открыть папку процесса в Проводнике — туда можно докинуть файлы");
         files.addActionListener(e -> openFolder());
         buttons.add(files);
-        head.add(buttons, BorderLayout.SOUTH);
+
+        // Только у сервера Minecraft
+        newWorld.setIcon(Icons.of(Icons.Kind.RESTART, Theme.WARN));
+        newWorld.setToolTipText("Удалить все три измерения — сервер создаст новые");
+        newWorld.addActionListener(e -> recreateWorld());
+        plugin.setIcon(Icons.of(Icons.Kind.PLUS, Theme.ACCENT));
+        plugin.setToolTipText("Выбрать jar — прошлая сборка VirusSwords удалится, сервер перезапустится");
+        plugin.addActionListener(e -> replacePlugin());
+        serverButtons.add(newWorld);
+        serverButtons.add(plugin);
+        var allButtons = Ui.transparent(new BorderLayout(0, 8));
+        allButtons.add(buttons, BorderLayout.NORTH);
+        allButtons.add(serverButtons, BorderLayout.SOUTH);
+        head.add(allButtons, BorderLayout.SOUTH);
 
         start.addActionListener(e -> act(ManagedProcess::start));
         stop.addActionListener(e -> act(ManagedProcess::stop));
@@ -156,9 +178,25 @@ final class ProcessPage extends Ui.Card {
         right.add(clear);
         bar.add(right, BorderLayout.EAST);
 
+        // Строка команд — серверу «op ник», «gamemode creative ник» и прочее
+        commandLine.putClientProperty("JTextField.placeholderText", "Команда в консоль процесса и Enter — например: op Steve");
+        commandLine.setFont(Theme.mono);
+        commandLine.addActionListener(e -> {
+            var text = commandLine.getText().strip();
+
+            if (process != null && !text.isEmpty()) {
+                if (process.send(text)) {
+                    commandLine.setText("");
+                } else {
+                    Toolkit.getDefaultToolkit().beep();
+                }
+            }
+        });
+
         var body = Ui.transparent(new BorderLayout(0, 10));
         body.add(bar, BorderLayout.NORTH);
         body.add(console, BorderLayout.CENTER);
+        body.add(commandLine, BorderLayout.SOUTH);
 
         add(top, BorderLayout.NORTH);
         add(body, BorderLayout.CENTER);
@@ -184,6 +222,97 @@ final class ProcessPage extends Ui.Card {
             javax.swing.JOptionPane.showMessageDialog(this, "Папка не открылась: " + e.getMessage()
                     + "\n" + folder, Virus.NAME, javax.swing.JOptionPane.WARNING_MESSAGE);
         }
+    }
+
+    /** Остановить сервер, сделать дело, запустить снова. Дело — на рабочем потоке. */
+    private void withServerStopped(String doing, boolean startAfter, Task task) {
+        var target = process;
+
+        if (target == null) {
+            return;
+        }
+
+        worker.submit(() -> {
+            var wasRunning = target.state() == ManagedProcess.State.RUNNING
+                    || target.state() == ManagedProcess.State.WAITING;
+            target.stop();
+
+            if (!target.waitExit(150_000)) {
+                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+                        "Сервер не остановился — " + doing + " не сделано.", Virus.NAME, JOptionPane.WARNING_MESSAGE));
+                return;
+            }
+
+            try {
+                var result = task.run(target.workdir());
+                SwingUtilities.invokeLater(() -> notice(result));
+            } catch (Exception e) {
+                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+                        doing + " не удалось: " + e.getMessage(), Virus.NAME, JOptionPane.ERROR_MESSAGE));
+            }
+
+            if (startAfter || wasRunning) {
+                target.start();
+            }
+        });
+    }
+
+    private interface Task {
+        String run(java.nio.file.Path folder) throws Exception;
+    }
+
+    private void notice(String text) {
+        if (process != null) {
+            process.log().add(java.time.LocalTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"))
+                    + " [V.I.R.U.S.] ▸ " + text);
+        }
+    }
+
+    private void recreateWorld() {
+        if (process == null) {
+            return;
+        }
+
+        var level = ServerTools.levelName(process.workdir());
+
+        if (JOptionPane.showConfirmDialog(this, "<html>Удалить мир <b>" + ConfigPage.escape(level)
+                        + "</b> со всеми измерениями — обычным, адом и краем?<br>Сервер остановится и создаст новые."
+                        + "<br><br>Вернуть старый мир будет нельзя.</html>",
+                Virus.NAME, JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.OK_OPTION) {
+            return;
+        }
+
+        withServerStopped("пересоздание мира", true,
+                folder -> "Удалено измерений: " + ServerTools.deleteWorlds(folder) + " — сервер создаёт новый мир.");
+    }
+
+    private void replacePlugin() {
+        if (process == null) {
+            return;
+        }
+
+        var chooser = new JFileChooser();
+        chooser.setDialogTitle("Новая сборка плагина");
+        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Плагины (*.jar)", "jar"));
+        var memory = java.util.prefs.Preferences.userNodeForPackage(ProcessPage.class);
+        var lastDir = memory.get("plugin-dir", "");
+
+        if (!lastDir.isEmpty()) {
+            chooser.setCurrentDirectory(new java.io.File(lastDir));
+        }
+
+        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+
+        var chosen = chooser.getSelectedFile().toPath();
+        memory.put("plugin-dir", chosen.getParent().toString());
+
+        withServerStopped("замена плагина", false, folder -> {
+            var removed = ServerTools.replacePlugin(folder, chosen);
+            return "Плагин заменён на " + chosen.getFileName()
+                    + (removed.isEmpty() ? "" : " (убран " + String.join(", ", removed) + ")") + ".";
+        });
     }
 
     private void act(Consumer<ManagedProcess> action) {
@@ -241,6 +370,8 @@ final class ProcessPage extends Ui.Card {
         var state = process.state();
 
         title.setText(process.spec().name());
+        var server = ServerTools.isServer(process.spec());
+        serverButtons.setVisible(server);
         badge.set(STATE_NAMES.get(state), Ui.Dot.color(state));
 
         var parts = new java.util.ArrayList<String>();

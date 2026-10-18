@@ -66,7 +66,7 @@ final class ProcessDialog extends JDialog {
 
         body.add(field("Имя", "", name));
         body.add(field("Короткое имя", "латиница, цифры и дефис — для файлов, потом не меняется", id));
-        body.add(field("Команда", "{java} — та же Java, {home} — папка V.I.R.U.S.", command));
+        body.add(field("Команда", "{java} — та же Java, {home} — папка V.I.R.U.S., {jar} — jar сервера в его папке", command));
         body.add(field("Папка запуска", "пусто — projects/<короткое имя>", workdir));
 
         for (var box : new JCheckBox[] { autostart, restart, supervised }) {

@@ -51,7 +51,29 @@ final class Supervisor {
             processes.put(spec.id(), create(spec));
         }
 
+        seed();
         save();
+    }
+
+    /**
+     * Процессы, которые V.I.R.U.S. заводит сам, — один раз. Удалил — не
+     * вернётся: кто заведён, записано в virus-seeded.txt.
+     */
+    private void seed() throws IOException {
+        var memo = home.resolve("virus-seeded.txt");
+        var seeded = Files.isRegularFile(memo)
+                ? new java.util.HashSet<>(Files.readAllLines(memo, StandardCharsets.UTF_8)) : new java.util.HashSet<String>();
+
+        if (!seeded.contains(ServerTools.ID)) {
+            if (!processes.containsKey(ServerTools.ID)) {
+                var spec = ServerTools.defaultSpec();
+                processes.put(spec.id(), create(spec));
+                Files.createDirectories(home.resolve(spec.workdir()));
+            }
+
+            seeded.add(ServerTools.ID);
+            Files.write(memo, seeded, StandardCharsets.UTF_8);
+        }
     }
 
     private ManagedProcess create(ProcessSpec spec) {

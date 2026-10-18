@@ -95,15 +95,62 @@ final class ManagedProcess {
         return state;
     }
 
-    /** Команда с подставленными {java} и {home}. */
+    /** Команда с подставленными {java}, {home} и {jar} — jar сервера в папке процесса. */
     List<String> resolvedCommand() {
         var result = new ArrayList<String>();
+        String jar = null;
 
         for (var part : spec.command()) {
-            result.add(part.replace("{java}", java).replace("{home}", home.toString()));
+            if (part.contains("{jar}") && jar == null) {
+                var found = ServerTools.serverJar(workdir());
+                jar = found == null ? "server.jar" : found.getFileName().toString();
+            }
+
+            result.add(part.replace("{java}", java).replace("{home}", home.toString())
+                    .replace("{jar}", jar == null ? "" : jar));
         }
 
         return result;
+    }
+
+    /** Строка в консоль процесса — как будто её набрали в его окне. */
+    boolean send(String line) {
+        var running = process;
+
+        if (running == null || !running.isAlive()) {
+            return false;
+        }
+
+        try {
+            var in = running.getOutputStream();
+            in.write((line + "\n").getBytes(StandardCharsets.UTF_8));
+            in.flush();
+            system("> " + line);
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /** Ждёт, пока процесс завершится, не закрывая журнал. @return завершился ли */
+    boolean waitExit(long millis) {
+        var running = process;
+
+        if (running == null) {
+            return true;
+        }
+
+        try {
+            return running.waitFor(millis, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    /** Серверу нужно время сохранить миры — ему ждём дольше, чем боту. */
+    private long grace() {
+        return ServerTools.isServer(spec) ? 120_000 : GRACE_MS;
     }
 
     Path workdir() {
@@ -263,7 +310,7 @@ final class ManagedProcess {
                 running.descendants().forEach(ProcessHandle::destroyForcibly);
                 running.destroyForcibly();
             }
-        }, GRACE_MS, TimeUnit.MILLISECONDS);
+        }, grace(), TimeUnit.MILLISECONDS);
     }
 
     /** Остановить и запустить снова, когда остановится. */

@@ -32,7 +32,7 @@ final class Projects {
 
     /** Своё V.I.R.U.S. — при переезде бота остаётся на месте. */
     private static final Set<String> OWN = Set.of("virus.jar", "virus.bat", "processes.json",
-            "processes.json.tmp", "logs", "projects", "reports", "tasks.json", "tasks.json.bak", "tasks.json.tmp", "virus-settings.json", "device.json");
+            "processes.json.tmp", "logs", "projects", "reports", "tasks.json", "tasks.json.bak", "tasks.json.tmp", "virus-settings.json", "device.json", "virus-seeded.txt");
 
     private final Path home;
 

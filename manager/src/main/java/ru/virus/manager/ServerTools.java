@@ -36,7 +36,7 @@ final class ServerTools {
 
     static ProcessSpec defaultSpec() {
         return new ProcessSpec(ID, "Тестовый сервер",
-                List.of("{java}", "-Xms1G", "-Xmx4G", "-jar", "{jar}", "nogui"),
+                List.of("{java}", "-Xms2G", "-Xmx4G", "-jar", "{jar}", "nogui"),
                 "projects/" + ID, false, true, true);
     }
 
@@ -145,6 +145,9 @@ final class ServerTools {
                 if (lower.endsWith(".jar") && (lower.startsWith(PLUGIN) || name.equals(last))
                         && !jar.equals(plugins.resolve(chosen.getFileName().toString()))) {
                     Files.delete(jar);
+                    // Paper держит переделанную копию плагина у себя в кэше — её тоже прочь,
+                    // иначе при совпадении имени мог бы подняться старый код
+                    Files.deleteIfExists(plugins.resolve(".paper-remapped").resolve(name));
                     removed.add(name);
                 }
             }

@@ -53,6 +53,8 @@ class ServerToolsTest {
         Files.writeString(plugins.resolve("VirusSwords-1.0.0.jar"), "old");
         Files.writeString(plugins.resolve("EssentialsX.jar"), "keep");
         Files.createDirectories(plugins.resolve("VirusSwords"));
+        Files.createDirectories(plugins.resolve(".paper-remapped"));
+        Files.writeString(plugins.resolve(".paper-remapped/VirusSwords-1.0.0.jar"), "cached");
         var build = Files.createDirectories(dir.resolve("build")).resolve("my-new-build.jar");
         Files.writeString(build, "new");
 
@@ -62,6 +64,7 @@ class ServerToolsTest {
         assertEquals("new", Files.readString(plugins.resolve("my-new-build.jar")));
         assertTrue(Files.exists(plugins.resolve("EssentialsX.jar")));
         assertTrue(Files.isDirectory(plugins.resolve("VirusSwords")), "настройки плагина остаются");
+        assertFalse(Files.exists(plugins.resolve(".paper-remapped/VirusSwords-1.0.0.jar")), "кэш Paper — тоже");
 
         // Следующая сборка с другим именем убирает и эту — V.I.R.U.S. её запомнил
         var next = dir.resolve("build/another-name.jar");

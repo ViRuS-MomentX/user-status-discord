@@ -691,6 +691,7 @@ public final class VoiceBridgeBot {
         names.load();
 
         var parody = new Parody(settings, telegram, llm, samples, state, names);
+        parody.setPeople(new PeopleBook(configPath.toAbsolutePath().resolveSibling("parody-people.json")));
         parody.start();
         return parody;
     }

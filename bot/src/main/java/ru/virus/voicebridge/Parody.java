@@ -114,6 +114,9 @@ public final class Parody {
 
     private volatile long lastSent;
 
+    /** Кого как называть и как шутить — из V.I.R.U.S.; null — списка нет. */
+    private volatile PeopleBook people;
+
     /** Подсказка про закрытый Telegram уже была. */
     private volatile boolean blockAdvised;
 
@@ -691,6 +694,18 @@ public final class Parody {
         return line.append(": ").append(message.text()).toString();
     }
 
+    void setPeople(PeopleBook people) {
+        this.people = people;
+    }
+
+    /** Блок подсказки со списком хозяина; пусто — списка нет. */
+    private String peopleBlock() {
+        var book = people;
+        var lines = book == null ? "" : book.describe(names::name);
+        return lines.isEmpty() ? "" : "Кого как называть и как над кем можно шутить — это задал хозяин, держись "
+                + "этого (по-дружески, в рамках правил выше):\n" + lines + "\n\n";
+    }
+
     /**
      * Сообщение хозяина из консоли V.I.R.U.S. — в группу от имени бота, с той
      * же пометкой, что у реплик. Ответы на него бот подхватит, как на свои.
@@ -1005,6 +1020,7 @@ public final class Parody {
         var known = names.describe(active, 15);
 
         return (style.isEmpty() ? "" : "Его манера в цифрах — держись её:\n" + style + "\n\n")
+                + peopleBlock()
                 + (known.isEmpty() ? "" : "Как он называет людей в чате:\n" + known + "\n\n")
                 + "Образцы его настоящих сообщений — для манеры, не для копирования:\n" + examples
                 + (recentOwn.isEmpty() ? ""
@@ -1035,6 +1051,7 @@ public final class Parody {
 
         var style = settings.target() == 0 ? "" : ParodyStyle.describe(samples.all());
         return (style.isEmpty() ? "" : "Форма сообщений в цифрах — держись её:\n" + style + "\n\n")
+                + peopleBlock()
                 + (examples.isEmpty() ? ""
                     : "Образцы формы сообщений (чужие — только для манеры письма, не копировать):\n" + examples)
                 + (recentOwn.isEmpty() ? ""

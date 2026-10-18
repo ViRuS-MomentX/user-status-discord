@@ -734,4 +734,20 @@ class ParodyTest {
         // Группа — числом, если бот уже узнал её, или по @имени, как в настройках
         assertTrue(List.of(String.valueOf(FakeTelegram.CHAT), "@grp").contains(sent.get("chat_id")));
     }
+
+    @Test
+    void ownerListOfNamesAndJokesReachesPrompt() throws Exception {
+        var file = dir.resolve("parody-people.json");
+        Files.writeString(file, "{\"people\":[{\"id\":\"7\",\"name\":\"Петруха\",\"jokes\":\"про то, что он вечно опаздывает\"},"
+                + "{\"id\":\"0\",\"name\":\"никто\"}]}");
+        start(character(0), llm(p -> "ну"));
+        parody.setPeople(new PeopleBook(file));
+
+        telegram.say(7, "Петя", "кто в доту");
+
+        assertNotNull(telegram.awaitSent(1, 3000));
+        var prompt = prompts.getFirst();
+        assertTrue(prompt.contains("«Петя»: называй «Петруха». Шутить над ним можно так: про то, что он вечно опаздывает"), prompt);
+        assertTrue(!prompt.contains("никто"), "строки без ID пропускаются");
+    }
 }

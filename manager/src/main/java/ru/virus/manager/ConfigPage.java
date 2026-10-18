@@ -38,6 +38,7 @@ import java.util.function.Consumer;
 final class ConfigPage extends Ui.Card {
 
     private final ConfigService config;
+    private final PeoplePanel people;
     private final Consumer<String> toast;
     private final Consumer<Boolean> saved;
 
@@ -63,6 +64,7 @@ final class ConfigPage extends Ui.Card {
     ConfigPage(MatrixBackground background, ConfigService config, Consumer<String> toast, Consumer<Boolean> saved) {
         super(new BorderLayout(0, 14));
         this.config = config;
+        this.people = new PeoplePanel(config::file, toast);
         this.toast = toast;
         this.saved = saved;
         setBorder(BorderFactory.createEmptyBorder(20, 22, 20, 22));
@@ -172,6 +174,7 @@ final class ConfigPage extends Ui.Card {
 
     /** Перечитать файл и показать заново, без несохранённого. */
     void reload() {
+        people.reload();
         changes.clear();
         path.setText(config.file().toString());
 
@@ -298,6 +301,17 @@ final class ConfigPage extends Ui.Card {
                 bounds.height = Math.max(bounds.height, formScroll.getViewport().getHeight());
                 form.scrollRectToVisible(bounds);
             }));
+            nav.add(link);
+        }
+
+        // Участники — свой раздел со строками, а не поля config.properties
+        if (query.isEmpty() || "участники как называть шутить".contains(query)) {
+            form.add(people);
+            var link = Ui.ghost("<html>Участники</html>");
+            link.setHorizontalAlignment(JButton.LEFT);
+            link.setAlignmentX(LEFT_ALIGNMENT);
+            link.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+            link.addActionListener(e -> SwingUtilities.invokeLater(() -> form.scrollRectToVisible(people.getBounds())));
             nav.add(link);
         }
 

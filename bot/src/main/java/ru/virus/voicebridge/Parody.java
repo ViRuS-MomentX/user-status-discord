@@ -223,11 +223,22 @@ public final class Parody {
                     return;
                 }
 
-                if (String.valueOf(e.getMessage()).contains("Conflict")) {
+                var said = String.valueOf(e.getMessage());
+
+                if (said.contains("Conflict") && said.toLowerCase().contains("webhook")) {
+                    // На бота поставили веб-хук — тогда getUpdates не работает вовсе. Снимаем
+                    try {
+                        telegram.deleteWebhook();
+                        log.warn("На пародийного бота был поставлен веб-хук — снял его, продолжаю.");
+                        continue;
+                    } catch (Exception failure) {
+                        log.warn("Веб-хук на пародийном боте не снялся: {}.", reason(failure));
+                    }
+                } else if (said.contains("Conflict")) {
                     // Обновления у бота одни: их забирает тот, кто спросил последним
                     log.warn("Обновления пародийного бота забирает кто-то ещё — скорее всего, "
-                            + "вторая копия бота с тем же parody.telegram.token. Закрой её. "
-                            + "Пробую через {} с.", RETRY_PAUSE_MS / 1000);
+                            + "вторая копия бота с тем же parody.telegram.token. В V.I.R.U.S. нажми "
+                            + "«Убрать дубли». Пробую через {} с.", RETRY_PAUSE_MS / 1000);
                 } else {
                     log.warn("Telegram не ответил пародийному боту: {}. Пробую через {} с.",
                             reason(e), RETRY_PAUSE_MS / 1000);

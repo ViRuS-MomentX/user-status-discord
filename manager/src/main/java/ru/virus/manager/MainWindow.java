@@ -338,7 +338,7 @@ final class MainWindow extends JFrame {
             var oldTask = Autostart.oldTaskExists();
 
             SwingUtilities.invokeLater(() -> {
-                if (copies.isEmpty()) {
+                if (copies.isEmpty() && !oldTask) {
                     if (!quiet) {
                         toast("Лишних копий нет.");
                     }
@@ -346,7 +346,9 @@ final class MainWindow extends JFrame {
                 }
 
                 if (quiet) {
-                    showDuplicatesBanner(copies.size());
+                    if (!copies.isEmpty()) {
+                        showDuplicatesBanner(copies.size());
+                    }
                     return;
                 }
 
@@ -358,28 +360,69 @@ final class MainWindow extends JFrame {
                             .append(ConfigPage.escape(shorten(copy.commandLine()))).append("</font>");
                 }
 
-                var answer = JOptionPane.showConfirmDialog(this, "<html><body style='width:520px'>"
-                                + "Найдены копии ботов, запущенные мимо V.I.R.U.S.:" + list
-                                + "<br><br>Остановить их? Свои процессы V.I.R.U.S. не тронет."
-                                + (oldTask ? "<br><br>Похоже, их запускает старая задача автозапуска "
-                                        + "<b>VoiceBridgeBot</b> — убери её, иначе после перезагрузки копия вернётся."
-                                        : "")
-                                + "</body></html>",
-                        Virus.NAME, JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
+                var text = "<html><body style='width:520px'>"
+                        + (copies.isEmpty() ? "Видимых копий нет, но стоит старая задача автозапуска "
+                                + "<b>VoiceBridgeBot</b>. Она запускает бота в фоновом сеансе Windows — "
+                                + "обычной программе его не видно — и перезапускает после остановки."
+                            : "Найдены копии ботов, запущенные мимо V.I.R.U.S.:" + list
+                                + (oldTask ? "<br><br>Их запускает старая задача автозапуска <b>VoiceBridgeBot</b> "
+                                    + "и перезапускает после остановки — поэтому простое «остановить» не помогает."
+                                    : ""))
+                        + (oldTask ? "<br><br>Нажми «Убрать всё»: V.I.R.U.S. удалит задачу и остановит все копии. "
+                                + "Windows спросит разрешение администратора — ответь «Да»."
+                            : "<br><br>Остановить их? Свои процессы V.I.R.U.S. не тронет.")
+                        + "</body></html>";
 
-                if (answer == JOptionPane.OK_OPTION) {
+                if (oldTask) {
+                    var answer = JOptionPane.showOptionDialog(this, text, Virus.NAME, JOptionPane.OK_CANCEL_OPTION,
+                            JOptionPane.WARNING_MESSAGE, null, new Object[] { "Убрать всё", "Отмена" }, "Убрать всё");
+
+                    if (answer == 0) {
+                        cleanAsAdmin();
+                    }
+                    return;
+                }
+
+                if (JOptionPane.showConfirmDialog(this, text, Virus.NAME, JOptionPane.OK_CANCEL_OPTION,
+                        JOptionPane.WARNING_MESSAGE) == JOptionPane.OK_OPTION) {
                     worker.submit(() -> {
                         var killed = Duplicates.kill(copies);
                         SwingUtilities.invokeLater(() -> {
                             toast("Остановлено лишних копий: " + killed + ".");
-                            banners.removeAll();
-                            banners.revalidate();
-                            banners.repaint();
+                            clearBanners();
                         });
                     });
                 }
             });
         });
+    }
+
+    /** Задача и копии — с правами администратора; потом проверяем, что вышло. */
+    private void cleanAsAdmin() {
+        toast("Жду разрешения Windows…");
+
+        worker.submit(() -> {
+            var ran = Duplicates.cleanAsAdmin(supervisor);
+            var leftTask = Autostart.oldTaskExists();
+            var left = Duplicates.find(supervisor);
+
+            SwingUtilities.invokeLater(() -> {
+                if (!ran) {
+                    toast("Без разрешения администратора задачу не убрать.");
+                } else if (leftTask || !left.isEmpty()) {
+                    toast("Убралось не всё: " + (leftTask ? "задача осталась" : "копий осталось " + left.size()) + ".");
+                } else {
+                    toast("Готово: старая задача удалена, лишних копий нет.");
+                    clearBanners();
+                }
+            });
+        });
+    }
+
+    private void clearBanners() {
+        banners.removeAll();
+        banners.revalidate();
+        banners.repaint();
     }
 
     private static String shorten(String line) {
@@ -603,9 +646,13 @@ final class MainWindow extends JFrame {
         var banner = new Ui.Card(new BorderLayout(12, 0), Theme.alpha(Theme.WARN, 26));
         banner.setBorder(BorderFactory.createEmptyBorder(10, 14, 10, 14));
         banner.add(Ui.label("<html>Стоит старая задача автозапуска <b>VoiceBridgeBot</b> — она запускает бота мимо "
-                + "V.I.R.U.S., и работали бы две копии. Убери её в PowerShell от администратора: "
-                + "<font face='monospace' color='#ffd79a'>Unregister-ScheduledTask -TaskName VoiceBridgeBot "
-                + "-Confirm:$false</font></html>", Theme.ui.deriveFont(13f), new Color(0xFF, 0xD7, 0x9A)));
+                + "V.I.R.U.S. и перезапускает после остановки, поэтому работают две копии. Нажми «Убрать» — "
+                + "Windows спросит разрешение администратора.</html>", Theme.ui.deriveFont(13f), new Color(0xFF, 0xD7, 0x9A)),
+                BorderLayout.CENTER);
+        var fix = Ui.button("Убрать");
+        fix.setToolTipText("Удалить задачу и остановить запущенные ею копии — Windows спросит разрешение");
+        fix.addActionListener(e -> cleanAsAdmin());
+        banner.add(fix, BorderLayout.EAST);
         banners.add(banner);
         banners.revalidate();
     }

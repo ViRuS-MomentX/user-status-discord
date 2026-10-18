@@ -531,6 +531,11 @@ public final class Telegram {
         }
     }
 
+    /** Снимает веб-хук: пока он стоит, getUpdates Telegram не отдаёт. */
+    public void deleteWebhook() throws IOException {
+        call("deleteWebhook", Map.of());
+    }
+
     private DataObject call(String method, Map<String, String> parameters) throws IOException {
         return call(method, parameters, Duration.ofSeconds(30));
     }

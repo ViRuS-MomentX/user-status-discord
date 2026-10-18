@@ -25,9 +25,12 @@ final class Duplicates {
 
     /** Чужие копии: процессы с тем же jar, что у наших, но не наши. */
     static List<Copy> find(Supervisor supervisor) {
+        return pick(commandLines(), jars(supervisor), ours(supervisor));
+    }
+
+    /** Какие jar запускают наши процессы — по ним и узнаём копии. */
+    static Set<String> jars(Supervisor supervisor) {
         var jars = new LinkedHashSet<String>();
-        var ours = new HashSet<Long>();
-        ours.add(ProcessHandle.current().pid());
 
         for (var process : supervisor.all()) {
             for (var part : process.spec().command()) {
@@ -35,7 +38,17 @@ final class Duplicates {
                     jars.add(part.replace('\\', '/').replaceAll(".*/", "").toLowerCase());
                 }
             }
+        }
 
+        return jars;
+    }
+
+    /** Наши процессы и их дети, и сам V.I.R.U.S. — их не трогаем. */
+    static Set<Long> ours(Supervisor supervisor) {
+        var ours = new HashSet<Long>();
+        ours.add(ProcessHandle.current().pid());
+
+        for (var process : supervisor.all()) {
             if (process.toJson().get("pid") instanceof Number pid) {
                 ours.add(pid.longValue());
                 ProcessHandle.of(pid.longValue()).ifPresent(handle ->
@@ -43,7 +56,49 @@ final class Duplicates {
             }
         }
 
-        return pick(commandLines(), jars, ours);
+        return ours;
+    }
+
+    /**
+     * Убирает копии с правами администратора: снимает старую задачу
+     * автозапуска (она перезапускала бота после остановки — потому обычное
+     * «убрать» не помогало) и останавливает чужие копии, в том числе те, что
+     * работают в фоновом сеансе и обычной программе не видны.
+     *
+     * <p>Windows спросит разрешение. Ждём, пока скрипт закончит.
+     *
+     * @return запустился ли скрипт (false — отказались в окне Windows)
+     */
+    static boolean cleanAsAdmin(Supervisor supervisor) {
+        var ids = String.join(",", ours(supervisor).stream().map(String::valueOf).toList());
+        var patterns = String.join(" -or ", jars(supervisor).stream()
+                .map(jar -> "$_.CommandLine -like '*" + jar.replace("'", "''") + "*'").toList());
+
+        if (patterns.isEmpty()) {
+            patterns = "$false";
+        }
+
+        var script = "$ours=@(" + ids + ");"
+                + "Stop-ScheduledTask -TaskName '" + Autostart.OLD_TASK + "' -ErrorAction SilentlyContinue;"
+                + "Unregister-ScheduledTask -TaskName '" + Autostart.OLD_TASK + "' -Confirm:$false "
+                + "-ErrorAction SilentlyContinue;"
+                + "Get-CimInstance Win32_Process -Filter \"Name='java.exe' or Name='javaw.exe'\""
+                + "|Where-Object{(" + patterns + ") -and ($ours -notcontains $_.ProcessId)}"
+                + "|ForEach-Object{Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue}";
+
+        // Скрипт — в base64 UTF-16LE: так его не испортят кавычки по дороге
+        var encoded = java.util.Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
+
+        try {
+            var process = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                    "Start-Process powershell.exe -Verb RunAs -Wait -WindowStyle Hidden "
+                            + "-ArgumentList '-NoProfile','-EncodedCommand','" + encoded + "'")
+                    .redirectErrorStream(true).start();
+            process.getInputStream().readAllBytes();
+            return process.waitFor(120, TimeUnit.SECONDS) && process.exitValue() == 0;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** Отбор — отдельно, чтобы проверять без настоящих процессов. */

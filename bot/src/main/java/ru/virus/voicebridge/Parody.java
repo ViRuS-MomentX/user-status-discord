@@ -49,6 +49,7 @@ public final class Parody {
         commands.put("parody_name", "ответом на сообщение: как называть этого человека");
         commands.put("parody_names", "кого как называть");
         commands.put("parody_status", "как дела");
+        commands.put("id", "ID участника — ответом на его сообщение");
         COMMANDS = java.util.Collections.unmodifiableMap(commands);
     }
 
@@ -494,6 +495,12 @@ public final class Parody {
             word = word.substring(0, at);
         }
 
+        // ID узнать может каждый: его и так видно любому, кто откроет профиль
+        if (word.equals("/id")) {
+            showId(message);
+            return true;
+        }
+
         if (!word.startsWith("/parody")) {
             return false;
         }
@@ -663,6 +670,21 @@ public final class Parody {
      * Ответ на команду. Без пометки «пародия»: это не реплика участника, а
      * служебное сообщение, — зато со значком, чтобы его ни с чем не спутать.
      */
+    /** /id ответом на сообщение — ID его автора; просто /id — свой. */
+    private void showId(TelegramMessage message) {
+        if (message.replyToAuthorId() != 0) {
+            var who = message.replyToAuthor().isBlank() ? "автора" : message.replyToAuthor();
+            answer(message, "ID " + who + ": " + message.replyToAuthorId()
+                    + "\nЕго можно вписать в V.I.R.U.S. → Конфиг ботов → Участники.");
+        } else {
+            answer(message, "Твой ID: " + message.authorId()
+                    + "\nЧтобы узнать чужой — ответь командой /id на сообщение этого человека.");
+        }
+
+        log.info("{} спросил ID{}.", message.author(),
+                message.replyToAuthorId() != 0 ? " участника " + message.replyToAuthor() : "");
+    }
+
     private void answer(TelegramMessage message, String text) {
         try {
             telegram.sendText(message.chat(), "⚙️ " + text, message.messageId());

@@ -478,7 +478,7 @@ class ParodyTest {
 
         var menu = net.dv8tion.jda.api.utils.data.DataArray.fromJson(telegram.commands);
         assertEquals("parody_say", menu.getObject(0).getString("command"));
-        assertEquals(8, menu.length());
+        assertEquals(9, menu.length());
     }
 
     @Test
@@ -749,5 +749,21 @@ class ParodyTest {
         var prompt = prompts.getFirst();
         assertTrue(prompt.contains("«Петя»: называй «Петруха». Шутить над ним можно так: про то, что он вечно опаздывает"), prompt);
         assertTrue(!prompt.contains("никто"), "строки без ID пропускаются");
+    }
+
+    @Test
+    void idCommandShowsAuthorOfRepliedMessage() throws Exception {
+        start(settings(0, 0, 1), llm(p -> ""), "образец");
+
+        telegram.say(FakeTelegram.CHAT, 7, "Посторонний", false, "/id",
+                FakeTelegram.original(99, 555, "Лантри", false, "привет всем"));
+        var sent = telegram.awaitSent(1, 3000);
+        assertNotNull(sent, "ID узнать может каждый, не только хозяин");
+        assertTrue(sent.get("text").contains("ID Лантри: 555"), sent.get("text"));
+
+        telegram.say(7, "Посторонний", "/id");
+        var own = telegram.awaitSent(2, 3000);
+        assertNotNull(own);
+        assertTrue(own.get("text").contains("Твой ID: 7"), own.get("text"));
     }
 }

@@ -127,7 +127,8 @@ class ManagedProcessTest {
         var spec = new ProcessSpec("x", "X", List.of("{java}", "-jar", "{home}/bot.jar"), "", false, true, false);
         var process = new ManagedProcess(spec, home, "/opt/java/bin/java", null);
 
-        assertEquals(List.of("/opt/java/bin/java", "-jar", home + "/bot.jar"), process.resolvedCommand());
+        assertEquals(List.of("/opt/java/bin/java", "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8",
+                "-Dstdin.encoding=UTF-8", "-jar", home + "/bot.jar"), process.resolvedCommand());
         assertEquals(home, process.workdir());
     }
 }

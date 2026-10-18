@@ -84,4 +84,39 @@ class ServerToolsTest {
         again.load();
         assertEquals(null, again.get(ServerTools.ID), "удалённый не возвращается");
     }
+
+    @Test
+    void serverCopiedWithItsFolderIsFoundInside() throws Exception {
+        var inner = Files.createDirectories(dir.resolve("virus"));
+        Files.writeString(inner.resolve("server.properties"), "level-name=world\n");
+        Files.writeString(inner.resolve("paper-1.21.11-132.jar"), "");
+
+        assertEquals(inner, ServerTools.serverHome(dir));
+        assertEquals(dir.resolve("empty"), ServerTools.serverHome(dir.resolve("empty")));
+    }
+
+    @Test
+    void emptyServerFolderDoesNotLaunch() throws Exception {
+        var supervisor = new Supervisor(dir, "java");
+        supervisor.load();
+        var server = supervisor.get(ServerTools.ID);
+
+        server.start();
+
+        assertEquals(ManagedProcess.State.FAILED, server.state());
+        assertTrue(String.valueOf(server.toJson().get("note")).contains("нет jar"));
+    }
+
+    @Test
+    void javaGetsUtf8UnlessCommandSaysOtherwise() {
+        var server = ManagedProcess.withUtf8(List.of("{java}", "-jar", "{jar}"), List.of("java", "-jar", "paper.jar"));
+        assertEquals(List.of("java", "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8", "-Dstdin.encoding=UTF-8",
+                "-jar", "paper.jar"), server);
+
+        var bot = List.of("{java}", "-Dstdout.encoding=UTF-8", "-jar", "bot.jar");
+        assertEquals(List.of("java", "-Dstdout.encoding=UTF-8", "-jar", "bot.jar"),
+                ManagedProcess.withUtf8(bot, List.of("java", "-Dstdout.encoding=UTF-8", "-jar", "bot.jar")));
+
+        assertEquals(List.of("node", "app.js"), ManagedProcess.withUtf8(List.of("node", "app.js"), List.of("node", "app.js")));
+    }
 }

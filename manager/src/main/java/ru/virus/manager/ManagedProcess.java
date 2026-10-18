@@ -110,6 +110,22 @@ final class ManagedProcess {
                     .replace("{jar}", jar == null ? "" : jar));
         }
 
+        return withUtf8(spec.command(), result);
+    }
+
+    /**
+     * Java на Windows пишет вывод в кодировке консоли, а мы читаем UTF-8 — и
+     * русский текст превращается в квадраты. Если команда запускает {java} и
+     * кодировку сама не задаёт, просим у Java UTF-8 для вывода и ввода.
+     */
+    static List<String> withUtf8(List<String> raw, List<String> resolved) {
+        if (raw.isEmpty() || !raw.getFirst().equals("{java}")
+                || raw.stream().anyMatch(part -> part.contains("stdout.encoding"))) {
+            return resolved;
+        }
+
+        var result = new ArrayList<>(resolved);
+        result.addAll(1, List.of("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8", "-Dstdin.encoding=UTF-8"));
         return result;
     }
 
@@ -155,7 +171,9 @@ final class ManagedProcess {
 
     Path workdir() {
         var dir = spec.workdir().replace("{home}", home.toString());
-        return dir.isBlank() ? home : home.resolve(dir);
+        var folder = dir.isBlank() ? home : home.resolve(dir);
+        // Сервер скопировали в папку вместе с его собственной папкой — найдём его внутри
+        return ServerTools.isServer(spec) ? ServerTools.serverHome(folder) : folder;
     }
 
     synchronized void start() {
@@ -170,6 +188,17 @@ final class ManagedProcess {
     }
 
     private synchronized void launch() {
+        // Без jar сервера запускать нечего: Java показала бы окно с ошибкой, а
+        // перезапуск — ещё и ещё одно
+        if (spec.command().stream().anyMatch(part -> part.contains("{jar}"))
+                && ServerTools.serverJar(workdir()) == null) {
+            state = State.FAILED;
+            note = "в папке нет jar сервера — открой «Файлы» и положи туда сервер";
+            system("Не запускаю: в " + workdir() + " нет jar сервера. Нажми «Файлы» и положи туда "
+                    + "содержимое папки сервера (jar, plugins, world…).");
+            return;
+        }
+
         var command = resolvedCommand();
         system("Запуск: " + ProcessSpec.join(command));
 

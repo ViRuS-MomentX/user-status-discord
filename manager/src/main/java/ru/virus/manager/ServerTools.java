@@ -72,6 +72,25 @@ final class ServerTools {
         return jars.isEmpty() ? null : jars.getFirst();
     }
 
+    /**
+     * Где на самом деле лежит сервер: сама папка или единственная подпапка с
+     * server.properties и jar — когда скопировали папку сервера целиком.
+     */
+    static Path serverHome(Path folder) {
+        if (serverJar(folder) != null || !Files.isDirectory(folder)) {
+            return folder;
+        }
+
+        try (var stream = Files.list(folder)) {
+            var inner = stream.filter(Files::isDirectory)
+                    .filter(sub -> Files.isRegularFile(sub.resolve("server.properties")) && serverJar(sub) != null)
+                    .toList();
+            return inner.size() == 1 ? inner.getFirst() : folder;
+        } catch (IOException e) {
+            return folder;
+        }
+    }
+
     /** Имя мира из server.properties; нет файла — «world». */
     static String levelName(Path folder) {
         var file = folder.resolve("server.properties");

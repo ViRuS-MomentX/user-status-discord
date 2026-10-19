@@ -165,6 +165,12 @@ public final class Parody {
     }
 
     public void start() {
+        // Свои прошлые реплики — из файла: после перезапуска не начинать по новой те же шутки
+        synchronized (said) {
+            said.clear();
+            said.addAll(state.said());
+        }
+
         worker = new Thread(this::loop, "parody-from-telegram");
         worker.setDaemon(true);
         worker.start();
@@ -909,7 +915,7 @@ public final class Parody {
         // К нему обратились — промолчать нельзя: вторая попытка, если первая не годится
         var must = direct || preview != null || alwaysAnswers();
         // Лишняя попытка — на случай, если модель списала реплику из образцов
-        var attempts = must ? 3 : 2;
+        var attempts = must ? 4 : 3;
         var text = "";
         var why = "";
 
@@ -930,6 +936,7 @@ public final class Parody {
 
             why = text.isBlank() ? "пусто — ИИ промолчал или сработал фильтр"
                     : repeats(text) ? "повтор недавней реплики"
+                    : samey(text) != null ? samey(text)
                     : copies(text, samples.all()) ? "это слово в слово его старое сообщение, а нужна новая "
                         + "фраза в его манере по теме разговора"
                     : addressesAbsent(text) != null ? "обращение к «" + addressesAbsent(text) + "», а он в "
@@ -981,6 +988,8 @@ public final class Parody {
                 }
             }
 
+            state.addSaid(text, SAID_LIMIT);
+
             synchronized (own) {
                 own.add(id);
 
@@ -1001,6 +1010,97 @@ public final class Parody {
             return said.stream().anyMatch(old -> normalize(old).equals(normalized));
         }
     }
+
+    /**
+     * Та же заготовка, что в недавней реплике, только с другим именем:
+     * «Содиум, ты че, как вайбкодер» → «Рома, ты че, как сторож». Слово в
+     * слово это не повтор, а читается как бот без мозгов.
+     *
+     * @return почему не годится; null — реплика новая
+     */
+    String samey(String text) {
+        List<String> recent;
+
+        synchronized (said) {
+            recent = List.copyOf(said);
+        }
+
+        return samey(text, recent);
+    }
+
+    static String samey(String text, List<String> recent) {
+        var words = words(text);
+        var opening = opening(text);
+
+        if (words.size() < 3) {
+            return null;
+        }
+
+        for (var old : recent) {
+            var before = words(old);
+            var start = opening(old);
+
+            if (before.size() < 3) {
+                continue;
+            }
+
+            if (opening.size() >= 2 && start.size() >= 2 && opening.get(0).equals(start.get(0))
+                    && opening.get(1).equals(start.get(1))) {
+                return "начинается так же, как твоя недавняя реплика «" + old + "» — начни по-другому и "
+                        + "скажи о другом";
+            }
+
+            var shared = sharedRun(words, before);
+
+            if (shared != null) {
+                return "опять оборот «" + shared + "», как в «" + old + "» — построй фразу иначе, "
+                        + "без этого оборота";
+            }
+
+            var mine = new java.util.HashSet<>(words);
+            var theirs = new java.util.HashSet<>(before);
+            var common = new java.util.HashSet<>(mine);
+            common.retainAll(theirs);
+
+            if (common.size() * 2 >= Math.min(mine.size(), theirs.size()) + 1 && common.size() >= 3) {
+                return "по смыслу почти то же, что «" + old + "» — скажи что-то новое";
+            }
+        }
+
+        return null;
+    }
+
+    /** Три слова подряд, общие у двух реплик. */
+    private static String sharedRun(List<String> a, List<String> b) {
+        var runs = new java.util.HashSet<String>();
+
+        for (var i = 0; i + 3 <= b.size(); i++) {
+            runs.add(String.join(" ", b.subList(i, i + 3)));
+        }
+
+        for (var i = 0; i + 3 <= a.size(); i++) {
+            var run = String.join(" ", a.subList(i, i + 3));
+
+            if (runs.contains(run)) {
+                return run;
+            }
+        }
+
+        return null;
+    }
+
+    static List<String> words(String text) {
+        var normalized = normalize(text);
+        return normalized.isEmpty() ? List.of() : List.of(normalized.split(" "));
+    }
+
+    /** Слова реплики без обращения в начале («•FroSt•, …», «Рома Смотрун, …»). */
+    static List<String> opening(String text) {
+        return words(LEADING_NAME.matcher(text).replaceFirst(""));
+    }
+
+    private static final java.util.regex.Pattern LEADING_NAME = java.util.regex.Pattern.compile(
+            "^\\s*[^,\\n]{1,30}?,\\s*(?=\\S)");
 
     /** Короче — «ахах», «го», «ок»: такие повторы у живого человека в порядке вещей. */
     static final int COPY_MIN = 12;
@@ -1137,13 +1237,18 @@ public final class Parody {
                 + (known.isEmpty() ? "" : "Как он называет людей в чате:\n" + known + "\n\n")
                 + "Образцы его настоящих сообщений — для манеры, не для копирования:\n" + examples
                 + (recentOwn.isEmpty() ? ""
-                    : "\nТвои недавние реплики-пародии — не повторяй их и не пересказывай:\n" + recentOwn)
+                    : "\nТвои недавние реплики-пародии:\n" + recentOwn + NOT_AGAIN)
                 + "\nПоследние сообщения в чате (снизу — самое новое):\n" + context + "\n\n" + addressee(context)
                 + (direct
                     ? "Последнее сообщение — ответ на его реплику. Ответь так, как ответил бы "
                     : "Встрянь в разговор одной репликой — так, как написал бы ")
                 + settings.name() + ".";
     }
+
+    /** Под списком своих реплик: новая должна быть новой не только по словам. */
+    static final String NOT_AGAIN = "Новая реплика должна отличаться от них и построением, и смыслом: "
+            + "не начинай с тех же слов, не бери те же обороты и сравнения, не подставляй другое имя "
+            + "в ту же заготовку. Отвечай на то, что сейчас написали, а не на шаблон.\n";
 
     private String characterPrompt(String context, boolean direct) {
         var examples = new StringBuilder();
@@ -1168,7 +1273,7 @@ public final class Parody {
                 + (examples.isEmpty() ? ""
                     : "Образцы формы сообщений (чужие — только для манеры письма, не копировать):\n" + examples)
                 + (recentOwn.isEmpty() ? ""
-                    : "\nТвои недавние реплики — не повторяй их и не пересказывай:\n" + recentOwn)
+                    : "\nТвои недавние реплики:\n" + recentOwn + NOT_AGAIN)
                 + "\nПоследние сообщения в чате (снизу — самое новое):\n" + context + "\n\n" + addressee(context)
                 + (direct
                     ? "Последнее сообщение обращено к тебе. Ответь как " + settings.name() + "."

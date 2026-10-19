@@ -157,7 +157,7 @@ class ParodyTest {
 
         assertNull(telegram.awaitSent(1, 1500));
         // При 100% молчать нельзя — были ещё попытки, но и они пустые
-        assertEquals(3, prompts.size());
+        assertEquals(4, prompts.size());
     }
 
     @Test
@@ -335,7 +335,7 @@ class ParodyTest {
         Thread.sleep(200);
         telegram.say(7, "Петя", "два");
         assertNull(telegram.awaitSent(2, 1500), "бот повторился");
-        assertTrue(prompts.getLast().contains("не повторяй"), prompts.getLast());
+        assertTrue(prompts.getLast().contains("отличаться от них"), prompts.getLast());
     }
 
     static Clock at(int hour) {
@@ -813,5 +813,31 @@ class ParodyTest {
         assertTrue(!prompt.contains("санёк"), "образец с обращением не показывается");
         assertTrue(!prompt.contains("Колян"), "сообщение двухчасовой давности — уже не разговор");
         assertTrue(prompt.contains("Самое новое сообщение написал «Петя»"), prompt);
+    }
+
+    @Test
+    void sameTemplateWithAnotherNameIsNotNew() {
+        var recent = List.of("Содиум, ты че, как вайбкодер, опять завис", "го катку");
+        assertNotNull(Parody.samey("•FroSt•, ты че, как свинья, нажрался", recent));
+        assertNotNull(Parody.samey("Рома Смотрун, ты че, как сторож", recent));
+        assertNotNull(Parody.samey("ты че, как медуза", recent));
+        assertNull(Parody.samey("кто опять сервер уронил, признавайтесь", recent));
+        assertNull(Parody.samey("ну", recent));
+    }
+
+    @Test
+    void ownRepliesSurviveRestart() throws Exception {
+        var file = java.nio.file.Files.createTempDirectory("said").resolve("state.json");
+        var state = new ParodyState(file);
+        state.load();
+
+        for (var i = 0; i < 12; i++) {
+            state.addSaid("реплика " + i, 10);
+        }
+
+        var again = new ParodyState(file);
+        again.load();
+        assertEquals(10, again.said().size());
+        assertEquals("реплика 11", again.said().getLast());
     }
 }

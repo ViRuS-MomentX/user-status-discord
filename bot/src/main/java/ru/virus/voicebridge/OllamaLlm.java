@@ -91,7 +91,10 @@ public final class OllamaLlm implements Llm {
                         // По умолчанию окно у Ollama маленькое, и длинная подсказка
                         // с образцами молча обрезалась бы с начала
                         .put("num_ctx", 8192)
-                        .put("temperature", 0.9));
+                        .put("temperature", 1.0)
+                        // Без штрафа маленькие модели гоняют по кругу одну заготовку
+                        .put("repeat_penalty", 1.15)
+                        .put("repeat_last_n", 256));
 
         HttpResponse<String> answer;
 

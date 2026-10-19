@@ -30,6 +30,8 @@ final class ParodyState {
     private long target;
     private String day = "";
     private int sentToday;
+    /** Свои последние реплики: чтобы и после перезапуска не повторяться. */
+    private final java.util.List<String> said = new java.util.ArrayList<>();
 
     ParodyState(Path file) {
         this.file = file;
@@ -48,6 +50,15 @@ final class ParodyState {
             target = json.getLong("target", 0);
             day = json.getString("day", "");
             sentToday = json.getInt("sentToday", 0);
+            said.clear();
+
+            if (json.hasKey("said")) {
+                var list = json.getArray("said");
+
+                for (var i = 0; i < list.length(); i++) {
+                    said.add(list.getString(i));
+                }
+            }
         } catch (IOException | RuntimeException e) {
             // Не знаем, выключали ли пародию, — значит, считаем, что выключали:
             // молчать по ошибке безобиднее, чем заговорить вопреки просьбе
@@ -118,6 +129,21 @@ final class ParodyState {
         save();
     }
 
+    synchronized java.util.List<String> said() {
+        return java.util.List.copyOf(said);
+    }
+
+    /** Запомнить свою реплику; держим не больше {@code limit} последних. */
+    synchronized void addSaid(String text, int limit) {
+        said.add(text);
+
+        while (said.size() > limit) {
+            said.removeFirst();
+        }
+
+        save();
+    }
+
     private void roll(LocalDate today) {
         var key = today.toString();
 
@@ -134,7 +160,8 @@ final class ParodyState {
                 .put("forgotten", forgotten)
                 .put("target", target)
                 .put("day", day)
-                .put("sentToday", sentToday);
+                .put("sentToday", sentToday)
+                .put("said", net.dv8tion.jda.api.utils.data.DataArray.fromCollection(said));
 
         try {
             var temporary = file.resolveSibling(file.getFileName() + ".tmp");

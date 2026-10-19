@@ -127,6 +127,26 @@ final class OpenRgb implements AutoCloseable {
         send(device.index(), UPDATE_LEDS, body.array());
     }
 
+    /** Включить «свой» режим: без него поверх наших кадров играет встроенный эффект. */
+    void customMode(Device device) throws IOException {
+        send(device.index(), SET_CUSTOM_MODE, new byte[0]);
+    }
+
+    /** Каждому светодиоду свой цвет — кадр анимации. */
+    void leds(Device device, Color[] colors) throws IOException {
+        var count = Math.min(device.leds(), colors.length);
+        var body = le(ByteBuffer.allocate(4 + 2 + 4 * count));
+        body.putInt(body.capacity());
+        body.putShort((short) count);
+
+        for (var i = 0; i < count; i++) {
+            body.put((byte) colors[i].getRed()).put((byte) colors[i].getGreen()).put((byte) colors[i].getBlue())
+                    .put((byte) 0);
+        }
+
+        send(device.index(), UPDATE_LEDS, body.array());
+    }
+
     /** Красит режимом «один цвет» — для устройств без перечисленных светодиодов. */
     private void paintMode(Device device, Color color) throws IOException {
         var mode = device.solid();

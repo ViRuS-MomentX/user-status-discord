@@ -292,4 +292,54 @@ class DeviceTest {
         var load = SystemInfo.load();
         assertTrue(load.memoryTotal() > 0);
     }
+
+    @Test
+    void modesPlayFrameByFrameThroughOpenRgb() throws Exception {
+        var got = fakeOpenRgb();
+        var settings = new SignalRgb.Live(() -> 0.5);
+        settings.mode = 3; // радужная волна
+        var animator = new RgbAnimator(settings, text -> { });
+        animator.port = rgbServer.getLocalPort();
+        animator.start("127.0.0.1");
+
+        try {
+            var deadline = System.currentTimeMillis() + 5000;
+
+            while (got.stream().filter(p -> p.id() == OpenRgb.UPDATE_LEDS && p.device() == 1).count() < 5
+                    && System.currentTimeMillis() < deadline) {
+                Thread.sleep(50);
+            }
+        } finally {
+            animator.stop();
+        }
+
+        var frames = got.stream().filter(p -> p.id() == OpenRgb.UPDATE_LEDS && p.device() == 1).toList();
+        assertTrue(frames.size() >= 5, "кадры идут: " + frames.size());
+        assertTrue(got.stream().anyMatch(p -> p.id() == OpenRgb.SET_CUSTOM_MODE && p.device() == 1), "свой режим включён");
+        // 98 светодиодов клавиатуры, и волна правда двигается: соседние кадры разные
+        assertEquals(4 + 2 + 4 * 98, frames.getFirst().body().length);
+        assertFalse(java.util.Arrays.equals(frames.getFirst().body(), frames.getLast().body()), "кадры меняются");
+    }
+
+    @Test
+    void everyModeLights() {
+        for (var mode : SignalRgb.MODES) {
+            var lit = false;
+
+            for (var t = 0.0; t < 3 && !lit; t += 0.1) {
+                for (var color : Glow.frame(mode.id(), t, 30, new Color(0x39FF8A), new Color(0x8A2BE2), 0.3, 100, true, 0)) {
+                    lit |= color.getRed() + color.getGreen() + color.getBlue() > 60;
+                }
+            }
+
+            assertTrue(lit, "режим «" + mode.name() + "» хоть раз светится");
+        }
+
+        // Выключено и яркость — работают в любом режиме
+        for (var color : Glow.frame(2, 1, 10, Color.RED, Color.BLUE, 0, 100, false, 0)) {
+            assertEquals(Color.BLACK, color);
+        }
+
+        assertEquals(new Color(128, 0, 0), Glow.frame(0, 0, 1, Color.RED, Color.BLUE, 0, 50, true, 0)[0]);
+    }
 }

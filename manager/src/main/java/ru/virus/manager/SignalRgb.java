@@ -386,6 +386,10 @@ final class SignalRgb {
             server.start();
         }
 
+        double cpu() {
+            return Math.max(0, cpu.getAsDouble());
+        }
+
         String json() {
             var load = cpu.getAsDouble();
             return "{\"mode\":" + mode + ",\"speed\":" + speed + ",\"color\":\"" + hex(color) + "\",\"color2\":\""

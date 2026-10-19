@@ -113,6 +113,13 @@ final class DevicePage extends Ui.Card {
     private boolean signalLocked;
     private List<String> diskEffects = List.of();
     private JComponent signalArrows;
+    /** Режимы через OpenRGB: V.I.R.U.S. сам считает кадры — бесплатно и для вентиляторов на плате. */
+    private final RgbAnimator animator;
+    private final JLabel animatorStatus = Ui.muted("", 13f);
+    private final JPanel signalOnly = Ui.transparent(null);
+    private final JPanel openRgbOnly = Ui.transparent(null);
+    private JToggleButton viaOpenRgb;
+    private JToggleButton viaSignal;
 
     DevicePage(MatrixBackground background, Path home, Consumer<String> toast, Supplier<String> bridgeApi) {
         super(new BorderLayout(0, 14));
@@ -131,6 +138,11 @@ final class DevicePage extends Ui.Card {
         glow.color = settings.glowColor;
         glow.color2 = settings.glowColor2;
 
+        if ("openrgb".equals(settings.engine)) {
+            glow.on = settings.glowOn;
+            glow.brightness = settings.glowBrightness;
+        }
+
         try {
             // Эффект «VIRUS» в SignalRGB спрашивает настройки здесь — всё время, пока открыт V.I.R.U.S.
             glow.start(SignalRgb.OUR_PORT);
@@ -140,6 +152,7 @@ final class DevicePage extends Ui.Card {
 
         urlFallback = new Timer(700, e -> pushByUrl());
         urlFallback.setRepeats(false);
+        animator = new RgbAnimator(glow, text -> SwingUtilities.invokeLater(() -> animatorStatus.setText(text)));
         setBorder(BorderFactory.createEmptyBorder(20, 22, 20, 22));
         Ui.rippleThrough(this, background);
 
@@ -147,6 +160,11 @@ final class DevicePage extends Ui.Card {
         body.add(overview(), "overview");
         body.add(customization(), "custom");
         add(body, BorderLayout.CENTER);
+
+        if (openRgbEngine()) {
+            // Режим, выбранный в прошлый раз, играет сразу с запуском V.I.R.U.S.
+            animator.start(settings.host);
+        }
 
         live = new Timer(2000, e -> {
             if (isShowing()) {
@@ -422,7 +440,11 @@ final class DevicePage extends Ui.Card {
         statusRow.add(statusButtons, BorderLayout.EAST);
 
         signalOn.onChange(on -> {
-            if (signalLocked) {
+            if (openRgbEngine()) {
+                glow.on = on;
+                settings.glowOn = on;
+                settings.save();
+            } else if (signalLocked) {
                 glow.on = on;
                 glowNudge();
             } else {
@@ -432,7 +454,14 @@ final class DevicePage extends Ui.Card {
         signalBrightness.setOpaque(false);
         signalBrightness.setPreferredSize(new Dimension(170, 28));
         signalBrightness.addChangeListener(e -> {
-            if (signalLocked) {
+            if (openRgbEngine()) {
+                glow.brightness = signalBrightness.getValue();
+                settings.glowBrightness = glow.brightness;
+
+                if (!signalBrightness.getValueIsAdjusting()) {
+                    settings.save();
+                }
+            } else if (signalLocked) {
                 glow.brightness = signalBrightness.getValue();
 
                 if (!signalBrightness.getValueIsAdjusting()) {
@@ -567,7 +596,48 @@ final class DevicePage extends Ui.Card {
 
         var stack = Ui.transparent(null);
         stack.setLayout(new BoxLayout(stack, BoxLayout.Y_AXIS));
-        stack.add(left(statusRow));
+        // Чем играть режимы: OpenRGB (бесплатно, всё что он видит) или SignalRGB
+        viaOpenRgb = new JToggleButton("Через OpenRGB — бесплатно");
+        viaSignal = new JToggleButton("Через SignalRGB");
+        var engines = new ButtonGroup();
+
+        for (var button : List.of(viaOpenRgb, viaSignal)) {
+            button.setFont(Theme.ui.deriveFont(13f));
+            button.setFocusable(false);
+            engines.add(button);
+        }
+
+        viaOpenRgb.setSelected(openRgbEngine());
+        viaSignal.setSelected(!openRgbEngine());
+        viaOpenRgb.addActionListener(e -> useEngine("openrgb"));
+        viaSignal.addActionListener(e -> useEngine("signalrgb"));
+        var engineRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        engineRow.add(viaOpenRgb);
+        engineRow.add(viaSignal);
+
+        var startOpenRgb = Ui.button("Запустить OpenRGB");
+        startOpenRgb.setIcon(Icons.of(Icons.Kind.PLAY, Theme.TEXT));
+        startOpenRgb.addActionListener(e -> launchOpenRgb());
+        var stopAnimation = Ui.ghost("Остановить");
+        stopAnimation.addActionListener(e -> {
+            animator.stop();
+            animatorStatus.setText("Остановлено. Выбери режим — запустится снова.");
+        });
+        openRgbOnly.setLayout(new BorderLayout(10, 0));
+        openRgbOnly.add(animatorStatus, BorderLayout.CENTER);
+        var openRgbButtons = Ui.transparent(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        openRgbButtons.add(stopAnimation);
+        openRgbButtons.add(startOpenRgb);
+        openRgbOnly.add(openRgbButtons, BorderLayout.EAST);
+        animatorStatus.setText(openRgbEngine() ? "Жду OpenRGB…" : "");
+
+        signalOnly.setLayout(new BoxLayout(signalOnly, BoxLayout.Y_AXIS));
+        signalOnly.add(left(statusRow));
+
+        stack.add(left(engineRow));
+        stack.add(Box.createVerticalStrut(12));
+        stack.add(left(openRgbOnly));
+        stack.add(left(signalOnly));
         stack.add(Box.createVerticalStrut(12));
         stack.add(left(powerRow));
         stack.add(Box.createVerticalStrut(14));
@@ -576,13 +646,14 @@ final class DevicePage extends Ui.Card {
         stack.add(left(modeTiles));
         stack.add(Box.createVerticalStrut(10));
         stack.add(left(colorRow));
-        stack.add(Box.createVerticalStrut(16));
-        stack.add(left(effectsHead));
-        stack.add(Box.createVerticalStrut(6));
-        stack.add(left(effectsScroll));
+        signalOnly.add(Box.createVerticalStrut(16));
+        signalOnly.add(left(effectsHead));
+        signalOnly.add(Box.createVerticalStrut(6));
+        signalOnly.add(left(effectsScroll));
+        showEngine();
 
         worker.submit(this::installEffect);
-        return inner("Подсветка через SignalRGB", stack);
+        return inner("Режимы подсветки V.I.R.U.S.", stack);
     }
 
     /** Положить эффект «VIRUS» в SignalRGB. @return true — положили только что */
@@ -732,6 +803,11 @@ final class DevicePage extends Ui.Card {
         glow.mode = mode.id();
         glowChanged();
 
+        if (openRgbEngine()) {
+            animator.start(settings.host);
+            return;
+        }
+
         if (signalLocked) {
             // Без API: включить VIRUS ссылкой, если он сейчас не играет (а если играет — сам подхватит)
             if (!glow.heard()) {
@@ -796,9 +872,75 @@ final class DevicePage extends Ui.Card {
         }
     }
 
+    /** Один цвет кнопками OpenRGB — режим остановить, иначе он закрасит этот цвет со следующего кадра. */
+    private void stopAnimation() {
+        if (animator.running()) {
+            animator.stop();
+            animatorStatus.setText("Режим остановлен: покрашено одним цветом. Выбери режим — запустится снова.");
+        }
+    }
+
+    private boolean openRgbEngine() {
+        return "openrgb".equals(settings.engine);
+    }
+
+    private void useEngine(String engine) {
+        settings.engine = engine;
+        settings.save();
+
+        if (openRgbEngine()) {
+            var answer = javax.swing.JOptionPane.showConfirmDialog(this,
+                    "Закрыть SignalRGB? Пока он открыт, он перебивает цвета OpenRGB и подсветка мигает.",
+                    "Режимы через OpenRGB", javax.swing.JOptionPane.YES_NO_OPTION);
+
+            if (answer == javax.swing.JOptionPane.YES_OPTION) {
+                worker.submit(() -> {
+                    try {
+                        new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                                "Get-Process | Where-Object { $_.ProcessName -like 'SignalRgb*' } | Stop-Process -Force")
+                                .start().waitFor(15, java.util.concurrent.TimeUnit.SECONDS);
+                    } catch (Exception ignored) {
+                        // не закрылся — пусть закроет сам
+                    }
+                });
+            }
+
+            glow.on = settings.glowOn;
+            glow.brightness = settings.glowBrightness;
+            animator.start(settings.host);
+        } else {
+            animator.stop();
+            glow.on = true;
+            glow.brightness = 100;
+            connectSignal(false);
+        }
+
+        showEngine();
+    }
+
+    private void showEngine() {
+        var open = openRgbEngine();
+        openRgbOnly.setVisible(open);
+        signalOnly.setVisible(!open);
+
+        if (signalArrows != null) {
+            signalArrows.setVisible(!open && !signalLocked);
+        }
+
+        if (open) {
+            signalQuiet = true;
+            signalOn.setOn(glow.on);
+            signalBrightness.setValue(glow.brightness);
+            signalQuiet = false;
+        }
+
+        revalidate();
+        repaint();
+    }
+
     private void pushByUrl() {
         // Эффект спрашивает V.I.R.U.S. сам — ссылка не нужна (и SignalRGB лишний раз не дёргаем)
-        if (glow.heard() || !SystemInfo.isWindows()) {
+        if (openRgbEngine() || glow.heard() || !SystemInfo.isWindows()) {
             return;
         }
 
@@ -1110,7 +1252,10 @@ final class DevicePage extends Ui.Card {
             });
             checkServers();
             checkApps();
-            connectSignal(false);
+
+            if (!openRgbEngine()) {
+                connectSignal(false);
+            }
         }
     }
 
@@ -1441,6 +1586,7 @@ final class DevicePage extends Ui.Card {
     }
 
     private void paintAll(Color color) {
+        stopAnimation();
         if (devices.isEmpty()) {
             // Ещё не подключались — подключимся и покрасим разом
             worker.submit(() -> {
@@ -1467,6 +1613,7 @@ final class DevicePage extends Ui.Card {
     }
 
     private void paint(List<OpenRgb.Device> which, Color color) {
+        stopAnimation();
         worker.submit(() -> {
             try (var rgb = new OpenRgb(settings.host, OpenRgb.PORT)) {
                 var painted = paintEach(rgb, which, color);
@@ -1596,7 +1743,8 @@ final class DevicePage extends Ui.Card {
     static void applyOnStart(Path home) {
         var saved = Settings.load(home.resolve("device.json"));
 
-        if (!saved.applyOnStart) {
+        // Режим через OpenRGB запускает сама страница «Устройство» — один цвет поверх не нужен
+        if (!saved.applyOnStart || "openrgb".equals(saved.engine)) {
             return;
         }
 
@@ -1660,6 +1808,10 @@ final class DevicePage extends Ui.Card {
         int brightness = 100;
         boolean applyOnStart;
         int glowMode = 3;
+        /** Чем играть режимы: «openrgb» или «signalrgb». */
+        String engine = "openrgb";
+        int glowBrightness = 100;
+        boolean glowOn = true;
         int glowSpeed = 50;
         Color glowColor = Theme.ACCENT;
         Color glowColor2 = new Color(0x8A2BE2);
@@ -1678,6 +1830,9 @@ final class DevicePage extends Ui.Card {
                     settings.brightness = json.get("brightness") instanceof Number n ? n.intValue() : 100;
                     settings.applyOnStart = Boolean.TRUE.equals(json.get("applyOnStart"));
                     settings.glowMode = json.get("glowMode") instanceof Number n ? n.intValue() : 3;
+                    settings.engine = String.valueOf(json.getOrDefault("engine", "openrgb"));
+                    settings.glowBrightness = json.get("glowBrightness") instanceof Number n ? n.intValue() : 100;
+                    settings.glowOn = !Boolean.FALSE.equals(json.get("glowOn"));
                     settings.glowSpeed = json.get("glowSpeed") instanceof Number n ? n.intValue() : 50;
                     settings.glowColor = Color.decode(String.valueOf(json.getOrDefault("glowColor", "#39FF8A")));
                     settings.glowColor2 = Color.decode(String.valueOf(json.getOrDefault("glowColor2", "#8A2BE2")));
@@ -1701,6 +1856,9 @@ final class DevicePage extends Ui.Card {
             json.put("brightness", brightness);
             json.put("applyOnStart", applyOnStart);
             json.put("glowMode", glowMode);
+            json.put("engine", engine);
+            json.put("glowBrightness", glowBrightness);
+            json.put("glowOn", glowOn);
             json.put("glowSpeed", glowSpeed);
             json.put("glowColor", SignalRgb.hex(glowColor));
             json.put("glowColor2", SignalRgb.hex(glowColor2));

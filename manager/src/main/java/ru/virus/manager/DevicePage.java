@@ -85,6 +85,9 @@ final class DevicePage extends Ui.Card {
     private final JSlider brightness = new JSlider(0, 100, 100);
     private final Ui.Switch onStart = new Ui.Switch(false);
     private final JPanel vendorRows = Ui.transparent(null);
+    private final JPanel litRows = new Ui.FitWidth();
+    private final JLabel litStatus = Ui.muted("Нажми «Найти», чтобы увидеть, кто чем красится.", 12.5f);
+    private List<LightScan.Device> lit = List.of();
     private List<OpenRgb.Device> devices = List.of();
 
     DevicePage(MatrixBackground background, Path home, Consumer<String> toast, Supplier<String> bridgeApi) {
@@ -331,8 +334,135 @@ final class DevicePage extends Ui.Card {
 
         var page = Ui.transparent(new BorderLayout(0, 14));
         page.add(rgb, BorderLayout.CENTER);
-        page.add(vendors, BorderLayout.SOUTH);
+        var bottom = Ui.transparent(new BorderLayout(0, 14));
+        bottom.add(lighting(), BorderLayout.CENTER);
+        bottom.add(vendors, BorderLayout.SOUTH);
+        page.add(bottom, BorderLayout.SOUTH);
         return page;
+    }
+
+    /**
+     * Все подключённые устройства с подсветкой и кто их может красить:
+     * Windows сама («Динамическое освещение»), OpenRGB или только родная программа.
+     */
+    private JComponent lighting() {
+        var find = Ui.button("Найти");
+        find.setIcon(Icons.of(Icons.Kind.RESTART, Theme.TEXT));
+        find.addActionListener(e -> scanLights(find));
+        var windows = Ui.button("Динамическое освещение Windows");
+        windows.addActionListener(e -> openDynamicLighting());
+        var copy = Ui.ghost("Скопировать список");
+        copy.setToolTipText("Скопировать названия и VID:PID — чтобы прислать их разработчику");
+        copy.addActionListener(e -> copyLights());
+
+        // Статус — отдельной строкой под кнопками: рядом с ними длинный текст обрезался
+        var top = Ui.transparent(new BorderLayout(0, 8));
+        var buttons = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        buttons.add(find);
+        buttons.add(windows);
+        buttons.add(copy);
+        top.add(buttons, BorderLayout.NORTH);
+        top.add(litStatus, BorderLayout.SOUTH);
+
+        litRows.setLayout(new BoxLayout(litRows, BoxLayout.Y_AXIS));
+        var scroll = new JScrollPane(litRows);
+        scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setBorder(null);
+        scroll.setOpaque(false);
+        scroll.getViewport().setOpaque(false);
+        scroll.setPreferredSize(new Dimension(10, 110));
+
+        var body = Ui.transparent(new BorderLayout(0, 8));
+        body.add(top, BorderLayout.NORTH);
+        body.add(scroll, BorderLayout.CENTER);
+        return inner("Все устройства с подсветкой", body);
+    }
+
+    private void scanLights(JButton find) {
+        find.setEnabled(false);
+        litStatus.setForeground(Theme.MUTED);
+        litStatus.setText("Ищу устройства…");
+
+        worker.submit(() -> {
+            List<LightScan.Device> found;
+            String error = null;
+
+            try {
+                found = SystemInfo.isWindows() ? LightScan.scan() : List.of();
+            } catch (Exception e) {
+                found = List.of();
+                error = e.getMessage();
+            }
+
+            var result = found;
+            var problem = error;
+            SwingUtilities.invokeLater(() -> {
+                find.setEnabled(true);
+                showLights(result, problem);
+            });
+        });
+    }
+
+    private void showLights(List<LightScan.Device> found, String error) {
+        lit = found;
+        litRows.removeAll();
+        var lamps = found.stream().filter(LightScan.Device::lamps).count();
+
+        if (error != null) {
+            litStatus.setForeground(Theme.ERROR);
+            litStatus.setText("Не получилось: " + error);
+        } else {
+            litStatus.setForeground(lamps > 0 ? Theme.ACCENT : Theme.MUTED);
+            litStatus.setText(lamps > 0
+                    ? "Windows сама красит устройств: " + lamps + " — открой «Динамическое освещение»."
+                    : "Устройств USB: " + found.size() + ". «Динамическое освещение» Windows их не поддерживает.");
+        }
+
+        for (var device : found) {
+            var row = Ui.transparent(new BorderLayout(10, 0));
+            row.setBorder(BorderFactory.createEmptyBorder(5, 2, 5, 2));
+            row.setAlignmentX(LEFT_ALIGNMENT);
+            row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+            var name = Ui.label(device.name(), Theme.ui.deriveFont(device.likelyLit() ? Font.BOLD : Font.PLAIN, 13f),
+                    device.likelyLit() ? Theme.TEXT : Theme.MUTED);
+            var id = Ui.label(device.id(), Theme.mono.deriveFont(12f), Theme.DIM);
+            id.setPreferredSize(new Dimension(90, 18));
+            row.add(id, BorderLayout.WEST);
+            row.add(name, BorderLayout.CENTER);
+            row.add(Ui.label(device.lamps() ? "Windows красит сама" : "OpenRGB или программа",
+                    Theme.ui.deriveFont(12f), device.lamps() ? Theme.ACCENT : Theme.DIM), BorderLayout.EAST);
+            litRows.add(row);
+        }
+
+        litRows.revalidate();
+        litRows.repaint();
+    }
+
+    /** Параметры → Персонализация → Динамическое освещение. */
+    private void openDynamicLighting() {
+        try {
+            new ProcessBuilder("explorer.exe", "ms-settings:personalization-lighting").start();
+        } catch (IOException e) {
+            toast.accept("Не открылось: " + e.getMessage());
+        }
+    }
+
+    private void copyLights() {
+        if (lit.isEmpty()) {
+            toast.accept("Сначала нажми «Найти».");
+            return;
+        }
+
+        var text = new StringBuilder();
+
+        for (var device : lit) {
+            text.append(device.id()).append("  ").append(device.name())
+                    .append(device.lamps() ? "  [Dynamic Lighting]" : "").append('\n');
+        }
+
+        java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
+                .setContents(new java.awt.datatransfer.StringSelection(text.toString()), null);
+        toast.accept("Список скопирован — пришли его, и я добавлю твои устройства.");
     }
 
     private static JComponent inner(String title, JComponent content) {
@@ -395,9 +525,23 @@ final class DevicePage extends Ui.Card {
         fact("Система", hardware.os());
         fact("Процессор", hardware.cpu());
         fact("Потоков", String.valueOf(hardware.cores()));
-        fact("Видеокарта", hardware.gpu());
+        fact(hardware.gpus().size() > 1 ? "Видеокарты" : "Видеокарта", String.join("\n", hardware.gpus()));
         fact("Мат. плата", hardware.board());
-        fact("Память", SystemInfo.size(hardware.memory()));
+
+        if (!hardware.bios().isBlank()) {
+            fact("BIOS", hardware.bios());
+        }
+
+        fact("Память", SystemInfo.size(hardware.memory())
+                + (hardware.ram().isBlank() ? "" : "\n" + hardware.ram()));
+
+        if (!hardware.drives().isEmpty()) {
+            fact("Накопители", String.join("\n", hardware.drives()));
+        }
+
+        if (!hardware.displays().isEmpty()) {
+            fact(hardware.displays().size() > 1 ? "Мониторы" : "Монитор", String.join("\n", hardware.displays()));
+        }
         facts.revalidate();
         facts.repaint();
     }
@@ -408,10 +552,18 @@ final class DevicePage extends Ui.Card {
         key.setPreferredSize(new Dimension(96, 20));
         key.setVerticalAlignment(JLabel.TOP);
         row.add(key, BorderLayout.WEST);
-        // Длинные названия видеокарт переносим, а не обрезаем
-        row.add(Ui.label("<html><body style='width:260px'>" + ConfigPage.escape(value) + "</body></html>",
-                        Theme.ui.deriveFont(13.5f), Theme.TEXT),
-                BorderLayout.CENTER);
+        // Длинные названия переносим по ширине карточки, а не обрезаем: HTML с
+        // шириной в пикселях ломался при масштабе Windows 125–150%
+        var text = new javax.swing.JTextArea(value);
+        text.setLineWrap(true);
+        text.setWrapStyleWord(true);
+        text.setEditable(false);
+        text.setFocusable(false);
+        text.setOpaque(false);
+        text.setBorder(null);
+        text.setFont(Theme.ui.deriveFont(13.5f));
+        text.setForeground(Theme.TEXT);
+        row.add(text, BorderLayout.CENTER);
         row.setBorder(BorderFactory.createEmptyBorder(0, 0, 9, 0));
         row.setAlignmentX(LEFT_ALIGNMENT);
         facts.add(row);
@@ -673,8 +825,9 @@ final class DevicePage extends Ui.Card {
                 + "3. Вентиляторы, подключённые к ARGB-разъёму платы (часто так подключают JONSBO), — это зона "
                 + "«MSI Mystic Light»: выбери её в OpenRGB, нажми <b>Resize</b> и укажи число светодиодов, затем "
                 + "сохрани профиль.<br>"
-                + "4. Устройства, которых OpenRGB не знает (возможно, Attack Shark X98), красятся только "
-                + "программой производителя — она ниже.</body></html>", 12.5f);
+                + "4. Устройства, которых OpenRGB не знает (возможно, Attack Shark X98), смотри в «Все "
+                + "устройства с подсветкой» ниже: если там написано «Windows красит сама» — цвет ставится в "
+                + "«Динамическом освещении» Windows, иначе — программой производителя.</body></html>", 12.5f);
         hint.setBorder(BorderFactory.createEmptyBorder(12, 2, 4, 2));
         hint.setAlignmentX(LEFT_ALIGNMENT);
         rgbDevices.add(hint);

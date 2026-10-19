@@ -22,8 +22,15 @@ final class SystemInfo {
     record Disk(String name, long total, long free) {
     }
 
+    /**
+     * @param gpus     видеокарты, каждая отдельно и с объёмом памяти
+     * @param ram      планки: «2 × 16 ГБ DDR5 6000 МГц»; пусто — неизвестно
+     * @param drives   накопители: «Samsung 990 PRO 2 ТБ · NVMe SSD»
+     * @param displays мониторы: «2560 × 1440 · 165 Гц»
+     */
     record Hardware(String computer, String model, String os, String cpu, int cores,
-                    String gpu, String board, long memory) {
+                    List<String> gpus, String board, long memory, String ram, List<String> drives,
+                    String bios, List<String> displays) {
     }
 
     /** Нагрузка сейчас: процессор 0..1 (или −1, если неизвестно) и память. */
@@ -42,17 +49,24 @@ final class SystemInfo {
         if (isWindows()) {
             var wmi = wmi();
 
+            var gpus = gpus(wmi.get("gpus"));
+
             return new Hardware(computer,
                     join(wmi.get("maker"), wmi.get("model")),
                     or(wmi.get("os"), os),
                     or(wmi.get("cpu"), "неизвестен") ,
                     cores,
-                    or(wmi.get("gpu"), "неизвестна"),
+                    gpus.isEmpty() ? List.of("неизвестна") : gpus,
                     or(join(wmi.get("boardMaker"), wmi.get("board")), "неизвестна"),
-                    memory);
+                    memory,
+                    ram(wmi.get("ram")),
+                    drives(wmi.get("drives")),
+                    or(wmi.get("bios"), ""),
+                    displays());
         }
 
-        return new Hardware(computer, linuxModel(), os, linuxCpu(), cores, "—", "—", memory);
+        return new Hardware(computer, linuxModel(), os, linuxCpu(), cores, List.of("—"), "—", memory, "",
+                List.of(), "", displays());
     }
 
     static Load load() {
@@ -100,10 +114,22 @@ final class SystemInfo {
         var script = "[Console]::OutputEncoding=[Text.Encoding]::UTF8;"
                 + "$c=Get-CimInstance Win32_ComputerSystem;"
                 + "$p=Get-CimInstance Win32_Processor|Select-Object -First 1;"
-                + "$g=(Get-CimInstance Win32_VideoController|ForEach-Object{$_.Name}) -join '; ';"
+                // Объём видеопамяти WMI врёт для карт больше 4 ГБ — честное число лежит в реестре драйвера
+                + "$vr=@(Get-ItemProperty 'HKLM:\\SYSTEM\\ControlSet001\\Control\\Class\\"
+                + "{4d36e968-e325-11ce-bfc1-08002be10318}\\0*' -ErrorAction SilentlyContinue|Where-Object{$_.DriverDesc});"
+                + "$g=@(Get-CimInstance Win32_VideoController|ForEach-Object{$n=$_.Name;"
+                + "$r=$vr|Where-Object{$_.DriverDesc -eq $n}|Select-Object -First 1;"
+                + "$q=0;if($r){$q=[int64]$r.'HardwareInformation.qwMemorySize'};"
+                + "if(-not $q){$q=[int64]$_.AdapterRAM};[pscustomobject]@{name=$n;memory=$q}});"
+                + "$m=@(Get-CimInstance Win32_PhysicalMemory|ForEach-Object{[pscustomobject]@{size=[int64]$_.Capacity;"
+                + "speed=$_.ConfiguredClockSpeed;type=$_.SMBIOSMemoryType}});"
+                + "$d=@();try{$d=@(Get-PhysicalDisk|ForEach-Object{[pscustomobject]@{name=$_.FriendlyName;"
+                + "size=[int64]$_.Size;media=[string]$_.MediaType;bus=[string]$_.BusType}})}catch{};"
+                + "$bi=Get-CimInstance Win32_BIOS;"
                 + "$b=Get-CimInstance Win32_BaseBoard;"
                 + "$o=Get-CimInstance Win32_OperatingSystem;"
-                + "[pscustomobject]@{maker=$c.Manufacturer;model=$c.Model;cpu=$p.Name.Trim();gpu=$g;"
+                + "[pscustomobject]@{maker=$c.Manufacturer;model=$c.Model;cpu=$p.Name.Trim();gpus=$g;ram=$m;drives=$d;"
+                + "bios=($bi.Manufacturer+' '+$bi.SMBIOSBIOSVersion);"
                 + "boardMaker=$b.Manufacturer;board=$b.Product;os=($o.Caption+' '+$o.Version)}"
                 + "|ConvertTo-Json -Compress";
 
@@ -124,6 +150,121 @@ final class SystemInfo {
         } catch (Exception e) {
             return Map.of();
         }
+    }
+
+    /** PowerShell отдаёт одиночный элемент то списком, то объектом — приводим к списку. */
+    private static List<Map<?, ?>> items(Object value) {
+        var list = new ArrayList<Map<?, ?>>();
+
+        if (value instanceof Map<?, ?> map) {
+            list.add(map);
+        } else if (value instanceof List<?> many) {
+            for (var item : many) {
+                if (item instanceof Map<?, ?> map) {
+                    list.add(map);
+                }
+            }
+        }
+
+        return list;
+    }
+
+    private static long number(Object value) {
+        if (value instanceof Number n) {
+            return n.longValue();
+        }
+
+        try {
+            return value == null ? 0 : Long.parseLong(String.valueOf(value).strip());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    static List<String> gpus(Object value) {
+        var result = new ArrayList<String>();
+
+        for (var gpu : items(value)) {
+            var name = or(gpu.get("name"), "");
+            var memory = number(gpu.get("memory"));
+
+            if (!name.isEmpty()) {
+                // Встроенная графика берёт память у системы — её объём ни о чём не говорит
+                result.add(memory >= 1L << 30 && !name.contains("(TM) Graphics")
+                        ? name + " · " + size(memory) : name);
+            }
+        }
+
+        return result;
+    }
+
+    /** «2 × 16 ГБ DDR5 6000 МГц»; разные планки — через запятую. */
+    static String ram(Object value) {
+        var groups = new java.util.LinkedHashMap<String, Integer>();
+
+        for (var stick : items(value)) {
+            var size = number(stick.get("size"));
+
+            if (size <= 0) {
+                continue;
+            }
+
+            var type = switch ((int) number(stick.get("type"))) {
+                case 20 -> " DDR";
+                case 21 -> " DDR2";
+                case 24 -> " DDR3";
+                case 26 -> " DDR4";
+                case 34 -> " DDR5";
+                case 35 -> " LPDDR5";
+                default -> "";
+            };
+            var speed = number(stick.get("speed"));
+            groups.merge(size(size) + type + (speed > 0 ? " " + speed + " МГц" : ""), 1, Integer::sum);
+        }
+
+        var parts = new ArrayList<String>();
+        groups.forEach((what, count) -> parts.add(count > 1 ? count + " × " + what : what));
+        return String.join(", ", parts);
+    }
+
+    static List<String> drives(Object value) {
+        var result = new ArrayList<String>();
+
+        for (var drive : items(value)) {
+            var name = or(drive.get("name"), "");
+
+            if (name.isEmpty()) {
+                continue;
+            }
+
+            var media = or(drive.get("media"), "");
+            var bus = or(drive.get("bus"), "");
+            var kind = bus.equalsIgnoreCase("NVMe") ? "NVMe SSD"
+                    : media.equalsIgnoreCase("SSD") ? "SSD"
+                    : media.equalsIgnoreCase("HDD") ? "HDD"
+                    : bus.equalsIgnoreCase("USB") ? "USB" : "";
+            var size = number(drive.get("size"));
+            result.add(name + (size > 0 ? " · " + size(size) : "") + (kind.isEmpty() ? "" : " · " + kind));
+        }
+
+        return result;
+    }
+
+    /** Мониторы — их Java знает сама: разрешение и частота. */
+    static List<String> displays() {
+        var result = new ArrayList<String>();
+
+        try {
+            for (var screen : java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices()) {
+                var mode = screen.getDisplayMode();
+                result.add(mode.getWidth() + " × " + mode.getHeight()
+                        + (mode.getRefreshRate() > 0 ? " · " + mode.getRefreshRate() + " Гц" : ""));
+            }
+        } catch (java.awt.HeadlessException | Error ignored) {
+            // без экрана — без мониторов
+        }
+
+        return result;
     }
 
     private static String linuxCpu() {

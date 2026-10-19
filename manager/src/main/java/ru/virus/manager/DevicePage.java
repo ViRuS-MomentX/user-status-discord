@@ -790,7 +790,7 @@ final class DevicePage extends Ui.Card {
         }
 
         try {
-            new ProcessBuilder("explorer.exe", url).start();
+            SignalRgb.open(url);
         } catch (IOException e) {
             toast.accept("SignalRGB не открылся: " + e.getMessage());
         }
@@ -803,7 +803,7 @@ final class DevicePage extends Ui.Card {
         }
 
         try {
-            new ProcessBuilder("explorer.exe", SignalRgb.applyUrl(glow)).start();
+            SignalRgb.open(SignalRgb.applyUrl(glow));
         } catch (IOException ignored) {
             // нет SignalRGB — сообщит «Подключиться»
         }

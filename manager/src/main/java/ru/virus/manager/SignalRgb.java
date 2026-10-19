@@ -185,6 +185,49 @@ final class SignalRgb {
     }
 
     /**
+     * Отдать ссылку SignalRGB. Через его лаунчер с --url — так советует сама
+     * SignalRGB, и так не нужен разбор ссылки Проводником (explorer.exe с
+     * «?» и «&» в ссылке открывал вместо этого папку «Документы»).
+     */
+    static void open(String url) throws IOException {
+        var launcher = launcher();
+
+        if (launcher != null) {
+            new ProcessBuilder(launcher.toString(), "--url=" + url.substring("signalrgb://".length())).start();
+            return;
+        }
+
+        // Нет лаунчера — пусть Windows откроет ссылку, как по клику в браузере
+        try {
+            java.awt.Desktop.getDesktop().browse(URI.create(url));
+        } catch (RuntimeException e) {
+            new ProcessBuilder("rundll32.exe", "url.dll,FileProtocolHandler", url).start();
+        }
+    }
+
+    /** SignalRgbLauncher.exe: обычно %LOCALAPPDATA%\VortxEngine. */
+    static Path launcher() {
+        var local = System.getenv("LOCALAPPDATA");
+
+        if (local == null) {
+            return null;
+        }
+
+        var direct = Path.of(local, "VortxEngine", "SignalRgbLauncher.exe");
+
+        if (Files.isRegularFile(direct)) {
+            return direct;
+        }
+
+        try (var files = Files.find(Path.of(local, "VortxEngine"), 3,
+                (path, attributes) -> path.getFileName().toString().equalsIgnoreCase("SignalRgbLauncher.exe"))) {
+            return files.findFirst().orElse(null);
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    /**
      * Эффекты SignalRGB, которые лежат на диске: без API их список больше
      * взять неоткуда. Имя эффекта — его &lt;title&gt;, по нему и включаем.
      */

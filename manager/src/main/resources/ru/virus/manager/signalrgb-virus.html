@@ -1,0 +1,227 @@
+<head>
+	<title>VIRUS</title>
+	<meta description="Режимы подсветки V.I.R.U.S.: режим, цвета и скорость меняются из приложения V.I.R.U.S. без открытия SignalRGB." />
+	<meta publisher="V.I.R.U.S." />
+	<meta property="mode" label="Режим (0-11)" type="number" min="0" max="11" default="3">
+	<meta property="speed" label="Скорость" type="number" min="1" max="100" default="50">
+	<meta property="color" label="Цвет" type="color" default="#39ff8a" min="0" max="360" />
+	<meta property="color2" label="Второй цвет" type="color" default="#8a2be2" min="0" max="360" />
+</head>
+
+<body style="margin: 0; padding: 0; background: #000;">
+	<canvas id="exCanvas" width="320" height="200"></canvas>
+</body>
+
+<script>
+	// Режимы: 0 статичный, 1 дыхание, 2 радуга, 3 радужная волна, 4 переливы двух цветов,
+	// 5 матрица, 6 огонь, 7 полиция, 8 северное сияние, 9 пульс, 10 нагрузка процессора, 11 звёзды.
+	// V.I.R.U.S. отдаёт настройки на http://127.0.0.1:16039/state — если он запущен, берём их
+	// оттуда; если нет — работают настройки самого эффекта в SignalRGB.
+	var c = document.getElementById("exCanvas");
+	var ctx = c.getContext("2d");
+	var W = 320, H = 200;
+	var live = null;
+	var lastLive = 0;
+	var t = 0;
+	var last = Date.now();
+	var drops = [];
+	var stars = [];
+	var heat = [];
+
+	function poll() {
+		try {
+			var xhr = new XMLHttpRequest();
+			xhr.open("GET", "http://127.0.0.1:16039/state", true);
+			xhr.timeout = 400;
+			xhr.onload = function () {
+				try {
+					live = JSON.parse(xhr.responseText);
+					lastLive = Date.now();
+				} catch (e) { }
+			};
+			xhr.send();
+		} catch (e) { }
+	}
+	setInterval(poll, 250);
+	poll();
+
+	function settings() {
+		if (live && Date.now() - lastLive < 3000) {
+			return live;
+		}
+		// Свойства эффекта SignalRGB задаёт глобальными переменными; до этого — умолчания
+		return {
+			mode: typeof mode === "undefined" ? 3 : Number(mode),
+			speed: typeof speed === "undefined" ? 50 : Number(speed),
+			color: typeof color === "undefined" ? "#39ff8a" : color,
+			color2: typeof color2 === "undefined" ? "#8a2be2" : color2,
+			cpu: 0
+		};
+	}
+
+	function rgb(hex) {
+		hex = String(hex || "#000000").replace("#", "");
+		if (hex.length == 3) {
+			hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+		}
+		var n = parseInt(hex, 16) || 0;
+		return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+	}
+
+	function css(a, k) {
+		k = k === undefined ? 1 : k;
+		return "rgb(" + Math.round(a[0] * k) + "," + Math.round(a[1] * k) + "," + Math.round(a[2] * k) + ")";
+	}
+
+	function mix(a, b, k) {
+		return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+	}
+
+	function fill(style) {
+		ctx.fillStyle = style;
+		ctx.fillRect(0, 0, W, H);
+	}
+
+	function update() {
+		try {
+			draw();
+		} catch (e) {
+			// один сбойный кадр не должен останавливать подсветку
+		}
+		window.requestAnimationFrame(update);
+	}
+
+	function draw() {
+		var now = Date.now();
+		var s = settings();
+		var pace = Math.max(1, Math.min(100, Number(s.speed) || 50)) / 50;
+		t += (now - last) / 1000 * pace;
+		last = now;
+		var a = rgb(s.color);
+		var b = rgb(s.color2);
+
+		switch (Number(s.mode) || 0) {
+			case 0:
+				fill(css(a));
+				break;
+			case 1:
+				fill(css(a, 0.08 + 0.92 * (0.5 - 0.5 * Math.cos(t * 2))));
+				break;
+			case 2:
+				fill("hsl(" + ((t * 40) % 360) + ",100%,50%)");
+				break;
+			case 3:
+				for (var x = 0; x < W; x += 4) {
+					ctx.fillStyle = "hsl(" + ((x * 1.2 + t * 90) % 360) + ",100%,50%)";
+					ctx.fillRect(x, 0, 4, H);
+				}
+				break;
+			case 4:
+				for (var x2 = 0; x2 < W; x2 += 4) {
+					var k = 0.5 + 0.5 * Math.sin(x2 / 40 + t * 2);
+					ctx.fillStyle = css(mix(a, b, k));
+					ctx.fillRect(x2, 0, 4, H);
+				}
+				break;
+			case 5:
+				matrix(a);
+				break;
+			case 6:
+				fire();
+				break;
+			case 7:
+				var phase = Math.floor(t * 4) % 4;
+				fill("#000");
+				ctx.fillStyle = phase < 2 ? (phase == 0 ? "#ff0000" : "#000") : "#000";
+				ctx.fillRect(0, 0, W / 2, H);
+				ctx.fillStyle = phase >= 2 ? (phase == 2 ? "#0033ff" : "#000") : "#000";
+				ctx.fillRect(W / 2, 0, W / 2, H);
+				break;
+			case 8:
+				for (var x3 = 0; x3 < W; x3 += 4) {
+					var w = 0.5 + 0.5 * Math.sin(x3 / 30 + t) * Math.sin(x3 / 53 - t * 0.7);
+					ctx.fillStyle = css(mix([0, 255, 140], [140, 40, 255], w), 0.35 + 0.65 * Math.abs(Math.sin(x3 / 70 + t * 0.5)));
+					ctx.fillRect(x3, 0, 4, H);
+				}
+				break;
+			case 9:
+				var beat = t % 1.6;
+				var level = Math.max(Math.exp(-Math.pow((beat - 0.1) * 14, 2)), 0.7 * Math.exp(-Math.pow((beat - 0.42) * 14, 2)));
+				fill(css(a, 0.05 + 0.95 * level));
+				break;
+			case 10:
+				var cpu = Math.max(0, Math.min(1, Number(s.cpu) || 0));
+				fill(css(cpu < 0.5 ? mix([0, 255, 80], [255, 210, 0], cpu * 2) : mix([255, 210, 0], [255, 0, 0], (cpu - 0.5) * 2)));
+				break;
+			case 11:
+				twinkle(a, b);
+				break;
+			default:
+				fill(css(a));
+		}
+	}
+
+	function matrix(a) {
+		ctx.fillStyle = "rgba(0,0,0,0.18)";
+		ctx.fillRect(0, 0, W, H);
+		if (drops.length == 0) {
+			for (var i = 0; i < 40; i++) {
+				drops.push({ x: i * 8, y: Math.random() * H, v: 40 + Math.random() * 80 });
+			}
+		}
+		for (var j = 0; j < drops.length; j++) {
+			var d = drops[j];
+			d.y += d.v / 60 * Math.max(0.3, Number(settings().speed) / 50 || 1);
+			if (d.y > H + 20) {
+				d.y = -Math.random() * 60;
+			}
+			ctx.fillStyle = css(a);
+			ctx.fillRect(d.x, d.y, 8, 14);
+			ctx.fillStyle = "rgba(255,255,255,0.8)";
+			ctx.fillRect(d.x, d.y + 12, 8, 3);
+		}
+	}
+
+	function fire() {
+		var cols = 80;
+		if (heat.length != cols) {
+			heat = [];
+			for (var i = 0; i < cols; i++) heat.push(0.5);
+		}
+		for (var j = 0; j < cols; j++) {
+			heat[j] = Math.max(0, Math.min(1, heat[j] * 0.9 + Math.random() * 0.25));
+		}
+		for (var x = 0; x < cols; x++) {
+			var h = heat[x];
+			var grad = ctx.createLinearGradient(0, H, 0, H * (1 - h));
+			grad.addColorStop(0, "rgb(255,220,80)");
+			grad.addColorStop(0.4, "rgb(255,90,0)");
+			grad.addColorStop(1, "rgb(60,0,0)");
+			ctx.fillStyle = "#000";
+			ctx.fillRect(x * 4, 0, 4, H);
+			ctx.fillStyle = grad;
+			ctx.fillRect(x * 4, H * (1 - h), 4, H * h);
+		}
+	}
+
+	function twinkle(a, b) {
+		fill(css(b, 0.12));
+		if (stars.length == 0) {
+			for (var i = 0; i < 60; i++) {
+				stars.push({ x: Math.random() * W, y: Math.random() * H, p: Math.random() * 6.28 });
+			}
+		}
+		for (var j = 0; j < stars.length; j++) {
+			var st = stars[j];
+			var k = Math.max(0, Math.sin(st.p + t * 2));
+			ctx.fillStyle = css(a, k);
+			ctx.fillRect(st.x - 6, st.y - 6, 12, 12);
+			if (k <= 0.01 && Math.random() < 0.02) {
+				st.x = Math.random() * W;
+				st.y = Math.random() * H;
+			}
+		}
+	}
+
+	window.requestAnimationFrame(update);
+</script>

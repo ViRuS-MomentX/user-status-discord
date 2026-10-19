@@ -1,0 +1,281 @@
+package ru.virus.manager;
+
+import com.sun.net.httpserver.HttpServer;
+
+import java.awt.Color;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * SignalRGB без его окна.
+ *
+ * <p>Два пути. Первый — его локальный API (порт 16038): список эффектов,
+ * включить эффект, яркость, вкл/выкл. Второй — свой эффект «VIRUS» в папке
+ * эффектов SignalRGB: он раз в четверть секунды спрашивает у V.I.R.U.S.
+ * (порт 16039), какой режим, цвета и скорость, — так режимы меняются мгновенно,
+ * без перезапуска эффекта.
+ */
+final class SignalRgb {
+
+    static final int PORT = 16038;
+    static final int OUR_PORT = 16039;
+    static final String EFFECT = "VIRUS";
+
+    record Effect(String id, String name, String apply) {
+    }
+
+    record State(boolean enabled, int brightness, String effectId, String effectName) {
+    }
+
+    /** Режимы эффекта «VIRUS»: номер — как в signalrgb-virus.html. */
+    record Mode(int id, String name, boolean usesColor, boolean usesSecond) {
+    }
+
+    static final List<Mode> MODES = List.of(
+            new Mode(0, "Статичный", true, false),
+            new Mode(1, "Дыхание", true, false),
+            new Mode(2, "Радуга", false, false),
+            new Mode(3, "Радужная волна", false, false),
+            new Mode(4, "Переливы", true, true),
+            new Mode(5, "Матрица", true, false),
+            new Mode(6, "Огонь", false, false),
+            new Mode(7, "Полиция", false, false),
+            new Mode(8, "Северное сияние", false, false),
+            new Mode(9, "Пульс", true, false),
+            new Mode(10, "Нагрузка ЦП", false, false),
+            new Mode(11, "Звёзды", true, true));
+
+    private final HttpClient http = HttpClient.newBuilder()
+            .proxy(HttpClient.Builder.NO_PROXY)
+            .connectTimeout(Duration.ofSeconds(2))
+            .build();
+    private final String base;
+
+    SignalRgb() {
+        this("http://127.0.0.1:" + PORT);
+    }
+
+    SignalRgb(String base) {
+        this.base = base;
+    }
+
+    List<Effect> effects() throws IOException {
+        var data = data(call("GET", "/api/v1/lighting/effects", null));
+        var result = new ArrayList<Effect>();
+
+        if (data instanceof Map<?, ?> map && map.get("items") instanceof List<?> items) {
+            for (var item : items) {
+                if (item instanceof Map<?, ?> effect) {
+                    var id = String.valueOf(effect.get("id"));
+                    var name = effect.get("attributes") instanceof Map<?, ?> attributes && attributes.get("name") != null
+                            ? String.valueOf(attributes.get("name")) : id;
+                    var apply = effect.get("links") instanceof Map<?, ?> links && links.get("apply") != null
+                            ? String.valueOf(links.get("apply")) : "/api/v1/lighting/effects/" + id + "/apply";
+                    result.add(new Effect(id, name, apply));
+                }
+            }
+        }
+
+        result.sort((a, b) -> a.name().compareToIgnoreCase(b.name()));
+        return result;
+    }
+
+    State state() throws IOException {
+        var data = data(call("GET", "/api/v1/lighting", null));
+
+        if (!(data instanceof Map<?, ?> map)) {
+            throw new IOException("SignalRGB ответил непонятно");
+        }
+
+        var attributes = map.get("attributes") instanceof Map<?, ?> a ? a : Map.of();
+        return new State(!Boolean.FALSE.equals(attributes.get("enabled")),
+                attributes.get("global_brightness") instanceof Number n ? n.intValue() : 100,
+                map.get("id") == null ? "" : String.valueOf(map.get("id")),
+                attributes.get("name") == null ? "" : String.valueOf(attributes.get("name")));
+    }
+
+    void apply(Effect effect) throws IOException {
+        call("POST", effect.apply(), null);
+    }
+
+    void brightness(int value) throws IOException {
+        call("PATCH", "/api/v1/lighting/global_brightness", "{\"global_brightness\":" + Math.max(0, Math.min(100, value)) + "}");
+    }
+
+    void enabled(boolean on) throws IOException {
+        call("PATCH", "/api/v1/lighting/enabled", "{\"enabled\":" + on + "}");
+    }
+
+    void next() throws IOException {
+        call("POST", "/api/v1/lighting/next", null);
+    }
+
+    void previous() throws IOException {
+        call("POST", "/api/v1/lighting/previous", null);
+    }
+
+    private String call(String method, String path, String json) throws IOException {
+        var request = HttpRequest.newBuilder(URI.create(path.startsWith("http") ? path : base + path))
+                .timeout(Duration.ofSeconds(5))
+                .header("Content-Type", "application/json")
+                .method(method, json == null ? HttpRequest.BodyPublishers.noBody()
+                        : HttpRequest.BodyPublishers.ofString(json))
+                .build();
+
+        try {
+            var response = http.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+
+            if (response.statusCode() >= 300) {
+                throw new IOException("SignalRGB ответил " + response.statusCode());
+            }
+
+            return response.body();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("прервано", e);
+        } catch (java.net.ConnectException e) {
+            throw new IOException("SignalRGB не запущен", e);
+        }
+    }
+
+    /** Ответы SignalRGB: { status: "ok", data: …, errors: [...] }. */
+    private static Object data(String body) throws IOException {
+        var json = Json.object(body);
+
+        if (json.get("errors") instanceof List<?> errors && !errors.isEmpty()
+                && errors.getFirst() instanceof Map<?, ?> error) {
+            throw new IOException(String.valueOf(error.get("detail") != null ? error.get("detail") : error.get("title")));
+        }
+
+        return json.get("data");
+    }
+
+    // ── эффект «VIRUS» ────────────────────────────────────────────────
+
+    static String effectHtml() throws IOException {
+        try (InputStream in = SignalRgb.class.getResourceAsStream("signalrgb-virus.html")) {
+            if (in == null) {
+                throw new IOException("нет signalrgb-virus.html в сборке");
+            }
+
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    /** Папка эффектов SignalRGB: Документы\WhirlwindFX\Effects (Документы бывают в OneDrive). */
+    static Path effectsFolder() {
+        var home = Path.of(System.getProperty("user.home"));
+
+        for (var documents : List.of(home.resolve("Documents"), home.resolve("OneDrive").resolve("Documents"),
+                home.resolve("OneDrive").resolve("Документы"))) {
+            if (Files.isDirectory(documents.resolve("WhirlwindFX"))) {
+                return documents.resolve("WhirlwindFX").resolve("Effects");
+            }
+        }
+
+        return home.resolve("Documents").resolve("WhirlwindFX").resolve("Effects");
+    }
+
+    /**
+     * Положить эффект в папку SignalRGB, если его там нет или он старый.
+     *
+     * @return true — файл записан заново (SignalRGB увидит его после перезапуска)
+     */
+    static boolean install(Path folder) throws IOException {
+        var file = folder.resolve(EFFECT + ".html");
+        var html = effectHtml();
+
+        if (Files.isRegularFile(file) && Files.readString(file, StandardCharsets.UTF_8).equals(html)) {
+            return false;
+        }
+
+        Files.createDirectories(folder);
+        Files.writeString(file, html, StandardCharsets.UTF_8);
+        return true;
+    }
+
+    /**
+     * Запасной путь, если эффект не может спросить V.I.R.U.S. (SignalRGB
+     * закрыл ему сеть): включить эффект ссылкой SignalRGB сразу с настройками.
+     */
+    static String applyUrl(Live live) {
+        return "signalrgb://effect/apply/" + EFFECT + "?mode=" + live.mode + "&speed=" + live.speed
+                + "&color=" + URLEncoder.encode(hex(live.color), StandardCharsets.UTF_8)
+                + "&color2=" + URLEncoder.encode(hex(live.color2), StandardCharsets.UTF_8)
+                + "&-silentlaunch-";
+    }
+
+    static String hex(Color color) {
+        return String.format("#%02x%02x%02x", color.getRed(), color.getGreen(), color.getBlue());
+    }
+
+    /**
+     * Что сейчас показывать эффекту «VIRUS». Эффект спрашивает раз в
+     * четверть секунды — по времени последнего вопроса видно, жив ли он.
+     */
+    static final class Live implements AutoCloseable {
+        volatile int mode = 3;
+        volatile int speed = 50;
+        volatile Color color = Theme.ACCENT;
+        volatile Color color2 = new Color(0x8A2BE2);
+        volatile long lastAsked;
+        private final java.util.function.DoubleSupplier cpu;
+        private HttpServer server;
+
+        Live(java.util.function.DoubleSupplier cpu) {
+            this.cpu = cpu;
+        }
+
+        void start(int port) throws IOException {
+            server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 0);
+            server.createContext("/state", exchange -> {
+                lastAsked = System.currentTimeMillis();
+                var body = json().getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json");
+                // Эффект — это страница, открытая из файла: без этого заголовка браузер ответ не отдаст
+                exchange.getResponseHeaders().add("Access-Control-Allow-Origin", "*");
+                exchange.sendResponseHeaders(200, body.length);
+
+                try (var out = exchange.getResponseBody()) {
+                    out.write(body);
+                }
+            });
+            server.start();
+        }
+
+        String json() {
+            var load = cpu.getAsDouble();
+            return "{\"mode\":" + mode + ",\"speed\":" + speed + ",\"color\":\"" + hex(color) + "\",\"color2\":\""
+                    + hex(color2) + "\",\"cpu\":" + String.format(java.util.Locale.ROOT, "%.3f", Math.max(0, load)) + "}";
+        }
+
+        boolean heard() {
+            return System.currentTimeMillis() - lastAsked < 3000;
+        }
+
+        @Override
+        public void close() {
+            if (server != null) {
+                server.stop(0);
+            }
+        }
+    }
+
+    static Mode mode(int id) {
+        return MODES.stream().filter(mode -> mode.id() == id).findFirst().orElse(MODES.getFirst());
+    }
+}

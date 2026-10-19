@@ -93,6 +93,23 @@ final class DevicePage extends Ui.Card {
     private List<LightScan.Device> lit = List.of();
     private List<OpenRgb.Device> devices = List.of();
 
+    // SignalRGB
+    private final SignalRgb signal = new SignalRgb();
+    private final SignalRgb.Live glow;
+    private final JLabel signalStatus = Ui.muted("Не подключено.", 13f);
+    private final Ui.Switch signalOn = new Ui.Switch(true);
+    private final JSlider signalBrightness = new JSlider(0, 100, 100);
+    private final JPanel modeTiles = Ui.transparent(new GridLayout(0, 6, 8, 8));
+    private final JPanel effectTiles = new Ui.FitWidth();
+    private final javax.swing.JTextField effectFilter = new javax.swing.JTextField();
+    private final Swatch glowColor = new Swatch(30);
+    private final Swatch glowColor2 = new Swatch(30);
+    private final JSlider glowSpeed = new JSlider(1, 100, 50);
+    private final Timer urlFallback;
+    private List<SignalRgb.Effect> effects = List.of();
+    private String currentEffect = "";
+    private boolean signalQuiet;
+
     DevicePage(MatrixBackground background, Path home, Consumer<String> toast, Supplier<String> bridgeApi) {
         super(new BorderLayout(0, 14));
         // Свои потоки: замер скорости идёт полминуты и не должен держать кнопки процессов
@@ -104,6 +121,21 @@ final class DevicePage extends Ui.Card {
         this.toast = toast;
         this.bridgeApi = bridgeApi;
         this.settings = Settings.load(home.resolve("device.json"));
+        this.glow = new SignalRgb.Live(DevicePage::cpuLoad);
+        glow.mode = settings.glowMode;
+        glow.speed = settings.glowSpeed;
+        glow.color = settings.glowColor;
+        glow.color2 = settings.glowColor2;
+
+        try {
+            // Эффект «VIRUS» в SignalRGB спрашивает настройки здесь — всё время, пока открыт V.I.R.U.S.
+            glow.start(SignalRgb.OUR_PORT);
+        } catch (IOException e) {
+            // порт занят — значит, V.I.R.U.S. уже запущен ещё раз; эффект спросит у того
+        }
+
+        urlFallback = new Timer(700, e -> pushByUrl());
+        urlFallback.setRepeats(false);
         setBorder(BorderFactory.createEmptyBorder(20, 22, 20, 22));
         Ui.rippleThrough(this, background);
 
@@ -340,7 +372,7 @@ final class DevicePage extends Ui.Card {
         var page = new Ui.FitWidth();
         page.setLayout(new BoxLayout(page, BoxLayout.Y_AXIS));
 
-        for (var card : List.of(rgb, apps(), lighting(), vendors)) {
+        for (var card : List.of(signalCard(), rgb, apps(), lighting(), vendors)) {
             card.setAlignmentX(LEFT_ALIGNMENT);
             page.add(card);
             page.add(Box.createVerticalStrut(14));
@@ -353,6 +385,369 @@ final class DevicePage extends Ui.Card {
         scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         scroll.getVerticalScrollBar().setUnitIncrement(22);
         return scroll;
+    }
+
+    private static double cpuLoad() {
+        return java.lang.management.ManagementFactory.getOperatingSystemMXBean()
+                instanceof com.sun.management.OperatingSystemMXBean bean ? bean.getCpuLoad() : 0;
+    }
+
+    /**
+     * SignalRGB без его окна: режимы V.I.R.U.S. (свой эффект «VIRUS»), все
+     * эффекты SignalRGB, яркость и вкл/выкл через его локальный API.
+     */
+    private JComponent signalCard() {
+        var connect = Ui.button("Подключиться");
+        connect.setIcon(Icons.of(Icons.Kind.RESTART, Theme.TEXT));
+        connect.addActionListener(e -> connectSignal(true));
+        var restart = Ui.ghost("Перезапустить SignalRGB");
+        restart.setToolTipText("Нужно один раз после установки эффекта VIRUS — чтобы SignalRGB его увидел");
+        restart.addActionListener(e -> restartSignal());
+        var previous = Ui.ghost("◀");
+        previous.setToolTipText("Предыдущий эффект");
+        previous.addActionListener(e -> signalCall(signal::previous));
+        var next = Ui.ghost("▶");
+        next.setToolTipText("Следующий эффект");
+        next.addActionListener(e -> signalCall(signal::next));
+
+        var statusRow = Ui.transparent(new BorderLayout(10, 0));
+        statusRow.add(signalStatus, BorderLayout.CENTER);
+        var statusButtons = Ui.transparent(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        statusButtons.add(restart);
+        statusButtons.add(connect);
+        statusRow.add(statusButtons, BorderLayout.EAST);
+
+        signalOn.onChange(on -> signalCall(() -> signal.enabled(on)));
+        signalBrightness.setOpaque(false);
+        signalBrightness.setPreferredSize(new Dimension(170, 28));
+        signalBrightness.addChangeListener(e -> {
+            if (!signalBrightness.getValueIsAdjusting() && !signalQuiet) {
+                var value = signalBrightness.getValue();
+                signalCall(() -> signal.brightness(value));
+            }
+        });
+        var powerRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        powerRow.add(signalOn);
+        powerRow.add(Ui.muted("подсветка", 13f));
+        powerRow.add(Box.createHorizontalStrut(12));
+        powerRow.add(Ui.muted("Яркость", 13f));
+        powerRow.add(signalBrightness);
+        powerRow.add(Box.createHorizontalStrut(12));
+        powerRow.add(previous);
+        powerRow.add(next);
+
+        // Режимы V.I.R.U.S.
+        var group = new ButtonGroup();
+
+        for (var mode : SignalRgb.MODES) {
+            var tile = new JToggleButton(mode.name());
+            tile.setFont(Theme.ui.deriveFont(13f));
+            tile.setFocusable(false);
+            tile.setSelected(mode.id() == glow.mode);
+            tile.addActionListener(e -> chooseMode(mode));
+            group.add(tile);
+            modeTiles.add(tile);
+        }
+
+        glowColor.setColor(glow.color);
+        glowColor.setToolTipText("Цвет режима");
+        glowColor.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                var chosen = JColorChooser.showDialog(DevicePage.this, "Цвет", glow.color);
+
+                if (chosen != null) {
+                    glow.color = chosen;
+                    glowColor.setColor(chosen);
+                    glowChanged();
+                }
+            }
+        });
+        glowColor2.setColor(glow.color2);
+        glowColor2.setToolTipText("Второй цвет — для «Переливов» и «Звёзд»");
+        glowColor2.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                var chosen = JColorChooser.showDialog(DevicePage.this, "Второй цвет", glow.color2);
+
+                if (chosen != null) {
+                    glow.color2 = chosen;
+                    glowColor2.setColor(chosen);
+                    glowChanged();
+                }
+            }
+        });
+
+        var presets = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 6, 0));
+
+        for (var preset : PRESETS) {
+            var small = new Swatch(20);
+            small.setColor(preset);
+            small.addMouseListener(new MouseAdapter() {
+                @Override
+                public void mousePressed(MouseEvent e) {
+                    glow.color = preset;
+                    glowColor.setColor(preset);
+                    glowChanged();
+                }
+            });
+            presets.add(small);
+        }
+
+        glowSpeed.setValue(glow.speed);
+        glowSpeed.setOpaque(false);
+        glowSpeed.setPreferredSize(new Dimension(150, 28));
+        glowSpeed.addChangeListener(e -> {
+            glow.speed = glowSpeed.getValue();
+
+            if (!glowSpeed.getValueIsAdjusting()) {
+                glowChanged();
+            }
+        });
+
+        var colorRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        colorRow.add(Ui.muted("Цвет", 13f));
+        colorRow.add(glowColor);
+        colorRow.add(presets);
+        colorRow.add(Ui.muted("Второй", 13f));
+        colorRow.add(glowColor2);
+        colorRow.add(Ui.muted("Скорость", 13f));
+        colorRow.add(glowSpeed);
+
+        // Все эффекты SignalRGB
+        effectTiles.setLayout(new GridLayout(0, 4, 8, 8));
+        effectTiles.add(Ui.muted("Нажми «Подключиться»", 12.5f));
+        effectFilter.putClientProperty("JTextField.placeholderText", "поиск эффекта");
+        effectFilter.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            @Override
+            public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                showEffects();
+            }
+
+            @Override
+            public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                showEffects();
+            }
+
+            @Override
+            public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                showEffects();
+            }
+        });
+        effectFilter.setPreferredSize(new Dimension(220, effectFilter.getPreferredSize().height));
+        var effectsHead = Ui.transparent(new BorderLayout(10, 0));
+        effectsHead.add(Ui.caption("Эффекты SignalRGB"), BorderLayout.WEST);
+        effectsHead.add(effectFilter, BorderLayout.EAST);
+        var effectsScroll = new JScrollPane(effectTiles);
+        effectsScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        effectsScroll.setBorder(null);
+        effectsScroll.setOpaque(false);
+        effectsScroll.getViewport().setOpaque(false);
+        effectsScroll.setPreferredSize(new Dimension(10, 150));
+
+        var stack = Ui.transparent(null);
+        stack.setLayout(new BoxLayout(stack, BoxLayout.Y_AXIS));
+        stack.add(left(statusRow));
+        stack.add(Box.createVerticalStrut(12));
+        stack.add(left(powerRow));
+        stack.add(Box.createVerticalStrut(14));
+        stack.add(left(Ui.caption("Режимы V.I.R.U.S.")));
+        stack.add(Box.createVerticalStrut(6));
+        stack.add(left(modeTiles));
+        stack.add(Box.createVerticalStrut(10));
+        stack.add(left(colorRow));
+        stack.add(Box.createVerticalStrut(16));
+        stack.add(left(effectsHead));
+        stack.add(Box.createVerticalStrut(6));
+        stack.add(left(effectsScroll));
+
+        worker.submit(this::installEffect);
+        return inner("Подсветка через SignalRGB", stack);
+    }
+
+    /** Положить эффект «VIRUS» в SignalRGB. @return true — положили только что */
+    private boolean installEffect() {
+        try {
+            return SystemInfo.isWindows() && SignalRgb.install(SignalRgb.effectsFolder());
+        } catch (IOException e) {
+            SwingUtilities.invokeLater(() -> toast.accept("Эффект VIRUS не записался: " + e.getMessage()));
+            return false;
+        }
+    }
+
+    private void connectSignal(boolean loud) {
+        signalStatus.setForeground(Theme.MUTED);
+        signalStatus.setText("Подключаюсь к SignalRGB…");
+
+        worker.submit(() -> {
+            try {
+                var found = signal.effects();
+                var state = signal.state();
+                SwingUtilities.invokeLater(() -> showSignal(found, state));
+            } catch (IOException e) {
+                SwingUtilities.invokeLater(() -> {
+                    signalStatus.setForeground(Theme.ERROR);
+                    signalStatus.setText(e.getMessage() + ". Запусти его — окно можно свернуть.");
+
+                    if (loud) {
+                        toast.accept("SignalRGB не отвечает — он запущен?");
+                    }
+                });
+            }
+        });
+    }
+
+    private void showSignal(List<SignalRgb.Effect> found, SignalRgb.State state) {
+        effects = found;
+        currentEffect = state.effectId();
+        var name = state.effectName().isBlank()
+                ? found.stream().filter(effect -> effect.id().equals(state.effectId())).map(SignalRgb.Effect::name)
+                        .findFirst().orElse("—")
+                : state.effectName();
+        var hasOurs = found.stream().anyMatch(effect -> effect.name().equals(SignalRgb.EFFECT));
+        signalStatus.setForeground(Theme.ACCENT);
+        signalStatus.setText("SignalRGB подключён. Эффектов: " + found.size() + ". Сейчас: " + name
+                + (hasOurs ? "" : " · эффекта VIRUS пока нет — нажми «Перезапустить SignalRGB»"));
+        signalQuiet = true;
+        signalOn.setOn(state.enabled());
+        signalBrightness.setValue(state.brightness());
+        signalQuiet = false;
+        showEffects();
+    }
+
+    private void showEffects() {
+        effectTiles.removeAll();
+        var filter = effectFilter.getText().strip().toLowerCase(java.util.Locale.ROOT);
+
+        for (var effect : effects) {
+            if (effect.name().equals(SignalRgb.EFFECT) || !filter.isEmpty()
+                    && !effect.name().toLowerCase(java.util.Locale.ROOT).contains(filter)) {
+                continue;
+            }
+
+            var tile = effect.id().equals(currentEffect) ? Ui.primary(effect.name()) : Ui.button(effect.name());
+            tile.setToolTipText(effect.name());
+            tile.addActionListener(e -> applyEffect(effect));
+            effectTiles.add(tile);
+        }
+
+        effectTiles.revalidate();
+        effectTiles.repaint();
+    }
+
+    private void applyEffect(SignalRgb.Effect effect) {
+        worker.submit(() -> {
+            try {
+                signal.apply(effect);
+                var state = signal.state();
+                SwingUtilities.invokeLater(() -> showSignal(effects, state));
+            } catch (IOException e) {
+                SwingUtilities.invokeLater(() -> toast.accept("SignalRGB: " + e.getMessage()));
+            }
+        });
+    }
+
+    private interface SignalAction {
+        void run() throws IOException;
+    }
+
+    private void signalCall(SignalAction action) {
+        if (signalQuiet) {
+            return;
+        }
+
+        worker.submit(() -> {
+            try {
+                action.run();
+                var state = signal.state();
+                SwingUtilities.invokeLater(() -> showSignal(effects, state));
+            } catch (IOException e) {
+                SwingUtilities.invokeLater(() -> toast.accept("SignalRGB: " + e.getMessage()));
+            }
+        });
+    }
+
+    private void chooseMode(SignalRgb.Mode mode) {
+        glow.mode = mode.id();
+        glowChanged();
+
+        // Включить сам эффект VIRUS, если в SignalRGB сейчас другой
+        worker.submit(() -> {
+            try {
+                var state = signal.state();
+                var all = effects.isEmpty() ? signal.effects() : effects;
+                var ours = all.stream().filter(effect -> effect.name().equals(SignalRgb.EFFECT)).findFirst();
+
+                if (ours.isEmpty()) {
+                    var fresh = installEffect();
+                    SwingUtilities.invokeLater(() -> toast.accept(fresh
+                            ? "Эффект VIRUS добавлен в SignalRGB — нажми «Перезапустить SignalRGB», и режимы заработают."
+                            : "SignalRGB ещё не видит эффект VIRUS — нажми «Перезапустить SignalRGB»."));
+                    return;
+                }
+
+                if (!ours.get().id().equals(state.effectId())) {
+                    signal.apply(ours.get());
+                }
+
+                var fresh = signal.state();
+                var list = all;
+                SwingUtilities.invokeLater(() -> showSignal(list, fresh));
+            } catch (IOException e) {
+                SwingUtilities.invokeLater(() -> toast.accept("SignalRGB: " + e.getMessage()));
+            }
+        });
+    }
+
+    /** Режим, цвет или скорость поменялись: эффект подхватит сам, а если не спрашивает — передадим ссылкой. */
+    private void glowChanged() {
+        settings.glowMode = glow.mode;
+        settings.glowSpeed = glow.speed;
+        settings.glowColor = glow.color;
+        settings.glowColor2 = glow.color2;
+        settings.save();
+        urlFallback.restart();
+    }
+
+    private void pushByUrl() {
+        // Эффект спрашивает V.I.R.U.S. сам — ссылка не нужна (и SignalRGB лишний раз не дёргаем)
+        if (glow.heard() || !SystemInfo.isWindows()) {
+            return;
+        }
+
+        try {
+            new ProcessBuilder("explorer.exe", SignalRgb.applyUrl(glow)).start();
+        } catch (IOException ignored) {
+            // нет SignalRGB — сообщит «Подключиться»
+        }
+    }
+
+    /** Закрыть и открыть SignalRGB: новые эффекты он видит только после запуска. */
+    private void restartSignal() {
+        if (!SystemInfo.isWindows()) {
+            return;
+        }
+
+        signalStatus.setForeground(Theme.MUTED);
+        signalStatus.setText("Перезапускаю SignalRGB…");
+        worker.submit(() -> {
+            installEffect();
+
+            try {
+                var script = "Get-Process | Where-Object { $_.ProcessName -like 'SignalRgb*' } | Stop-Process -Force";
+                new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+                        .start().waitFor(15, java.util.concurrent.TimeUnit.SECONDS);
+                Thread.sleep(1500);
+                var app = RgbApps.ALL.stream().filter(a -> a.name().equals("SignalRGB")).findFirst().orElseThrow();
+                RgbApps.open(app, RgbApps.find(app, RgbApps.startApps()));
+                Thread.sleep(15000);
+            } catch (Exception e) {
+                SwingUtilities.invokeLater(() -> toast.accept("SignalRGB не перезапустился: " + e.getMessage()));
+                return;
+            }
+
+            SwingUtilities.invokeLater(() -> connectSignal(false));
+        });
     }
 
     /**
@@ -628,6 +1023,7 @@ final class DevicePage extends Ui.Card {
             });
             checkServers();
             checkApps();
+            connectSignal(false);
         }
     }
 
@@ -1176,6 +1572,10 @@ final class DevicePage extends Ui.Card {
         Color color = Theme.ACCENT;
         int brightness = 100;
         boolean applyOnStart;
+        int glowMode = 3;
+        int glowSpeed = 50;
+        Color glowColor = Theme.ACCENT;
+        Color glowColor2 = new Color(0x8A2BE2);
         final Map<String, String> apps = new LinkedHashMap<>();
 
         static Settings load(Path file) {
@@ -1190,6 +1590,10 @@ final class DevicePage extends Ui.Card {
                     settings.color = Color.decode(String.valueOf(json.getOrDefault("color", "#39FF8A")));
                     settings.brightness = json.get("brightness") instanceof Number n ? n.intValue() : 100;
                     settings.applyOnStart = Boolean.TRUE.equals(json.get("applyOnStart"));
+                    settings.glowMode = json.get("glowMode") instanceof Number n ? n.intValue() : 3;
+                    settings.glowSpeed = json.get("glowSpeed") instanceof Number n ? n.intValue() : 50;
+                    settings.glowColor = Color.decode(String.valueOf(json.getOrDefault("glowColor", "#39FF8A")));
+                    settings.glowColor2 = Color.decode(String.valueOf(json.getOrDefault("glowColor2", "#8A2BE2")));
 
                     if (json.get("apps") instanceof Map<?, ?> apps) {
                         apps.forEach((key, value) -> settings.apps.put(String.valueOf(key), String.valueOf(value)));
@@ -1209,6 +1613,10 @@ final class DevicePage extends Ui.Card {
             json.put("color", String.format("#%02X%02X%02X", color.getRed(), color.getGreen(), color.getBlue()));
             json.put("brightness", brightness);
             json.put("applyOnStart", applyOnStart);
+            json.put("glowMode", glowMode);
+            json.put("glowSpeed", glowSpeed);
+            json.put("glowColor", SignalRgb.hex(glowColor));
+            json.put("glowColor2", SignalRgb.hex(glowColor2));
             json.put("apps", apps);
 
             try {

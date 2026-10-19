@@ -86,6 +86,9 @@ final class DevicePage extends Ui.Card {
     private final Ui.Switch onStart = new Ui.Switch(false);
     private final JPanel vendorRows = Ui.transparent(null);
     private final JPanel litRows = new Ui.FitWidth();
+    private final JPanel appRows = Ui.transparent(null);
+    private Map<String, String> startApps = Map.of();
+    private boolean appsChecked;
     private final JLabel litStatus = Ui.muted("Нажми «Найти», чтобы увидеть, кто чем красится.", 12.5f);
     private List<LightScan.Device> lit = List.of();
     private List<OpenRgb.Device> devices = List.of();
@@ -332,13 +335,130 @@ final class DevicePage extends Ui.Card {
                 + "из OpenRGB — закрой её, если красишь отсюда.", 12.5f), BorderLayout.SOUTH);
         var vendors = inner("Программы производителей", vendorBody);
 
-        var page = Ui.transparent(new BorderLayout(0, 14));
-        page.add(rgb, BorderLayout.CENTER);
-        var bottom = Ui.transparent(new BorderLayout(0, 14));
-        bottom.add(lighting(), BorderLayout.CENTER);
-        bottom.add(vendors, BorderLayout.SOUTH);
-        page.add(bottom, BorderLayout.SOUTH);
-        return page;
+        // Карточек стало много — страница прокручивается, а не сплющивает их
+        devicesScroll.setPreferredSize(new Dimension(10, 200));
+        var page = new Ui.FitWidth();
+        page.setLayout(new BoxLayout(page, BoxLayout.Y_AXIS));
+
+        for (var card : List.of(rgb, apps(), lighting(), vendors)) {
+            card.setAlignmentX(LEFT_ALIGNMENT);
+            page.add(card);
+            page.add(Box.createVerticalStrut(14));
+        }
+
+        var scroll = new JScrollPane(page);
+        scroll.setBorder(null);
+        scroll.setOpaque(false);
+        scroll.getViewport().setOpaque(false);
+        scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.getVerticalScrollBar().setUnitIncrement(22);
+        return scroll;
+    }
+
+    /**
+     * Программы для подсветки и экранов разных фирм: SignalRGB/OpenRGB для
+     * всего сразу, родные MSI и GIGABYTE, AIDA64 и Wallpaper Engine для экранов.
+     */
+    private JComponent apps() {
+        appRows.setLayout(new BoxLayout(appRows, BoxLayout.Y_AXIS));
+        var recheck = Ui.button("Проверить");
+        recheck.setIcon(Icons.of(Icons.Kind.RESTART, Theme.TEXT));
+        recheck.addActionListener(e -> checkApps());
+
+        var top = Ui.transparent(new BorderLayout(10, 0));
+        top.add(Ui.muted("<html><body style='width:560px'>Ставь <b>одну</b> общую программу — SignalRGB или "
+                + "OpenRGB. Две сразу, да ещё с MSI Center, перебивают друг друга, и подсветка мигает. "
+                + "Экраны корпуса: если Windows видит их как мониторы (вкладка «Обзор» → «Мониторы»), на них "
+                + "работают обои из Wallpaper Engine; если нет — датчики выводит AIDA64 (SensorPanel / "
+                + "LCD).</body></html>", 12.5f), BorderLayout.CENTER);
+        var right = Ui.transparent(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        right.add(recheck);
+        top.add(right, BorderLayout.EAST);
+
+        var body = Ui.transparent(new BorderLayout(0, 10));
+        body.add(top, BorderLayout.NORTH);
+        body.add(appRows, BorderLayout.CENTER);
+        showApps();
+        return inner("Программы для подсветки и экранов", body);
+    }
+
+    private void checkApps() {
+        if (!SystemInfo.isWindows()) {
+            appsChecked = true;
+            showApps();
+            return;
+        }
+
+        worker.submit(() -> {
+            var found = RgbApps.startApps();
+            SwingUtilities.invokeLater(() -> {
+                startApps = found;
+                appsChecked = true;
+                showApps();
+            });
+        });
+    }
+
+    private void showApps() {
+        appRows.removeAll();
+
+        for (var app : RgbApps.ALL) {
+            var id = RgbApps.find(app, startApps);
+            var row = Ui.transparent(new BorderLayout(12, 0));
+            row.setBorder(BorderFactory.createEmptyBorder(6, 0, 6, 0));
+            row.setAlignmentX(LEFT_ALIGNMENT);
+
+            var name = Ui.label(app.name(), Theme.ui.deriveFont(Font.BOLD, 14f), Theme.TEXT);
+            name.setPreferredSize(new Dimension(200, 20));
+            var purpose = Ui.muted(app.purpose(), 12.5f);
+            var state = !appsChecked ? Ui.muted("проверяю…", 12f)
+                    : id != null ? Ui.label("✓ установлена", Theme.ui.deriveFont(12f), Theme.ACCENT)
+                    : Ui.label("не установлена", Theme.ui.deriveFont(12f), Theme.DIM);
+            var text = Ui.transparent(new BorderLayout(0, 2));
+            text.add(name, BorderLayout.NORTH);
+            text.add(purpose, BorderLayout.CENTER);
+            text.add(state, BorderLayout.SOUTH);
+            row.add(text, BorderLayout.CENTER);
+
+            var buttons = Ui.transparent(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+
+            if (id == null && app.installable()) {
+                var install = Ui.button("Установить");
+                install.setIcon(Icons.of(Icons.Kind.PLUS, Theme.TEXT));
+                install.addActionListener(e -> {
+                    try {
+                        RgbApps.install(app);
+                        toast.accept("Установка " + app.name() + " — в отдельном окне. Когда закончится, нажми «Проверить».");
+                    } catch (IOException ex) {
+                        toast.accept("Установка не запустилась: " + ex.getMessage());
+                    }
+                });
+                buttons.add(install);
+            } else if (id == null) {
+                var get = Ui.button("Где взять");
+                get.addActionListener(e -> browse(app.page()));
+                buttons.add(get);
+            }
+
+            var open = Ui.button("Открыть");
+            open.setIcon(Icons.of(Icons.Kind.PLAY, Theme.TEXT));
+            open.setEnabled(id != null || !app.launch().isEmpty());
+            open.addActionListener(e -> {
+                try {
+                    RgbApps.open(app, id);
+                } catch (IOException ex) {
+                    toast.accept("Не открылось: " + ex.getMessage());
+                }
+            });
+            buttons.add(open);
+            var buttonsBox = Ui.transparent(new BorderLayout());
+            buttonsBox.add(buttons, BorderLayout.CENTER);
+            row.add(buttonsBox, BorderLayout.EAST);
+            appRows.add(row);
+        }
+
+        appRows.revalidate();
+        appRows.repaint();
     }
 
     /**
@@ -507,6 +627,7 @@ final class DevicePage extends Ui.Card {
                 SwingUtilities.invokeLater(() -> showFacts(hardware));
             });
             checkServers();
+            checkApps();
         }
     }
 

@@ -130,4 +130,33 @@ class SignalRgbTest {
         assertTrue(url.contains("color2=%230000ff"), url);
         assertTrue(url.endsWith("&-silentlaunch-"), url);
     }
+
+    @Test
+    void lockedApiFallsBackToLinksAndDiskEffects(@TempDir Path dir) throws Exception {
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            exchange.sendResponseHeaders(403, -1);
+            exchange.close();
+        });
+        server.start();
+        var signal = new SignalRgb("http://127.0.0.1:" + server.getAddress().getPort());
+        org.junit.jupiter.api.Assertions.assertThrows(SignalRgb.Locked.class, signal::effects);
+
+        var library = Files.createDirectories(dir.resolve("VortxEngine/app-2.4/Effects/Neon Shift"));
+        Files.writeString(library.resolve("Neon Shift.html"), "<head><title>Neon Shift</title></head><body><canvas id=\"exCanvas\"></canvas></body>");
+        Files.writeString(library.resolve("readme.html"), "<head><title>Справка</title></head><body>без холста</body>");
+        Files.writeString(dir.resolve("VIRUS.html"), SignalRgb.effectHtml());
+
+        assertEquals(List.of("Neon Shift"), SignalRgb.localEffects(List.of(dir, dir.resolve("missing"))));
+        assertEquals("signalrgb://effect/apply/Neon%20Shift?-silentlaunch-", SignalRgb.applyUrl("Neon Shift"));
+    }
+
+    @Test
+    void brightnessAndPowerGoToTheEffect() throws Exception {
+        var live = new SignalRgb.Live(() -> 0);
+        live.brightness = 40;
+        live.on = false;
+        assertTrue(live.json().contains("\"brightness\":40,\"on\":false"), live.json());
+        assertTrue(SignalRgb.effectHtml().contains("s.brightness"));
+    }
 }

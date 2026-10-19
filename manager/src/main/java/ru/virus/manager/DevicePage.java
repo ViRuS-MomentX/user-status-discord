@@ -109,6 +109,10 @@ final class DevicePage extends Ui.Card {
     private List<SignalRgb.Effect> effects = List.of();
     private String currentEffect = "";
     private boolean signalQuiet;
+    /** API SignalRGB закрыт (403): эффекты — ссылками, яркость — внутри эффекта VIRUS. */
+    private boolean signalLocked;
+    private List<String> diskEffects = List.of();
+    private JComponent signalArrows;
 
     DevicePage(MatrixBackground background, Path home, Consumer<String> toast, Supplier<String> bridgeApi) {
         super(new BorderLayout(0, 14));
@@ -403,10 +407,10 @@ final class DevicePage extends Ui.Card {
         var restart = Ui.ghost("Перезапустить SignalRGB");
         restart.setToolTipText("Нужно один раз после установки эффекта VIRUS — чтобы SignalRGB его увидел");
         restart.addActionListener(e -> restartSignal());
-        var previous = Ui.ghost("◀");
+        var previous = Ui.ghost("Пред.");
         previous.setToolTipText("Предыдущий эффект");
         previous.addActionListener(e -> signalCall(signal::previous));
-        var next = Ui.ghost("▶");
+        var next = Ui.ghost("След.");
         next.setToolTipText("Следующий эффект");
         next.addActionListener(e -> signalCall(signal::next));
 
@@ -417,11 +421,24 @@ final class DevicePage extends Ui.Card {
         statusButtons.add(connect);
         statusRow.add(statusButtons, BorderLayout.EAST);
 
-        signalOn.onChange(on -> signalCall(() -> signal.enabled(on)));
+        signalOn.onChange(on -> {
+            if (signalLocked) {
+                glow.on = on;
+                glowNudge();
+            } else {
+                signalCall(() -> signal.enabled(on));
+            }
+        });
         signalBrightness.setOpaque(false);
         signalBrightness.setPreferredSize(new Dimension(170, 28));
         signalBrightness.addChangeListener(e -> {
-            if (!signalBrightness.getValueIsAdjusting() && !signalQuiet) {
+            if (signalLocked) {
+                glow.brightness = signalBrightness.getValue();
+
+                if (!signalBrightness.getValueIsAdjusting()) {
+                    glowNudge();
+                }
+            } else if (!signalBrightness.getValueIsAdjusting() && !signalQuiet) {
                 var value = signalBrightness.getValue();
                 signalCall(() -> signal.brightness(value));
             }
@@ -433,8 +450,11 @@ final class DevicePage extends Ui.Card {
         powerRow.add(Ui.muted("Яркость", 13f));
         powerRow.add(signalBrightness);
         powerRow.add(Box.createHorizontalStrut(12));
-        powerRow.add(previous);
-        powerRow.add(next);
+        var arrows = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        arrows.add(previous);
+        arrows.add(next);
+        signalArrows = arrows;
+        powerRow.add(arrows);
 
         // Режимы V.I.R.U.S.
         var group = new ButtonGroup();
@@ -584,6 +604,10 @@ final class DevicePage extends Ui.Card {
                 var found = signal.effects();
                 var state = signal.state();
                 SwingUtilities.invokeLater(() -> showSignal(found, state));
+            } catch (SignalRgb.Locked e) {
+                // Запущен, но API закрыт: эффекты найдём на диске, включать будем ссылками
+                var found = SignalRgb.localEffects(SignalRgb.effectRoots());
+                SwingUtilities.invokeLater(() -> showLocked(found));
             } catch (IOException e) {
                 SwingUtilities.invokeLater(() -> {
                     signalStatus.setForeground(Theme.ERROR);
@@ -597,7 +621,23 @@ final class DevicePage extends Ui.Card {
         });
     }
 
+    private void showLocked(List<String> found) {
+        signalLocked = true;
+        diskEffects = found;
+        signalArrows.setVisible(false);
+        signalStatus.setForeground(Theme.ACCENT);
+        signalStatus.setText("<html>SignalRGB найден. Его API закрыт (так в бесплатной версии), поэтому эффекты "
+                + "включаются ссылками SignalRGB, а яркость и вкл/выкл действуют на режимы V.I.R.U.S.</html>");
+        signalQuiet = true;
+        signalOn.setOn(glow.on);
+        signalBrightness.setValue(glow.brightness);
+        signalQuiet = false;
+        showEffects();
+    }
+
     private void showSignal(List<SignalRgb.Effect> found, SignalRgb.State state) {
+        signalLocked = false;
+        signalArrows.setVisible(true);
         effects = found;
         currentEffect = state.effectId();
         var name = state.effectName().isBlank()
@@ -618,6 +658,27 @@ final class DevicePage extends Ui.Card {
     private void showEffects() {
         effectTiles.removeAll();
         var filter = effectFilter.getText().strip().toLowerCase(java.util.Locale.ROOT);
+
+        if (signalLocked) {
+            for (var name : diskEffects) {
+                if (!filter.isEmpty() && !name.toLowerCase(java.util.Locale.ROOT).contains(filter)) {
+                    continue;
+                }
+
+                var tile = Ui.button(name);
+                tile.setToolTipText(name);
+                tile.addActionListener(e -> openSignalUrl(SignalRgb.applyUrl(name)));
+                effectTiles.add(tile);
+            }
+
+            if (diskEffects.isEmpty()) {
+                effectTiles.add(Ui.muted("Эффекты на диске не нашлись", 12.5f));
+            }
+
+            effectTiles.revalidate();
+            effectTiles.repaint();
+            return;
+        }
 
         for (var effect : effects) {
             if (effect.name().equals(SignalRgb.EFFECT) || !filter.isEmpty()
@@ -671,6 +732,15 @@ final class DevicePage extends Ui.Card {
         glow.mode = mode.id();
         glowChanged();
 
+        if (signalLocked) {
+            // Без API: включить VIRUS ссылкой, если он сейчас не играет (а если играет — сам подхватит)
+            if (!glow.heard()) {
+                openSignalUrl(SignalRgb.applyUrl(glow));
+            }
+
+            return;
+        }
+
         // Включить сам эффект VIRUS, если в SignalRGB сейчас другой
         worker.submit(() -> {
             try {
@@ -707,6 +777,23 @@ final class DevicePage extends Ui.Card {
         settings.glowColor2 = glow.color2;
         settings.save();
         urlFallback.restart();
+    }
+
+    /** Яркость или вкл/выкл без API: эффект VIRUS подхватит сам; если он не играет — включим его. */
+    private void glowNudge() {
+        urlFallback.restart();
+    }
+
+    private void openSignalUrl(String url) {
+        if (!SystemInfo.isWindows()) {
+            return;
+        }
+
+        try {
+            new ProcessBuilder("explorer.exe", url).start();
+        } catch (IOException e) {
+            toast.accept("SignalRGB не открылся: " + e.getMessage());
+        }
     }
 
     private void pushByUrl() {

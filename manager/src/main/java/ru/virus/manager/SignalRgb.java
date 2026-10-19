@@ -139,6 +139,10 @@ final class SignalRgb {
         try {
             var response = http.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
 
+            if (response.statusCode() == 401 || response.statusCode() == 403) {
+                throw new Locked();
+            }
+
             if (response.statusCode() >= 300) {
                 throw new IOException("SignalRGB ответил " + response.statusCode());
             }
@@ -162,6 +166,85 @@ final class SignalRgb {
         }
 
         return json.get("data");
+    }
+
+    /**
+     * SignalRGB запущен, но управлять собой через API не даёт (403) — в
+     * бесплатной версии API закрыт. Тогда эффекты включаем его же ссылками.
+     */
+    static final class Locked extends IOException {
+        Locked() {
+            super("SignalRGB закрыл API (403) — так бывает без Pro");
+        }
+    }
+
+    /** Ссылка SignalRGB «включи эффект», в фоне — без всплывающего окна. */
+    static String applyUrl(String effect) {
+        return "signalrgb://effect/apply/" + URLEncoder.encode(effect, StandardCharsets.UTF_8).replace("+", "%20")
+                + "?-silentlaunch-";
+    }
+
+    /**
+     * Эффекты SignalRGB, которые лежат на диске: без API их список больше
+     * взять неоткуда. Имя эффекта — его &lt;title&gt;, по нему и включаем.
+     */
+    static List<String> localEffects(List<Path> roots) {
+        var names = new java.util.TreeSet<String>(String.CASE_INSENSITIVE_ORDER);
+
+        for (var root : roots) {
+            if (!Files.isDirectory(root)) {
+                continue;
+            }
+
+            try (var files = Files.find(root, 7, (path, attributes) -> attributes.isRegularFile()
+                    && path.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".html")
+                    && attributes.size() < 2_000_000)) {
+                files.limit(2000).forEach(path -> {
+                    var title = title(path);
+
+                    if (title != null && !title.equals(EFFECT)) {
+                        names.add(title);
+                    }
+                });
+            } catch (IOException | RuntimeException ignored) {
+                // нет доступа к папке — берём что нашли
+            }
+        }
+
+        return List.copyOf(names);
+    }
+
+    /** &lt;title&gt; эффекта; null — не эффект (нет холста или заголовка). */
+    static String title(Path file) {
+        try (var in = Files.newInputStream(file)) {
+            var head = new String(in.readNBytes(16_384), StandardCharsets.UTF_8);
+            var start = head.indexOf("<title>");
+            var end = head.indexOf("</title>");
+
+            if (start < 0 || end <= start || !head.contains("<canvas")) {
+                return null;
+            }
+
+            var title = head.substring(start + 7, end).strip();
+            return title.isEmpty() || title.length() > 60 ? null : title;
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /** Где SignalRGB держит эффекты: свои, скачанные и встроенные. */
+    static List<Path> effectRoots() {
+        var local = System.getenv("LOCALAPPDATA");
+        var roots = new ArrayList<Path>();
+        roots.add(effectsFolder());
+
+        if (local != null) {
+            roots.add(Path.of(local, "VortxEngine"));
+            roots.add(Path.of(local, "WhirlwindFX"));
+        }
+
+        roots.add(effectsFolder().getParent());
+        return roots;
     }
 
     // ── эффект «VIRUS» ────────────────────────────────────────────────
@@ -232,6 +315,9 @@ final class SignalRgb {
         volatile int speed = 50;
         volatile Color color = Theme.ACCENT;
         volatile Color color2 = new Color(0x8A2BE2);
+        /** Яркость и вкл/выкл самого эффекта — работают и без API SignalRGB. */
+        volatile int brightness = 100;
+        volatile boolean on = true;
         volatile long lastAsked;
         private final java.util.function.DoubleSupplier cpu;
         private HttpServer server;
@@ -260,7 +346,7 @@ final class SignalRgb {
         String json() {
             var load = cpu.getAsDouble();
             return "{\"mode\":" + mode + ",\"speed\":" + speed + ",\"color\":\"" + hex(color) + "\",\"color2\":\""
-                    + hex(color2) + "\",\"cpu\":" + String.format(java.util.Locale.ROOT, "%.3f", Math.max(0, load)) + "}";
+                    + hex(color2) + "\",\"brightness\":" + brightness + ",\"on\":" + on + ",\"cpu\":" + String.format(java.util.Locale.ROOT, "%.3f", Math.max(0, load)) + "}";
         }
 
         boolean heard() {

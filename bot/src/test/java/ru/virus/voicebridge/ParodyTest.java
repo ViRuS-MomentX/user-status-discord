@@ -23,6 +23,7 @@ class ParodyTest {
 
     static final long TARGET = 42;
     static final long OWNER = 1;
+    static final List<Long> BANNED = List.of(66L);
 
     @TempDir
     Path dir;
@@ -65,7 +66,7 @@ class ParodyTest {
         return new ParodySettings(true, "T", "@grp", TARGET, "Вася",
                 "anthropic", "KEY", "model", "", "", "", "",
                 chance, cooldown, minSamples, "", "", "", OWNER, quiet, daily,
-                ParodySettings.DEFAULT_MARK, "");
+                ParodySettings.DEFAULT_MARK, "", BANNED);
     }
 
     ParodySamples store;
@@ -243,7 +244,7 @@ class ParodyTest {
     void learnsNicknamesFromHisAddressesAndUsesThem() throws Exception {
         start(settings(0, 0, 1), llm(p -> "ок"), "образец");
 
-        for (var i = 0; i < 2; i++) {
+        for (var i = 0; i < ParodyNames.SURE; i++) {
             var question = telegram.say(7, "Пётр Иванов", "кто идёт?");
             telegram.say(FakeTelegram.CHAT, TARGET, "Вася", false, "Петька, я иду",
                     FakeTelegram.original(question, 7, "Пётр Иванов", false, "кто идёт?"));
@@ -254,7 +255,9 @@ class ParodyTest {
 
         telegram.say(OWNER, "Хозяин", "/parody_say");
         assertNotNull(telegram.awaitSent(1, 3000));
-        assertTrue(prompts.getLast().contains("Пётр Иванов — Петька"), prompts.getLast());
+        // В переписке он теперь сразу подписан прозвищем — отдельного списка нет
+        assertTrue(prompts.getLast().contains("Петька: кто идёт?"), prompts.getLast());
+        assertTrue(!prompts.getLast().contains("Пётр Иванов"), prompts.getLast());
     }
 
     @Test
@@ -478,7 +481,7 @@ class ParodyTest {
 
         var menu = net.dv8tion.jda.api.utils.data.DataArray.fromJson(telegram.commands);
         assertEquals("parody_say", menu.getObject(0).getString("command"));
-        assertEquals(9, menu.length());
+        assertEquals(10, menu.length());
     }
 
     @Test
@@ -683,7 +686,7 @@ class ParodyTest {
     static ParodySettings character(long styleUser) {
         return new ParodySettings(true, "T", "@grp", styleUser, "Дед",
                 "anthropic", "KEY", "model", "", "", "", "",
-                100, 0, 50, "", "", "", OWNER, "", 0, "", "ворчливый дед, всех зовёт обезьянами");
+                100, 0, 50, "", "", "", OWNER, "", 0, "", "ворчливый дед, всех зовёт обезьянами", List.of());
     }
 
     @Test
@@ -748,7 +751,8 @@ class ParodyTest {
 
         assertNotNull(telegram.awaitSent(1, 3000));
         var prompt = prompts.getFirst();
-        assertTrue(prompt.contains("«Петя»: называй «Петруха». Шутить над ним можно так: про то, что он вечно опаздывает"), prompt);
+        assertTrue(prompt.contains("«Петруха»: шутить над ним можно так: про то, что он вечно опаздывает"), prompt);
+        assertTrue(prompt.contains("Петруха: кто в доту"), "в переписке — так, как велел хозяин: " + prompt);
         assertTrue(!prompt.contains("никто"), "строки без ID пропускаются");
         assertTrue(!prompt.contains("Колян"), "кто не писал — того в подсказке нет, чтобы ИИ его не звал");
     }
@@ -839,5 +843,73 @@ class ParodyTest {
         again.load();
         assertEquals(10, again.said().size());
         assertEquals("реплика 11", again.said().getLast());
+    }
+
+    @Test
+    void banCommandBansConfiguredMemberOnlyForAdmins() throws Exception {
+        start(settings(0, 0, 1), llm(p -> "-"), "образец");
+
+        telegram.say(7, "Петя", Parody.BAN);
+        var refused = telegram.awaitSent(1, 3000);
+        assertNotNull(refused);
+        assertTrue(refused.get("text").contains("только админы"), refused.toString());
+        assertTrue(telegram.bans.isEmpty(), "простой участник не банит");
+
+        telegram.admins.add(9L);
+        telegram.say(9, "Админ", Parody.BAN);
+        var done = telegram.awaitSent(2, 3000);
+        assertTrue(done.get("text").contains("Забанен"), done.toString());
+        assertEquals("66", telegram.bans.getFirst().get("user_id"));
+        assertEquals(String.valueOf(FakeTelegram.CHAT), telegram.bans.getFirst().get("chat_id"));
+
+        telegram.say(OWNER, "Хозяин", Parody.BAN);
+        assertNotNull(telegram.awaitSent(3, 3000));
+        assertEquals(2, telegram.bans.size(), "хозяин бота банит и не будучи админом");
+    }
+
+    @Test
+    void peopleAreLabelledByTheirCallNames() throws Exception {
+        var book = dir.resolve("parody-people.json");
+        Files.writeString(book, "{\"people\":[{\"id\":\"7\",\"name\":\"Санёк\",\"jokes\":\"\"}]}");
+        var replies = new java.util.concurrent.atomic.AtomicInteger();
+        start(settings(100, 0, 1), llm(p -> "ну " + replies.incrementAndGet()), "образец");
+        parody.setPeople(new PeopleBook(book));
+
+        telegram.say(8, "•FroSt•", "всем ку");
+        assertNotNull(telegram.awaitSent(1, 3000));
+        Thread.sleep(300);
+        telegram.say(7, "Рома Смотрун", "кто в доту");
+        assertNotNull(telegram.awaitSent(2, 3000));
+
+        var prompt = prompts.getLast();
+        assertTrue(prompt.contains("Санёк: кто в доту"), prompt);
+        assertTrue(!prompt.contains("Рома Смотрун"), "ник из Telegram заменён тем, как звать: " + prompt);
+        assertTrue(prompt.contains("Самое новое сообщение написал «Санёк»"), prompt);
+
+        // «•FroSt•, …» в ответ Саньку — путаница, переписываем
+        assertEquals("•FroSt•", parody.addressesOther("•FroSt•, го", "•FroSt•: всем ку\nСанёк: кто в доту"));
+        assertNull(parody.addressesOther("Санёк, го", "•FroSt•: всем ку\nСанёк: кто в доту"));
+        assertNull(parody.addressesOther("ну, го", "•FroSt•: всем ку\nСанёк: кто в доту"));
+    }
+
+    @Test
+    void addressToSomeoneElseIsNotTheirNickname() {
+        var names = new ParodyNames(dir.resolve("names-test.json"));
+        names.seen(7, "Саня");
+        names.seen(8, "Рома Смотрун");
+
+        // Отвечает Сане, но зовёт Рому — Саню «Ромой» не записываем
+        for (var i = 0; i < 5; i++) {
+            names.learn(7, "Рома, глянь");
+        }
+
+        assertTrue(names.nicknames(7).isEmpty(), names.nicknames(7).toString());
+        assertNull(names.callName(7));
+
+        for (var i = 0; i < ParodyNames.SURE; i++) {
+            names.learn(7, "Санёк, глянь");
+        }
+
+        assertEquals("Санёк", names.callName(7));
     }
 }

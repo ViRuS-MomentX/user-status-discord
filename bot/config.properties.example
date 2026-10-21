@@ -329,6 +329,12 @@ parody.character.mark=
 # перезапуск: оно хранится в parody-state.json.
 parody.telegram.owner=
 
+# Кого банит команда /pinhead_lox1000lvl — числовой ID в Telegram (узнать:
+# ответь командой /id на сообщение человека). Можно несколько через запятую.
+# Командовать могут только админы группы и хозяин бота (parody.telegram.owner).
+# Бот должен быть админом группы с правом «Блокировка участников».
+parody.ban.id=
+
 # Чья модель сочиняет реплики: ollama, gigachat или anthropic.
 #
 # ollama — модель на этом же компьютере (https://ollama.com): бесплатно, без

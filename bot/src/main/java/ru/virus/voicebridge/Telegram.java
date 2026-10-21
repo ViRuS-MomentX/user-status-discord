@@ -531,6 +531,18 @@ public final class Telegram {
         }
     }
 
+    /** Забанить участника в группе. Бот должен быть админом с правом блокировать. */
+    public void ban(String chat, long user) throws IOException {
+        call("banChatMember", Map.of("chat_id", chat, "user_id", String.valueOf(user)));
+    }
+
+    /** Админ ли человек в группе (или её создатель). */
+    public boolean isAdmin(String chat, long user) throws IOException {
+        var status = call("getChatMember", Map.of("chat_id", chat, "user_id", String.valueOf(user)))
+                .getObject("result").getString("status", "");
+        return status.equals("creator") || status.equals("administrator");
+    }
+
     /** Снимает веб-хук: пока он стоит, getUpdates Telegram не отдаёт. */
     public void deleteWebhook() throws IOException {
         call("deleteWebhook", Map.of());

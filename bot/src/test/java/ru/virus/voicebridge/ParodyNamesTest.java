@@ -33,6 +33,7 @@ class ParodyNamesTest {
         names.seen(7, "Дмитрий");
 
         names.learn(7, "Димон, го");
+        names.learn(7, "Димон, а ты?");
         assertEquals(List.of(), names.nicknames(7));
 
         names.learn(7, "Димон, ну");

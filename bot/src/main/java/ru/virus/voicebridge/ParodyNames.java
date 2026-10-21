@@ -32,7 +32,7 @@ final class ParodyNames {
     private static final Logger log = LoggerFactory.getLogger(ParodyNames.class);
 
     /** Сколько раз обращение должно встретиться, чтобы считаться прозвищем. */
-    static final int SURE = 2;
+    static final int SURE = 3;
 
     /** Обращение в начале реплики: «Санёк, …», «Петруха! …», «Димон ты где». */
     private static final Pattern ADDRESS = Pattern.compile("^\\s*([\\p{L}][\\p{L}-]{1,19})\\s*[,!]");
@@ -152,6 +152,14 @@ final class ParodyNames {
             return null;
         }
 
+        // «Рома, …» в ответ на сообщение Сани — это обращение к Роме, а не прозвище
+        // Сани. Раньше такое записывалось Сане, и бот потом звал людей чужими именами
+        for (var entry : people.entrySet()) {
+            if (entry.getKey() != addresseeId && known(entry.getValue(), word)) {
+                return null;
+            }
+        }
+
         var person = people.computeIfAbsent(addresseeId, key -> new Person());
         var count = person.heard.merge(word, 1, Integer::sum);
 
@@ -162,6 +170,39 @@ final class ParodyNames {
 
         save();
         return word;
+    }
+
+    /** Это имя или прозвище человека: первое слово имени в Telegram, заданное или уже выученное. */
+    private static boolean known(Person person, String word) {
+        var first = person.name.strip().split("[\\s,.]+", 2)[0];
+
+        return first.equalsIgnoreCase(word)
+                || person.manual.stream().anyMatch(word::equalsIgnoreCase)
+                || person.nicknames().stream().anyMatch(word::equalsIgnoreCase);
+    }
+
+    /**
+     * Как звать человека в переписке: заданное вручную, иначе самое частое
+     * уверенное прозвище, если его не носит ещё кто-то. null — звать по имени.
+     */
+    synchronized String callName(long id) {
+        var person = people.get(id);
+
+        if (person == null) {
+            return null;
+        }
+
+        for (var nick : person.nicknames()) {
+            var taken = people.entrySet().stream()
+                    .anyMatch(entry -> entry.getKey() != id && entry.getValue().nicknames().stream()
+                            .anyMatch(nick::equalsIgnoreCase));
+
+            if (!taken) {
+                return nick;
+            }
+        }
+
+        return null;
     }
 
     /** Прозвище вручную — командой. */

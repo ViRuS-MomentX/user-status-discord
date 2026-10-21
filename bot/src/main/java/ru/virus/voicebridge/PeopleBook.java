@@ -105,20 +105,15 @@ final class PeopleBook {
                 continue;
             }
 
+            // Имя уже стоит в переписке вместо ника — здесь нужно только, как шутить
+            if (entry.jokes().isEmpty()) {
+                continue;
+            }
+
             var shown = seen.apply(entry.id());
-            var who = shown == null || shown.isBlank() ? "участник с ID " + entry.id() : "«" + shown + "»";
-            var line = new StringBuilder("- ").append(who);
-
-            if (!entry.name().isEmpty()) {
-                line.append(": называй «").append(entry.name()).append("»");
-            }
-
-            if (!entry.jokes().isEmpty()) {
-                line.append(entry.name().isEmpty() ? ": " : ". ").append("Шутить над ним можно так: ")
-                        .append(entry.jokes());
-            }
-
-            lines.add(line.toString());
+            var who = !entry.name().isEmpty() ? "«" + entry.name() + "»"
+                    : shown == null || shown.isBlank() ? "участник с ID " + entry.id() : "«" + shown + "»";
+            lines.add("- " + who + ": шутить над ним можно так: " + entry.jokes());
         }
 
         return String.join("\n", lines);

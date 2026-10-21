@@ -35,7 +35,8 @@ public record ParodySettings(boolean enabled, String token, String chat, long ta
                              String llmScope, String llmCert, String llmUrl, String llmProxy,
                              int chance, int cooldownMinutes, int minSamples, String importFile,
                              String proxy, String api,
-                             long owner, String quiet, int daily, String mark, String character) {
+                             long owner, String quiet, int daily, String mark, String character,
+                             java.util.List<Long> ban) {
 
     /** Пометка по умолчанию. */
     public static final String DEFAULT_MARK = "пародия: ";

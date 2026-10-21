@@ -50,6 +50,7 @@ public final class Parody {
         commands.put("parody_names", "кого как называть");
         commands.put("parody_status", "как дела");
         commands.put("id", "ID участника — ответом на его сообщение");
+        commands.put("pinhead_lox1000lvl", "бан того, кто записан в конфиге");
         COMMANDS = java.util.Collections.unmodifiableMap(commands);
     }
 
@@ -103,8 +104,13 @@ public final class Parody {
 
     private final Deque<Line> recent = new ArrayDeque<>();
 
-    /** Строка переписки и когда она прозвучала. */
-    private record Line(long at, String text) {
+    /**
+     * Строка переписки и когда она прозвучала. Кто писал и кому отвечал —
+     * отдельно: подпись («Санёк» вместо ника) ставится, когда собирается
+     * подсказка, — прозвище, выученное позже, попадёт и в старые строки.
+     */
+    private record Line(long at, long authorId, String author, long replyToId, String replyTo, String quote,
+                        String text) {
     }
     private final SequencedSet<Long> own = new LinkedHashSet<>();
     private final Deque<String> said = new ArrayDeque<>();
@@ -325,7 +331,8 @@ public final class Parody {
             // Фото или голосовое без подписи: отвечать не на что, но разговор без
             // них рвётся — «смотри» повисло бы без того, на что смотреть
             if (group && !message.fileName().isBlank()) {
-                remember(message.author() + ": [" + attachment(message.fileName()) + "]");
+                remember(new Line(clock.millis(), message.authorId(), message.author(), 0, "", "",
+                        "[" + attachment(message.fileName()) + "]"));
             }
             return;
         }
@@ -518,6 +525,11 @@ public final class Parody {
         // ID узнать может каждый: его и так видно любому, кто откроет профиль
         if (word.equals("/id")) {
             showId(message);
+            return true;
+        }
+
+        if (word.equals(BAN)) {
+            ban(message);
             return true;
         }
 
@@ -733,6 +745,50 @@ public final class Parody {
      * Ответ на команду. Без пометки «пародия»: это не реплика участника, а
      * служебное сообщение, — зато со значком, чтобы его ни с чем не спутать.
      */
+    static final String BAN = "/pinhead_lox1000lvl";
+
+    /**
+     * Бан тех, кто записан в parody.ban.id. Командовать могут хозяин бота и
+     * админы группы — иначе любой участник мог бы банить кого угодно из списка.
+     */
+    private void ban(TelegramMessage message) {
+        if (settings.ban().isEmpty()) {
+            answer(message, "Кого банить, не задано: впиши ID в V.I.R.U.S. → Конфиг ботов → parody.ban.id.");
+            return;
+        }
+
+        // Банят в группе бота, даже если команду прислали в личку
+        var chat = chatId != null ? chatId : settings.chat();
+
+        try {
+            var allowed = settings.owner() != 0 && message.authorId() == settings.owner()
+                    || telegram.isAdmin(chat, message.authorId());
+
+            if (!allowed) {
+                answer(message, "Банить могут только админы группы и хозяин бота.");
+                return;
+            }
+        } catch (Exception e) {
+            answer(message, "Не получилось проверить, админ ли ты: " + reason(e));
+            return;
+        }
+
+        for (var id : settings.ban()) {
+            var who = names.name(id).isBlank() ? "ID " + id : names.name(id) + " (ID " + id + ")";
+
+            try {
+                telegram.ban(chat, id);
+                answer(message, "🔨 Забанен: " + who + ".");
+                log.info("{} забанил {} командой {}.", message.author(), who, BAN);
+            } catch (Exception e) {
+                var why = reason(e);
+                answer(message, "Не забанил " + who + ": " + (why.contains("not enough rights")
+                        || why.contains("CHAT_ADMIN_REQUIRED")
+                        ? "сделай бота админом группы с правом «Блокировка участников»." : why));
+            }
+        }
+    }
+
     /** /id ответом на сообщение — ID его автора; просто /id — свой. */
     private void showId(TelegramMessage message) {
         if (message.replyToAuthorId() != 0) {
@@ -756,27 +812,90 @@ public final class Parody {
         }
     }
 
-    /** Строка переписки для ИИ: кто, кому отвечает и что сказал. */
-    private String line(TelegramMessage message) {
-        var line = new StringBuilder(message.author());
+    /** Строка переписки: кто, кому отвечает и что сказал. */
+    private Line line(TelegramMessage message) {
+        var quote = message.replyToText().replace('\n', ' ');
 
-        if (!message.replyToAuthor().isBlank()) {
-            var quote = message.replyToText().replace('\n', ' ');
-
-            if (quote.length() > QUOTE_LIMIT) {
-                quote = quote.substring(0, QUOTE_LIMIT) + "…";
-            }
-
-            line.append(" (в ответ ").append(message.replyToAuthor());
-
-            if (!quote.isBlank()) {
-                line.append(" на «").append(quote).append("»");
-            }
-
-            line.append(")");
+        if (quote.length() > QUOTE_LIMIT) {
+            quote = quote.substring(0, QUOTE_LIMIT) + "…";
         }
 
-        return line.append(": ").append(message.text()).toString();
+        return new Line(clock.millis(), message.authorId(), message.author(), message.replyToAuthorId(),
+                message.replyToAuthor(), quote, message.text());
+    }
+
+    /** Строка для ИИ: люди подписаны так, как их звать. */
+    private String render(Line line) {
+        var text = new StringBuilder(label(line.authorId(), line.author()));
+
+        if (!line.replyTo().isBlank()) {
+            text.append(" (в ответ ").append(label(line.replyToId(), line.replyTo()));
+
+            if (!line.quote().isBlank()) {
+                text.append(" на «").append(line.quote()).append("»");
+            }
+
+            text.append(")");
+        }
+
+        return text.append(": ").append(line.text()).toString();
+    }
+
+    /**
+     * Как подписать человека в переписке для ИИ: как велел хозяин в списке
+     * участников, иначе — прозвище, иначе — имя в Telegram. Раньше в переписке
+     * стояли ники из Telegram, а «кого как звать» — отдельным списком, и ИИ
+     * путал, какое прозвище чьё.
+     */
+    String label(long id, String shown) {
+        if (id == 0 || id == settings.target() && !settings.isCharacter()) {
+            return shown;
+        }
+
+        var book = people;
+
+        if (book != null) {
+            for (var entry : book.entries()) {
+                if (entry.id() == id && !entry.name().isBlank()) {
+                    return entry.name();
+                }
+            }
+        }
+
+        var nick = names.callName(id);
+        return nick == null ? shown : nick;
+    }
+
+    /**
+     * Ответ начинается с обращения к другому участнику разговора, а не к тому,
+     * кому отвечаем: «Рома, …» в ответ на сообщение Сани. Так ИИ путает людей.
+     *
+     * @return к кому ошибочно обратился; null — всё в порядке
+     */
+    String addressesOther(String text, String context) {
+        var start = text.strip();
+        var comma = start.indexOf(',');
+        var to = lastAuthor(context);
+
+        if (comma <= 0 || comma > 30 || to.isEmpty()) {
+            return null;
+        }
+
+        var address = start.substring(0, comma).strip();
+
+        if (address.equalsIgnoreCase(to)) {
+            return null;
+        }
+
+        for (var id : active()) {
+            var label = label(id, names.name(id));
+
+            if (!label.equalsIgnoreCase(to) && address.equalsIgnoreCase(label)) {
+                return label;
+            }
+        }
+
+        return null;
     }
 
     void setPeople(PeopleBook people) {
@@ -788,8 +907,8 @@ public final class Parody {
         var book = people;
         // Только тех, кто сейчас в разговоре: остальные имена сбивали ИИ, и он
         // обращался к людям, которые ничего не писали
-        var lines = book == null ? "" : book.describe(names::name, new java.util.HashSet<>(active()));
-        return lines.isEmpty() ? "" : "Кого как называть и как над кем можно шутить — это задал хозяин, держись "
+        var lines = book == null ? "" : book.describe(id -> label(id, names.name(id)), new java.util.HashSet<>(active()));
+        return lines.isEmpty() ? "" : "Как над кем можно шутить — это задал хозяин, держись "
                 + "этого (по-дружески, в рамках правил выше):\n" + lines + "\n\n";
     }
 
@@ -803,7 +922,7 @@ public final class Parody {
         try {
             var id = telegram.sendText(chat, settings.mark() + text, 0);
             log.info("Отправил в чат {} из консоли: {}", settings.chat(), text);
-            remember(settings.name() + ": " + text);
+            remember(text);
 
             synchronized (own) {
                 own.add(id);
@@ -820,11 +939,19 @@ public final class Parody {
     /** Длиннее строку переписки не держим: простыня вытеснила бы из подсказки весь разговор. */
     private static final int LINE_LIMIT = 300;
 
-    private void remember(String line) {
-        var cut = line.length() > LINE_LIMIT ? line.substring(0, LINE_LIMIT) + "…" : line;
+    /** Своя реплика бота — в переписку. */
+    private void remember(String text) {
+        remember(new Line(clock.millis(), 0, settings.name(), 0, "", "", text));
+    }
+
+    private void remember(Line line) {
+        var cut = line.text().length() > LINE_LIMIT
+                ? new Line(line.at(), line.authorId(), line.author(), line.replyToId(), line.replyTo(), line.quote(),
+                        line.text().substring(0, LINE_LIMIT) + "…")
+                : line;
 
         synchronized (recent) {
-            recent.addLast(new Line(clock.millis(), cut));
+            recent.addLast(cut);
 
             while (recent.size() > CONTEXT) {
                 recent.removeFirst();
@@ -841,10 +968,10 @@ public final class Parody {
         var now = clock.millis();
 
         synchronized (recent) {
-            var fresh = recent.stream().filter(line -> now - line.at() < ACTIVE_MS).map(Line::text).toList();
+            var fresh = recent.stream().filter(line -> now - line.at() < ACTIVE_MS).map(this::render).toList();
 
             if (fresh.isEmpty()) {
-                fresh = recent.stream().skip(Math.max(0, recent.size() - 3)).map(Line::text).toList();
+                fresh = recent.stream().skip(Math.max(0, recent.size() - 3)).map(this::render).toList();
             }
 
             return String.join("\n", fresh);
@@ -940,7 +1067,10 @@ public final class Parody {
                     : copies(text, samples.all()) ? "это слово в слово его старое сообщение, а нужна новая "
                         + "фраза в его манере по теме разговора"
                     : addressesAbsent(text) != null ? "обращение к «" + addressesAbsent(text) + "», а он в "
-                        + "разговоре не участвует — обращайся только к тем, кто писал выше" : "";
+                        + "разговоре не участвует — обращайся только к тем, кто писал выше"
+                    : (direct || replyTo != 0) && addressesOther(text, context) != null
+                        ? "ты обратился к «" + addressesOther(text, context) + "», а отвечаешь «"
+                        + lastAuthor(context) + "» — обращайся к нему или без имени" : "";
 
             // Промолчать без обращения — можно: тогда и переспрашивать незачем
             if (why.isEmpty() || (text.isBlank() && !must)) {
@@ -978,7 +1108,7 @@ public final class Parody {
             state.countSent(LocalDate.now(clock));
             // Хозяин должен видеть, что бот говорит от лица участника
             log.info("Пародия сказала: {}", text);
-            remember(settings.name() + ": " + text);
+            remember(text);
 
             synchronized (said) {
                 said.addLast(text);
@@ -1167,7 +1297,7 @@ public final class Parody {
                 + "реплика. Выводи только текст реплики — без имени, кавычек, пометок и пояснений. "
                 + "Не выдумывай о нём личных фактов, событий, признаний и мнений о реальных людях, "
                 + "которых нет в образцах. Без угроз, травли и оскорблений участников. "
-                + "Людей называй так, как называет их он, — список ниже. " + ADDRESS_RULE
+                + "Люди в переписке подписаны так, как их надо называть, — называй их только так. " + ADDRESS_RULE
                 + (must ? "К тебе обратились — обязательно ответь хотя бы короткой репликой."
                         : "Если вставить в разговор нечего, ответь одним символом «-».");
     }
@@ -1223,18 +1353,10 @@ public final class Parody {
 
         var style = ParodyStyle.describe(samples.all());
 
-        List<Long> active;
-
-        synchronized (activeIds) {
-            active = List.copyOf(activeIds);
-        }
-
-        active = active();
-        var known = names.describe(active, 15);
-
+        // Отдельного списка «кого как зовут» больше нет: люди в переписке уже
+        // подписаны так, как их надо называть, — сопоставлять ИИ нечего и путать тоже
         return (style.isEmpty() ? "" : "Его манера в цифрах — держись её:\n" + style + "\n\n")
                 + peopleBlock()
-                + (known.isEmpty() ? "" : "Как он называет людей в чате:\n" + known + "\n\n")
                 + "Образцы его настоящих сообщений — для манеры, не для копирования:\n" + examples
                 + (recentOwn.isEmpty() ? ""
                     : "\nТвои недавние реплики-пародии:\n" + recentOwn + NOT_AGAIN)

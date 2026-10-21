@@ -412,7 +412,27 @@ public final class BotConfig {
                 quiet(props.getProperty("parody.quiet", "").trim()),
                 bounded(props, "parody.daily", 30, 0, 10_000),
                 mark,
-                characterMode ? character : "");
+                characterMode ? character : "",
+                ids(props.getProperty("parody.ban.id", "")));
+    }
+
+    /** «123, 456» → [123, 456]; не-числа пропускаются с предупреждением. */
+    static java.util.List<Long> ids(String raw) {
+        var result = new java.util.ArrayList<Long>();
+
+        for (var part : raw.split("[,;\\s]+")) {
+            if (part.isBlank()) {
+                continue;
+            }
+
+            try {
+                result.add(Long.parseLong(part.strip()));
+            } catch (NumberFormatException e) {
+                log.error("parody.ban.id: «{}» — не ID. ID — это только цифры, узнать их можно командой /id.", part);
+            }
+        }
+
+        return java.util.List.copyOf(result);
     }
 
     /** Пометка персонажа: любая короткая или никакой. */

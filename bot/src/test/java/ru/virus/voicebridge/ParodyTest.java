@@ -846,25 +846,21 @@ class ParodyTest {
     }
 
     @Test
-    void banCommandBansConfiguredMemberOnlyForAdmins() throws Exception {
+    void banCommandWorksForAnyone() throws Exception {
         start(settings(0, 0, 1), llm(p -> "-"), "образец");
 
+        // Простой участник — не админ и не хозяин
         telegram.say(7, "Петя", Parody.BAN);
-        var refused = telegram.awaitSent(1, 3000);
-        assertNotNull(refused);
-        assertTrue(refused.get("text").contains("только админы"), refused.toString());
-        assertTrue(telegram.bans.isEmpty(), "простой участник не банит");
-
-        telegram.admins.add(9L);
-        telegram.say(9, "Админ", Parody.BAN);
-        var done = telegram.awaitSent(2, 3000);
+        var done = telegram.awaitSent(1, 3000);
+        assertNotNull(done);
         assertTrue(done.get("text").contains("Забанен"), done.toString());
         assertEquals("66", telegram.bans.getFirst().get("user_id"));
         assertEquals(String.valueOf(FakeTelegram.CHAT), telegram.bans.getFirst().get("chat_id"));
 
-        telegram.say(OWNER, "Хозяин", Parody.BAN);
-        assertNotNull(telegram.awaitSent(3, 3000));
-        assertEquals(2, telegram.bans.size(), "хозяин бота банит и не будучи админом");
+        // И сам тот, кого банят
+        telegram.say(66, "Пинхед", Parody.BAN);
+        assertNotNull(telegram.awaitSent(2, 3000));
+        assertEquals(2, telegram.bans.size());
     }
 
     @Test

@@ -112,8 +112,6 @@ final class FakeTelegram implements AutoCloseable {
 
     /** Кого забанили: chat_id и user_id. */
     final List<Map<String, String>> bans = new java.util.concurrent.CopyOnWriteArrayList<>();
-    /** Админы группы — для getChatMember. */
-    final java.util.Set<Long> admins = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private void handle(HttpExchange exchange) throws IOException {
         var body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
@@ -143,8 +141,6 @@ final class FakeTelegram implements AutoCloseable {
                 bans.add(form);
                 answer.put("result", true);
             }
-            case "getChatMember" -> answer.put("result", DataObject.empty()
-                    .put("status", admins.contains(Long.parseLong(form.get("user_id"))) ? "administrator" : "member"));
             case "sendChatAction" -> {
                 actions.add(form);
                 answer.put("result", true);

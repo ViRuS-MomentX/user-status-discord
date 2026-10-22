@@ -551,13 +551,6 @@ public final class Telegram {
         call("banChatMember", Map.of("chat_id", chat, "user_id", String.valueOf(user)));
     }
 
-    /** Админ ли человек в группе (или её создатель). */
-    public boolean isAdmin(String chat, long user) throws IOException {
-        var status = call("getChatMember", Map.of("chat_id", chat, "user_id", String.valueOf(user)))
-                .getObject("result").getString("status", "");
-        return status.equals("creator") || status.equals("administrator");
-    }
-
     /**
      * Соединение даже не открылось — путь закрыт (провайдер блокирует то
      * пересыльщик Cloudflare, то api.telegram.org). Следующий запрос пойдёт

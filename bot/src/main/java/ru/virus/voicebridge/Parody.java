@@ -748,8 +748,8 @@ public final class Parody {
     static final String BAN = "/pinhead_lox1000lvl";
 
     /**
-     * Бан тех, кто записан в parody.ban.id. Командовать могут хозяин бота и
-     * админы группы — иначе любой участник мог бы банить кого угодно из списка.
+     * Бан тех, кто записан в parody.ban.id. Командовать может кто угодно —
+     * так захотел хозяин: банят только тех, кого он сам вписал в конфиг.
      */
     private void ban(TelegramMessage message) {
         if (settings.ban().isEmpty()) {
@@ -759,19 +759,6 @@ public final class Parody {
 
         // Банят в группе бота, даже если команду прислали в личку
         var chat = chatId != null ? chatId : settings.chat();
-
-        try {
-            var allowed = settings.owner() != 0 && message.authorId() == settings.owner()
-                    || telegram.isAdmin(chat, message.authorId());
-
-            if (!allowed) {
-                answer(message, "Банить могут только админы группы и хозяин бота.");
-                return;
-            }
-        } catch (Exception e) {
-            answer(message, "Не получилось проверить, админ ли ты: " + reason(e));
-            return;
-        }
 
         for (var id : settings.ban()) {
             var who = names.name(id).isBlank() ? "ID " + id : names.name(id) + " (ID " + id + ")";

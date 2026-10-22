@@ -62,7 +62,10 @@ public final class Telegram {
     private volatile boolean warnedAboutAvatars;
 
     /** Куда стучаться: официальный сервер или свой. */
-    private final String api;
+    /** Куда ходим сейчас; при обрыве соединения меняется на запасной путь. */
+    private volatile String api;
+    /** Пересыльщик и официальный адрес: провайдеры блокируют то одно, то другое. */
+    private final java.util.List<String> routes;
 
     public Telegram(String token) {
         this(token, "", "");
@@ -80,8 +83,20 @@ public final class Telegram {
         var trimmed = api.trim();
         this.api = trimmed.isBlank() ? OFFICIAL
                 : (trimmed.endsWith("/") ? trimmed.substring(0, trimmed.length() - 1) : trimmed);
+        // Свой адрес на localhost — это свой сервер Bot API, у него запасного пути нет
+        this.routes = this.api.equals(OFFICIAL) || this.api.contains("localhost") || this.api.contains("127.0.0.1")
+                ? java.util.List.of(this.api) : java.util.List.of(this.api, OFFICIAL);
 
         this.proxy = proxy.trim();
+        this.http = build();
+    }
+
+    /** Для проверок: свои пути вместо пересыльщика и официального адреса. */
+    Telegram(String token, java.util.List<String> routes) {
+        this.token = token;
+        this.proxy = "";
+        this.routes = java.util.List.copyOf(routes);
+        this.api = routes.getFirst();
         this.http = build();
     }
 
@@ -543,6 +558,39 @@ public final class Telegram {
         return status.equals("creator") || status.equals("administrator");
     }
 
+    /**
+     * Соединение даже не открылось — путь закрыт (провайдер блокирует то
+     * пересыльщик Cloudflare, то api.telegram.org). Следующий запрос пойдёт
+     * другим путём; заработает — на нём и останемся.
+     */
+    private synchronized void switchRoute(HttpRequest request, IOException e) {
+        var refused = e instanceof java.net.http.HttpConnectTimeoutException || e instanceof java.net.ConnectException
+                || e.getCause() instanceof java.net.ConnectException
+                || String.valueOf(e.getMessage()).contains("terminated the handshake");
+
+        if (!refused || routes.size() < 2 || !request.uri().toString().startsWith(api)) {
+            return;
+        }
+
+        var next = routes.get((routes.indexOf(api) + 1) % routes.size());
+        log.warn("Telegram через {} не открывается ({}). Пробую через {}.", host(api), e.getMessage(), host(next));
+        api = next;
+    }
+
+    /** Только хост — в журнал, без пути (в пути бывает токен). */
+    static String host(String url) {
+        try {
+            return URI.create(url).getHost();
+        } catch (RuntimeException e) {
+            return "другой адрес";
+        }
+    }
+
+    /** Через какой адрес сейчас ходим — для журнала и проверок. */
+    String route() {
+        return api;
+    }
+
     /** Снимает веб-хук: пока он стоит, getUpdates Telegram не отдаёт. */
     public void deleteWebhook() throws IOException {
         call("deleteWebhook", Map.of());
@@ -615,6 +663,7 @@ public final class Telegram {
             throw new IOException("запрос прерван");
         } catch (IOException e) {
             renew(client);
+            switchRoute(request, e);
             throw e;
         }
 

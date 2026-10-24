@@ -121,6 +121,13 @@ final class DevicePage extends Ui.Card {
     private JToggleButton viaOpenRgb;
     private JToggleButton viaSignal;
 
+    /**
+     * Подсветка временно убрана из интерфейса: вкладки «Кастомизация» нет,
+     * режимы не запускаются, порт для эффекта SignalRGB не открывается. Код
+     * остаётся — вернуть всё можно, поставив true.
+     */
+    static final boolean LIGHTING = false;
+
     DevicePage(MatrixBackground background, Path home, Consumer<String> toast, Supplier<String> bridgeApi) {
         super(new BorderLayout(0, 14));
         // Свои потоки: замер скорости идёт полминуты и не должен держать кнопки процессов
@@ -145,7 +152,9 @@ final class DevicePage extends Ui.Card {
 
         try {
             // Эффект «VIRUS» в SignalRGB спрашивает настройки здесь — всё время, пока открыт V.I.R.U.S.
-            glow.start(SignalRgb.OUR_PORT);
+            if (LIGHTING) {
+                glow.start(SignalRgb.OUR_PORT);
+            }
         } catch (IOException e) {
             // порт занят — значит, V.I.R.U.S. уже запущен ещё раз; эффект спросит у того
         }
@@ -158,10 +167,14 @@ final class DevicePage extends Ui.Card {
 
         add(header(), BorderLayout.NORTH);
         body.add(overview(), "overview");
-        body.add(customization(), "custom");
+
+        if (LIGHTING) {
+            body.add(customization(), "custom");
+        }
+
         add(body, BorderLayout.CENTER);
 
-        if (openRgbEngine()) {
+        if (LIGHTING && openRgbEngine()) {
             // Режим, выбранный в прошлый раз, играет сразу с запуском V.I.R.U.S.
             animator.start(settings.host);
         }
@@ -178,7 +191,8 @@ final class DevicePage extends Ui.Card {
     private JComponent header() {
         var titles = Ui.transparent(new BorderLayout(0, 4));
         titles.add(Ui.label("Устройство", Theme.ui.deriveFont(Font.BOLD, 22f), Theme.TEXT), BorderLayout.NORTH);
-        titles.add(Ui.muted("Компьютер, интернет, связь с Discord и Telegram — и подсветка.", 13f),
+        titles.add(Ui.muted(LIGHTING ? "Компьютер, интернет, связь с Discord и Telegram — и подсветка."
+                        : "Компьютер, интернет и связь с Discord и Telegram.", 13f),
                 BorderLayout.CENTER);
 
         var group = new ButtonGroup();
@@ -197,7 +211,11 @@ final class DevicePage extends Ui.Card {
 
         var head = Ui.transparent(new BorderLayout(12, 0));
         head.add(titles, BorderLayout.CENTER);
-        head.add(chips, BorderLayout.EAST);
+
+        // Одна вкладка — переключатель не нужен
+        if (LIGHTING) {
+            head.add(chips, BorderLayout.EAST);
+        }
         return head;
     }
 
@@ -1251,10 +1269,13 @@ final class DevicePage extends Ui.Card {
                 SwingUtilities.invokeLater(() -> showFacts(hardware));
             });
             checkServers();
-            checkApps();
 
-            if (!openRgbEngine()) {
-                connectSignal(false);
+            if (LIGHTING) {
+                checkApps();
+
+                if (!openRgbEngine()) {
+                    connectSignal(false);
+                }
             }
         }
     }
@@ -1744,7 +1765,7 @@ final class DevicePage extends Ui.Card {
         var saved = Settings.load(home.resolve("device.json"));
 
         // Режим через OpenRGB запускает сама страница «Устройство» — один цвет поверх не нужен
-        if (!saved.applyOnStart || "openrgb".equals(saved.engine)) {
+        if (!LIGHTING || !saved.applyOnStart || "openrgb".equals(saved.engine)) {
             return;
         }
 

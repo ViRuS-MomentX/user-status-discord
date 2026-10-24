@@ -103,6 +103,26 @@ final class ConfigService {
         return added;
     }
 
+    /**
+     * Разложить по разделам то, что прошлые версии дописали в конец файла.
+     *
+     * @return сколько настроек переехало
+     */
+    int tidy() throws IOException {
+        if (!exists()) {
+            return 0;
+        }
+
+        var config = read();
+        var moved = config.tidy(example());
+
+        if (moved > 0) {
+            config.write(file());
+        }
+
+        return moved;
+    }
+
     static ConfigFile example() throws IOException {
         try (InputStream in = ConfigService.class.getResourceAsStream("/config.properties.example")) {
             return in == null ? ConfigFile.parse("")

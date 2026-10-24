@@ -197,9 +197,14 @@ final class ConfigFile {
         return value == null ? "" : value.replace("\r", "").replace("\n", " ");
     }
 
+    /** Заголовок дописанного блока: настройки, которым не нашлось своего раздела. */
+    static final String APPENDIX = "Добавлено V.I.R.U.S. из образца";
+
     /**
      * Настройки из образца, которых в файле нет, — с их пояснениями. Нужно
      * после обновления: новая версия бота умеет больше, чем знает старый файл.
+     * Каждая встаёт в конец своего раздела; если такого раздела в файле нет —
+     * в общий блок в конце.
      *
      * @return сколько добавлено
      */
@@ -235,14 +240,19 @@ final class ConfigFile {
             var entry = ENTRY.matcher(line);
 
             if (entry.matches() && !have.contains(entry.group(2))) {
-                block.add("");
+                var unit = new ArrayList<String>(comment);
+                unit.add(line);
 
-                if (!section.isEmpty()) {
-                    block.add("# [" + section + "]");
+                if (!insertInto(section, unit)) {
+                    block.add("");
+
+                    if (!section.isEmpty()) {
+                        block.add("# [" + section + "]");
+                    }
+
+                    block.addAll(unit);
                 }
 
-                block.addAll(comment);
-                block.add(line);
                 have.add(entry.group(2));
                 added++;
             }
@@ -250,14 +260,183 @@ final class ConfigFile {
             comment.clear();
         }
 
-        if (added > 0) {
+        if (!block.isEmpty()) {
             lines.add("");
             lines.add("# ---------------------------------------------------------------------------");
-            lines.add("# Добавлено V.I.R.U.S. из образца " + LocalDate.now());
+            lines.add("# " + APPENDIX + " " + LocalDate.now());
             lines.add("# ---------------------------------------------------------------------------");
             lines.addAll(block);
         }
 
         return added;
+    }
+
+    /**
+     * Настройки, дописанные раньше в блок «Добавлено V.I.R.U.S.», — по своим
+     * разделам. Опустевший блок убирается. В меню панели такой блок висел
+     * отдельным разделом с длинным названием.
+     *
+     * @return сколько настроек переехало
+     */
+    int tidy(ConfigFile example) {
+        var home = new LinkedHashMap<String, String>();
+
+        for (var field : example.fields()) {
+            home.put(field.key(), field.section());
+        }
+
+        var moves = new ArrayList<Map.Entry<String, List<String>>>();
+        var headers = headers();
+
+        // С конца — чтобы вырезание не сдвигало ещё не разобранные блоки
+        for (var h = headers.size() - 1; h >= 0; h--) {
+            var at = headers.get(h);
+
+            if (!title(at).startsWith(APPENDIX)) {
+                continue;
+            }
+
+            var end = h + 1 < headers.size() ? headers.get(h + 1) : lines.size();
+            var kept = new ArrayList<String>();
+            var comment = new ArrayList<String>();
+            var keptEntries = 0;
+            var before = moves.size();
+
+            for (var i = at + 3; i < end; i++) {
+                var line = lines.get(i);
+                var trimmed = line.strip();
+
+                if (trimmed.isEmpty()) {
+                    kept.addAll(comment);
+                    comment.clear();
+                    kept.add(line);
+                    continue;
+                }
+
+                if (trimmed.startsWith("#")) {
+                    // «# [Раздел]» — пометка, откуда настройка; при переезде она не нужна
+                    if (!trimmed.matches("#\\s*\\[.*]")) {
+                        comment.add(line);
+                    }
+                    continue;
+                }
+
+                var entry = ENTRY.matcher(line);
+                var section = entry.matches() ? home.get(entry.group(2)) : null;
+
+                if (section != null && !section.startsWith(APPENDIX) && hasSection(section)) {
+                    var unit = new ArrayList<String>(comment);
+                    unit.add(line);
+                    moves.add(Map.entry(section, unit));
+                } else {
+                    kept.addAll(comment);
+                    kept.add(line);
+                    keptEntries++;
+                }
+
+                comment.clear();
+            }
+
+            if (moves.size() == before) {
+                continue;
+            }
+
+            for (var i = end - 1; i >= at; i--) {
+                lines.remove(i);
+            }
+
+            if (keptEntries > 0) {
+                var header = List.of("# ---------------------------------------------------------------------------",
+                        "# " + APPENDIX, "# ---------------------------------------------------------------------------");
+                lines.addAll(at, header);
+                lines.addAll(at + 3, kept);
+            } else {
+                // Пустые строки перед убранным блоком — тоже прочь
+                while (at > 0 && at <= lines.size() && lines.get(at - 1).isBlank()) {
+                    lines.remove(--at);
+                }
+            }
+        }
+
+        for (var move : moves) {
+            insertInto(move.getKey(), move.getValue());
+        }
+
+        return moves.size();
+    }
+
+    /** Где начинаются заголовки разделов (первая черта). */
+    private List<Integer> headers() {
+        var result = new ArrayList<Integer>();
+
+        for (var i = 0; i + 2 < lines.size(); i++) {
+            if (RULE.matcher(lines.get(i).strip()).matches() && RULE.matcher(lines.get(i + 2).strip()).matches()
+                    && lines.get(i + 1).strip().startsWith("#")) {
+                result.add(i);
+                i += 2;
+            }
+        }
+
+        return result;
+    }
+
+    private String title(int header) {
+        return lines.get(header + 1).strip().replaceFirst("^#\\s*", "");
+    }
+
+    private boolean hasSection(String name) {
+        return headers().stream().anyMatch(at -> title(at).equals(name));
+    }
+
+    /**
+     * Вставить настройку с пояснением в конец раздела.
+     *
+     * @return false — такого раздела в файле нет
+     */
+    private boolean insertInto(String section, List<String> unit) {
+        if (section.startsWith(APPENDIX)) {
+            return false;
+        }
+
+        var headers = headers();
+
+        // Без заголовка — «Основное»: начало файла до первого раздела
+        if (section.isEmpty()) {
+            if (headers.isEmpty() || lines.subList(0, headers.getFirst()).stream().allMatch(String::isBlank)) {
+                return false;
+            }
+
+            var end = headers.getFirst();
+
+            while (end > 0 && lines.get(end - 1).isBlank()) {
+                end--;
+            }
+
+            var insert = new ArrayList<String>();
+            insert.add("");
+            insert.addAll(unit);
+            lines.addAll(end, insert);
+            return true;
+        }
+
+        for (var h = 0; h < headers.size(); h++) {
+            if (!title(headers.get(h)).equals(section)) {
+                continue;
+            }
+
+            var end = h + 1 < headers.size() ? headers.get(h + 1) : lines.size();
+
+            while (end > headers.get(h) + 3 && lines.get(end - 1).isBlank()) {
+                end--;
+            }
+
+            var insert = new ArrayList<String>();
+            insert.add("");
+            insert.addAll(unit);
+            lines.addAll(end, insert);
+            return true;
+        }
+
+        return false;
     }
 }

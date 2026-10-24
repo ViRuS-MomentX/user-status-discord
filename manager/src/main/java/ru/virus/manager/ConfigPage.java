@@ -172,9 +172,23 @@ final class ConfigPage extends Ui.Card {
         return rawMode ? !raw.getText().equals(rawOriginal) : !changes.isEmpty();
     }
 
+    /** Ширина текста в меню разделов: меню 236 точек минус отступы кнопки. */
+    private static final int NAV_TEXT = 170;
+
     /** Перечитать файл и показать заново, без несохранённого. */
     void reload() {
         people.reload();
+
+        try {
+            var moved = config.tidy();
+
+            if (moved > 0) {
+                toast.accept("Настройки, дописанные в конец файла, разложены по разделам: " + moved + ".");
+            }
+        } catch (IOException e) {
+            // не вышло — покажем как есть
+        }
+
         changes.clear();
         path.setText(config.file().toString());
 
@@ -291,11 +305,13 @@ final class ConfigPage extends Ui.Card {
 
             form.add(section);
 
-            var link = Ui.ghost("<html>" + escape(entry.getKey()) + "&nbsp;&nbsp;<font color='#39ff8a'>"
-                    + entry.getValue().size() + "</font></html>");
+            // Длинное название переносится, и строка меню растёт вместе с ним —
+            // раньше высота была жёсткой, и вторая строка наезжала на соседний пункт
+            var link = Ui.ghost("<html><body style='width:" + NAV_TEXT + "px'>" + escape(entry.getKey())
+                    + "&nbsp;&nbsp;<font color='#39ff8a'>" + entry.getValue().size() + "</font></body></html>");
             link.setHorizontalAlignment(JButton.LEFT);
             link.setAlignmentX(LEFT_ALIGNMENT);
-            link.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+            link.setMaximumSize(new Dimension(Integer.MAX_VALUE, link.getPreferredSize().height));
             link.addActionListener(e -> SwingUtilities.invokeLater(() -> {
                 var bounds = section.getBounds();
                 bounds.height = Math.max(bounds.height, formScroll.getViewport().getHeight());
@@ -307,10 +323,10 @@ final class ConfigPage extends Ui.Card {
         // Участники — свой раздел со строками, а не поля config.properties
         if (query.isEmpty() || "участники как называть шутить".contains(query)) {
             form.add(people);
-            var link = Ui.ghost("<html>Участники</html>");
+            var link = Ui.ghost("<html><body style='width:" + NAV_TEXT + "px'>Участники</body></html>");
             link.setHorizontalAlignment(JButton.LEFT);
             link.setAlignmentX(LEFT_ALIGNMENT);
-            link.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+            link.setMaximumSize(new Dimension(Integer.MAX_VALUE, link.getPreferredSize().height));
             link.addActionListener(e -> SwingUtilities.invokeLater(() -> form.scrollRectToVisible(people.getBounds())));
             nav.add(link);
         }

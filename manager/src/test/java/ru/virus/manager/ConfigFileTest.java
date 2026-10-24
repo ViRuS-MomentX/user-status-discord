@@ -85,6 +85,59 @@ class ConfigFileTest {
     }
 
     @Test
+    void missingSettingGoesIntoItsOwnSection() {
+        var mine = ConfigFile.parse("""
+                bot.token=abc
+
+                # ---------------------------------------------------------------------------
+                # Пародия
+                # ---------------------------------------------------------------------------
+                parody.enabled=true
+                parody.llm.key=k
+
+                # ---------------------------------------------------------------------------
+                # Другое
+                # ---------------------------------------------------------------------------
+                other=1""");
+
+        assertEquals(2, mine.addMissing(ConfigFile.parse(TEXT)));
+        var fields = mine.fields();
+        assertEquals("Пародия", fields.stream().filter(f -> f.key().equals("parody.chance")).findFirst().orElseThrow().section());
+        assertEquals("Основное", fields.stream().filter(f -> f.key().equals("guild.id")).findFirst().orElseThrow().section());
+        assertFalse(mine.text().contains(ConfigFile.APPENDIX), "отдельного блока «Добавлено» нет: " + mine.text());
+    }
+
+    @Test
+    void oldAppendixIsSortedIntoSections() {
+        var mine = ConfigFile.parse("""
+                bot.token=abc
+                guild.id=1
+
+                # ---------------------------------------------------------------------------
+                # Пародия
+                # ---------------------------------------------------------------------------
+                parody.enabled=true
+                parody.llm.key=k
+
+                # ---------------------------------------------------------------------------
+                # Добавлено V.I.R.U.S. из образца 2026-10-21
+                # ---------------------------------------------------------------------------
+
+                # [Пародия]
+                # Сколько встревать.
+                parody.chance=7""");
+
+        assertEquals(1, mine.tidy(ConfigFile.parse(TEXT)));
+        var chance = mine.fields().stream().filter(f -> f.key().equals("parody.chance")).findFirst().orElseThrow();
+        assertEquals("Пародия", chance.section());
+        assertEquals("7", chance.value(), "значение не теряется");
+        assertEquals("Сколько встревать.", chance.hint());
+        assertFalse(mine.text().contains("Добавлено"), mine.text());
+        assertFalse(mine.text().contains("# [Пародия]"), mine.text());
+        assertEquals(0, mine.tidy(ConfigFile.parse(TEXT)), "второй раз переносить нечего");
+    }
+
+    @Test
     void writeKeepsBackupAndHandlesBom(@TempDir Path dir) throws Exception {
         var file = dir.resolve("config.properties");
         Files.writeString(file, "\uFEFFbot.token=old", StandardCharsets.UTF_8);

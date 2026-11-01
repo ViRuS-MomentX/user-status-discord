@@ -72,8 +72,9 @@ final class GlowPreview extends JComponent {
 
     private Color[] frame(List<OpenRgb.Place> places, int seed) {
         var shaped = Glow.positional(settings.mode) ? places : Glow.shape(places, settings.reverse, settings.scale);
-        return Glow.frame(settings.mode, time, shaped, settings.color, settings.color2, settings.cpu(),
-                Math.max(25, settings.brightness), settings.on, seed);
+        return RgbAnimator.overlay(Glow.frame(settings.mode, time, shaped, settings.color, settings.color2, settings.cpu(),
+                Math.max(25, settings.brightness), settings.on, seed), settings.flashColor,
+                settings.flashLevel(System.currentTimeMillis()));
     }
 
     @Override

@@ -142,6 +142,21 @@ final class RgbAnimator {
         }
     }
 
+    /** Сигнал поверх кадра: весь кадр тянется к цвету сигнала. */
+    static Color[] overlay(Color[] frame, Color color, double level) {
+        if (level <= 0) {
+            return frame;
+        }
+
+        var result = new Color[frame.length];
+
+        for (var i = 0; i < frame.length; i++) {
+            result[i] = Glow.mix(frame[i], color, level);
+        }
+
+        return result;
+    }
+
     /** Что видно глазу: режим, цвета, вкл/выкл. Поменялось — пора плавного перехода. */
     private String look() {
         return settings.mode + "|" + settings.reverse + "|" + settings.scale + "|" + modes + "|" + settings.color.getRGB() + "|" + settings.color2.getRGB() + "|" + settings.on
@@ -273,6 +288,8 @@ final class RgbAnimator {
                 if (fade < 1 && from[d] != null) {
                     frame = blend(from[d], frame, fade);
                 }
+
+                frame = overlay(frame, settings.flashColor, settings.flashLevel(System.currentTimeMillis()));
 
                 shown[d] = frame;
 

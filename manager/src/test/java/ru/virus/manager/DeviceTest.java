@@ -819,4 +819,20 @@ class DeviceTest {
             assertFalse(rgb.save(devices.get(2), Color.RED), "в версии 0 записи в память нет");
         }
     }
+
+    @Test
+    void eventsFlashTheLights() {
+        var live = new SignalRgb.Live(() -> 0);
+        var now = System.currentTimeMillis();
+        assertEquals(0.0, live.flashLevel(now), "сигнала нет");
+
+        live.flash(Color.RED);
+        var middle = live.flashLevel(now + SignalRgb.Live.FLASH_MS / 6);
+        assertTrue(middle > 0.9, "первый импульс — в полную силу: " + middle);
+        assertEquals(0.0, live.flashLevel(now + SignalRgb.Live.FLASH_MS + 10), "сигнал закончился");
+
+        var frame = new Color[] {Color.BLUE};
+        assertEquals(Color.RED, RgbAnimator.overlay(frame, Color.RED, 1)[0]);
+        assertEquals(Color.BLUE, RgbAnimator.overlay(frame, Color.RED, 0)[0]);
+    }
 }

@@ -793,6 +793,21 @@ final class DevicePage extends Ui.Card {
         hardwareRow.add(hardware);
         hardwareRow.add(Ui.muted("как Hardware Lighting в iCUE: цвет остаётся, даже когда программы выключены", 12.5f));
         stack.add(left(hardwareRow));
+        stack.add(Box.createVerticalStrut(10));
+        var signalsSwitch = new Ui.Switch(settings.signals);
+        signalsSwitch.onChange(on -> {
+            settings.signals = on;
+            settings.save();
+
+            if (on) {
+                glow.flash(Theme.ACCENT);
+            }
+        });
+        var signalsRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        signalsRow.add(signalsSwitch);
+        signalsRow.add(Ui.muted("мигать о событиях: красным — упал процесс, оранжевым — поломка, зелёным — встал плагин",
+                12.5f));
+        stack.add(left(signalsRow));
         signalOnly.add(Box.createVerticalStrut(16));
         signalOnly.add(left(effectsHead));
         signalOnly.add(Box.createVerticalStrut(6));
@@ -2132,6 +2147,13 @@ final class DevicePage extends Ui.Card {
         return row;
     }
 
+    /** Световой сигнал о событии — если хозяин их не выключил. */
+    void signal(Color color) {
+        if (LIGHTING && settings.signals) {
+            glow.flash(color);
+        }
+    }
+
     /** Основной цвет — в память устройств, которые это умеют. */
     private void saveToHardware() {
         var color = glow.color;
@@ -2756,6 +2778,8 @@ final class DevicePage extends Ui.Card {
         /** Узор: в обратную сторону и масштаб. */
         boolean glowReverse;
         double glowScale = 1;
+        /** Мигать подсветкой о событиях: упал процесс, поломка, плагин. */
+        boolean signals = true;
         /** Основной цвет берётся из цвета оформления Windows. */
         boolean followAccent;
         /** Ночь: с какого по какой час приглушать и до скольких процентов. */
@@ -2817,6 +2841,7 @@ final class DevicePage extends Ui.Card {
 
                     settings.nightOn = Boolean.TRUE.equals(json.get("nightOn"));
                     settings.followAccent = Boolean.TRUE.equals(json.get("followAccent"));
+                    settings.signals = !Boolean.FALSE.equals(json.get("signals"));
                     settings.glowReverse = Boolean.TRUE.equals(json.get("glowReverse"));
                     settings.glowScale = json.get("glowScale") instanceof Number n ? n.doubleValue() : 1;
                     settings.openRgbTask = Boolean.TRUE.equals(json.get("openRgbTask"));
@@ -2906,6 +2931,7 @@ final class DevicePage extends Ui.Card {
             json.put("canvasOrder", canvasOrder);
             json.put("nightOn", nightOn);
             json.put("followAccent", followAccent);
+            json.put("signals", signals);
             json.put("glowReverse", glowReverse);
             json.put("glowScale", glowScale);
             json.put("openRgbTask", openRgbTask);

@@ -66,6 +66,8 @@ final class MainWindow extends JFrame {
     private final Map<String, PluginWatch> watches = new java.util.concurrent.ConcurrentHashMap<>();
     /** Доктор у каждого процесса: узнаёт поломки по консоли. */
     private final Map<String, Doctor> doctors = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Прошлое состояние процессов — чтобы заметить падение. */
+    private final Map<String, ManagedProcess.State> lastStates = new java.util.HashMap<>();
     private final DevicePage devicePage;
     private final Ui.Card side;
     private final java.util.prefs.Preferences prefs = java.util.prefs.Preferences.userNodeForPackage(MainWindow.class);
@@ -752,6 +754,15 @@ final class MainWindow extends JFrame {
         }
 
         for (var process : all) {
+            // Упал — красная вспышка подсветкой (один раз на падение)
+            var state = process.state();
+            var before = lastStates.put(process.spec().id(), state);
+
+            if (before == ManagedProcess.State.RUNNING
+                    && (state == ManagedProcess.State.FAILED || state == ManagedProcess.State.WAITING)) {
+                devicePage.signal(Theme.ERROR);
+            }
+
             rows.get(process.spec().id()).update(process, doctor(process).active(System.currentTimeMillis()));
             watch(process);
         }
@@ -779,6 +790,7 @@ final class MainWindow extends JFrame {
 
                 if (issue != null) {
                     SwingUtilities.invokeLater(() -> {
+                        devicePage.signal(Theme.WARN);
                         toast(process.spec().name() + ": " + issue.title());
                         Virus.notifyTray(process.spec().name() + ": " + issue.title(), issue.advice());
                     });
@@ -837,6 +849,7 @@ final class MainWindow extends JFrame {
 
         return watches.computeIfAbsent(process.spec().id(), id -> {
             var watch = new PluginWatch(process, (text, good) -> SwingUtilities.invokeLater(() -> {
+                devicePage.signal(good ? Theme.ACCENT : Theme.ERROR);
                 toast(text);
                 Virus.notifyTray(good ? "Плагин обновлён" : "Плагин: что-то не так", text);
                 process.log().add(java.time.LocalTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"))

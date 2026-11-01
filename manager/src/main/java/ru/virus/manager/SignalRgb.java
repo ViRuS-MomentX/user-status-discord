@@ -398,6 +398,29 @@ final class SignalRgb {
             server.start();
         }
 
+        /** Световой сигнал поверх режима: каким цветом и до какого времени. */
+        volatile Color flashColor = Color.WHITE;
+        volatile long flashUntil;
+        static final long FLASH_MS = 1800;
+
+        /** Мигнуть три раза — о событии: упал процесс, нашлась поломка, встал плагин. */
+        void flash(Color color) {
+            flashColor = color;
+            flashUntil = System.currentTimeMillis() + FLASH_MS;
+        }
+
+        /** Насколько сейчас виден сигнал, 0..1: три мягких импульса. */
+        double flashLevel(long now) {
+            var left = flashUntil - now;
+
+            if (left <= 0) {
+                return 0;
+            }
+
+            var phase = 1 - left / (double) FLASH_MS;
+            return Math.max(0, Math.sin(phase * Math.PI * 3));
+        }
+
         /** Яркость с учётом расписания и простоя. */
         int effective() {
             return brightness * Math.max(0, Math.min(100, dim)) / 100;

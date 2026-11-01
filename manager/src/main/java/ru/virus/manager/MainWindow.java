@@ -233,6 +233,10 @@ final class MainWindow extends JFrame {
         side.add(configRow);
         side.add(Box.createVerticalGlue());
         side.add(indent(Ui.label("Кликни по фону — пойдёт волна", Theme.ui.deriveFont(11.5f), Theme.DIM)));
+        side.add(Box.createVerticalStrut(4));
+        var version = Ui.label(versionText(AutoUpdate.current()), Theme.mono.deriveFont(11.5f), Theme.DIM);
+        version.setToolTipText("Номер сборки на GitHub — по нему видно, обновился ли V.I.R.U.S.");
+        side.add(indent(version));
 
         // Пустая страница — пока ничего не выбрано
         var empty = new Ui.Card(new BorderLayout());
@@ -657,6 +661,11 @@ final class MainWindow extends JFrame {
         banner.add(fix, BorderLayout.EAST);
         banners.add(banner);
         banners.revalidate();
+    }
+
+    /** Подпись версии: номер сборки с GitHub или «своя сборка», если собрано не там. */
+    static String versionText(int build) {
+        return build > 0 ? "Версия: сборка " + build : "Версия: своя сборка";
     }
 
     /** Свой адрес Bot API из настроек бота — его тоже проверяем на связь. */

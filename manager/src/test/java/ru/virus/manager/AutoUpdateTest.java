@@ -73,4 +73,10 @@ class AutoUpdateTest {
         supervisor.startAutostart();
         assertFalse(Files.exists(home.resolve(Supervisor.RESUME)), "список читается один раз");
     }
+
+    @org.junit.jupiter.api.Test
+    void versionIsShownAsBuildNumber() {
+        org.junit.jupiter.api.Assertions.assertEquals("Версия: сборка 57", MainWindow.versionText(57));
+        org.junit.jupiter.api.Assertions.assertEquals("Версия: своя сборка", MainWindow.versionText(-1));
+    }
 }

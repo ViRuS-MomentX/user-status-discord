@@ -765,6 +765,11 @@ final class MainWindow extends JFrame {
         autostartSwitch.setOn(autostart.isEnabled());
     }
 
+    /** Меню «Подсветка» для трея. */
+    java.awt.Menu lightingMenu() {
+        return devicePage.trayMenu();
+    }
+
     /** Доктор процесса — слушает его консоль с первой строки. */
     private Doctor doctor(ManagedProcess process) {
         return doctors.computeIfAbsent(process.spec().id(), id -> {

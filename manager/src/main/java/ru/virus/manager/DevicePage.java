@@ -492,6 +492,7 @@ final class DevicePage extends Ui.Card {
         statusRow.add(statusButtons, BorderLayout.EAST);
 
         signalOn.onChange(on -> {
+            SwingUtilities.invokeLater(this::fillTrayMenu);
             if (openRgbEngine()) {
                 glow.on = on;
                 settings.glowOn = on;
@@ -974,8 +975,85 @@ final class DevicePage extends Ui.Card {
         return row;
     }
 
+    /** Меню «Подсветка» в трее — пересобирается, когда меняются профили. */
+    private final java.awt.Menu trayMenu = new java.awt.Menu("Подсветка");
+
+    /**
+     * Подсветка из трея, как меню значка у iCUE и SignalRGB: включить или
+     * выключить, профиль, режим — не открывая окно.
+     */
+    java.awt.Menu trayMenu() {
+        fillTrayMenu();
+        return trayMenu;
+    }
+
+    private void fillTrayMenu() {
+        trayMenu.removeAll();
+        var power = new java.awt.MenuItem(glow.on ? "Выключить" : "Включить");
+        power.addActionListener(e -> SwingUtilities.invokeLater(() -> setLighting(!glow.on)));
+        trayMenu.add(power);
+
+        if (!settings.profiles.isEmpty()) {
+            trayMenu.addSeparator();
+
+            for (var profile : settings.profiles) {
+                var item = new java.awt.MenuItem("Профиль: " + profile.name());
+                item.addActionListener(e -> SwingUtilities.invokeLater(() -> {
+                    autoProfile = null;
+                    beforeAuto = null;
+                    applyProfile(profile);
+                }));
+                trayMenu.add(item);
+            }
+        }
+
+        trayMenu.addSeparator();
+
+        for (var group : MODE_GROUPS.entrySet()) {
+            var sub = new java.awt.Menu(group.getKey());
+
+            for (var id : group.getValue()) {
+                var mode = SignalRgb.mode(id);
+                var item = new java.awt.MenuItem(mode.name());
+                item.addActionListener(e -> SwingUtilities.invokeLater(() -> {
+                    var tile = tileById.get(id);
+
+                    if (tile != null) {
+                        tile.setSelected(true);
+                    }
+
+                    chooseMode(mode);
+                }));
+                sub.add(item);
+            }
+
+            trayMenu.add(sub);
+        }
+    }
+
+    /** Включить или выключить подсветку — как переключатель «подсветка» на странице. */
+    void setLighting(boolean on) {
+        signalQuiet = true;
+        signalOn.setOn(on);
+        signalQuiet = false;
+
+        if (openRgbEngine()) {
+            glow.on = on;
+            settings.glowOn = on;
+            settings.save();
+        } else if (signalLocked) {
+            glow.on = on;
+            glowNudge();
+        } else {
+            signalCall(() -> signal.enabled(on));
+        }
+
+        fillTrayMenu();
+    }
+
     /** Профили: кнопки, «сохранить как», правила для программ. */
     private void showProfiles() {
+        fillTrayMenu();
         profileRow.removeAll();
         profileRow.add(Ui.muted("Профили", 13f));
 

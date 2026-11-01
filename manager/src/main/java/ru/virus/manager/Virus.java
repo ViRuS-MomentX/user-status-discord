@@ -200,6 +200,11 @@ public final class Virus {
         var exit = new MenuItem("Выход (остановить всё)");
         exit.addActionListener(event -> new Thread(quit, "virus-quit").start());
         menu.add(open);
+
+        if (DevicePage.LIGHTING) {
+            menu.add(window.lightingMenu());
+        }
+
         menu.addSeparator();
         menu.add(exit);
 

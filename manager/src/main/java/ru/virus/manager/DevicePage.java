@@ -262,6 +262,11 @@ final class DevicePage extends Ui.Card {
                 rotate();
             }).start();
             new Timer(10_000, e -> followAccent()).start();
+            new Timer((int) BleLamps.PERIOD_MS, e -> feedLamps()).start();
+
+            if (settings.bleLamps) {
+                lamps.start();
+            }
         }
 
         if (LIGHTING && openRgbEngine()) {
@@ -975,6 +980,27 @@ final class DevicePage extends Ui.Card {
         signalsRow.add(Ui.muted("мигать о событиях: красным — упал процесс, оранжевым — поломка, зелёным — встал плагин",
                 12.5f));
         stack.add(left(signalsRow));
+
+        // Bluetooth-лампы (Lotus Lamp X и подобные) — повторяют режим, как устройства в OpenRGB
+        stack.add(Box.createVerticalStrut(10));
+        var lampsSwitch = new Ui.Switch(settings.bleLamps);
+        lampsSwitch.onChange(on -> {
+            settings.bleLamps = on;
+            settings.save();
+
+            if (on) {
+                lampsStatus.setText("Лампы: ищу по Bluetooth… (закрой Lotus на телефоне)");
+                lamps.start();
+            } else {
+                lamps.stop();
+                lampsStatus.setText("");
+            }
+        });
+        var lampsRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        lampsRow.add(lampsSwitch);
+        lampsRow.add(Ui.muted("Bluetooth-лампы и ленты (Lotus Lamp X, duoCo и подобные) повторяют режим", 12.5f));
+        stack.add(left(lampsRow));
+        stack.add(left(lampsStatus));
         signalOnly.add(Box.createVerticalStrut(16));
         signalOnly.add(left(effectsHead));
         signalOnly.add(Box.createVerticalStrut(6));
@@ -1732,6 +1758,28 @@ final class DevicePage extends Ui.Card {
         } catch (IOException | RuntimeException e) {
             // OpenRGB уже закрыт — красить нечего
         }
+    }
+
+    /** Bluetooth-лампы: что с ними и сам помощник. */
+    private final JLabel lampsStatus = Ui.muted("", 12.5f);
+    private final BleLamps lamps = new BleLamps(text -> SwingUtilities.invokeLater(() -> lampsStatus.setText(text)));
+    private double lampsTime;
+    private long lampsAt = System.nanoTime();
+
+    /** Цвет режима для ламп — как для устройства «одним цветом» в OpenRGB. */
+    private void feedLamps() {
+        var now = System.nanoTime();
+        lampsTime += (now - lampsAt) / 1e9 * Math.max(1, Math.min(100, glow.speed)) / 50.0;
+        lampsAt = now;
+
+        if (!settings.bleLamps) {
+            return;
+        }
+
+        var color = Glow.frame(glow.mode, lampsTime, List.of(new OpenRgb.Place(0.5, 0.5, false)), glow.color,
+                glow.color2, glow.cpu(), glow.effective(), glow.on, 300)[0];
+        lamps.color(RgbAnimator.overlay(new Color[] {color}, glow.flashColor,
+                glow.flashLevel(System.currentTimeMillis()))[0]);
     }
 
     /** Переключатель «как в Windows». */
@@ -3246,6 +3294,7 @@ final class DevicePage extends Ui.Card {
         int idleMinutes = 0;
         int idleLevel = 0;
         int rotateMinutes = 0;
+        boolean bleLamps;
         boolean offWhenLocked = true;
         String exitLight = "ровный цвет";
         int screenMonitor = -1;
@@ -3311,6 +3360,7 @@ final class DevicePage extends Ui.Card {
                     settings.idleMinutes = json.get("idleMinutes") instanceof Number n ? n.intValue() : 0;
                     settings.idleLevel = json.get("idleLevel") instanceof Number n ? n.intValue() : 0;
                     settings.rotateMinutes = json.get("rotateMinutes") instanceof Number n ? n.intValue() : 0;
+                    settings.bleLamps = Boolean.TRUE.equals(json.get("bleLamps"));
                     settings.offWhenLocked = !Boolean.FALSE.equals(json.get("offWhenLocked"));
                     settings.screenMonitor = json.get("screenMonitor") instanceof Number n ? n.intValue() : -1;
                     settings.exitLight = json.get("exitLight") instanceof String exit && EXIT_CHOICES.contains(exit)
@@ -3407,6 +3457,7 @@ final class DevicePage extends Ui.Card {
             json.put("idleMinutes", idleMinutes);
             json.put("idleLevel", idleLevel);
             json.put("rotateMinutes", rotateMinutes);
+            json.put("bleLamps", bleLamps);
             json.put("offWhenLocked", offWhenLocked);
             json.put("exitLight", exitLight);
             json.put("screenMonitor", screenMonitor);

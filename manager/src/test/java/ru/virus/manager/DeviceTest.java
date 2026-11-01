@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -1101,5 +1102,20 @@ class DeviceTest {
 
         assertTrue(reds > 10, "есть красная энергия: " + reds);
         assertTrue(greys > 100, "основа — серая сталь: " + greys);
+    }
+
+    @Test
+    void bluetoothLampsSpeakElkBledom() {
+        assertArrayEquals(new byte[] {0x7e, 0x00, 0x05, 0x03, (byte) 0xff, 0x00, 0x00, 0x00, (byte) 0xef},
+                BleLamps.frame(255, 0, 0), "красный — как в открытом описании протокола");
+        assertEquals("255 0 0", BleLamps.command(Color.RED));
+        assertTrue(BleLamps.NAMES.matcher("ELK-BLEDOM").find());
+        assertTrue(BleLamps.NAMES.matcher("ELK-LAMPL").find());
+        assertTrue(BleLamps.NAMES.matcher("MELK-OF10").find());
+        assertFalse(BleLamps.NAMES.matcher("JBL Flip 5").find());
+        assertTrue(BleLamps.describe("found ELK-LAMPL, ELK-LAMPL").contains("подключены"));
+        assertTrue(BleLamps.describe("none").contains("Lotus"));
+        assertNull(BleLamps.describe("какая-то служебная строка"));
+        assertTrue(BleLamps.script().contains("0000fff3") && !BleLamps.script().contains("%NAMES%"));
     }
 }

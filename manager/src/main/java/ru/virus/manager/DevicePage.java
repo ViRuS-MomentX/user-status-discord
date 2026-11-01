@@ -504,9 +504,38 @@ final class DevicePage extends Ui.Card {
         return scroll;
     }
 
-    private static double cpuLoad() {
-        return java.lang.management.ManagementFactory.getOperatingSystemMXBean()
-                instanceof com.sun.management.OperatingSystemMXBean bean ? bean.getCpuLoad() : 0;
+    /** Сглаженная загрузка и когда её мерили в последний раз. */
+    private static double cpuSmooth;
+    private static long cpuAt;
+
+    /**
+     * Загрузка процессора для режима «Нагрузка ЦП». Мерить её каждый кадр
+     * (30 раз в секунду) нельзя: на таких коротких отрезках Windows отдаёт
+     * шум, и цвет скачет зелёный↔красный. Как датчики в iCUE: замер раз в
+     * полсекунды и плавное сглаживание.
+     */
+    private static synchronized double cpuLoad() {
+        var now = System.currentTimeMillis();
+
+        if (now - cpuAt >= CPU_PERIOD_MS) {
+            cpuAt = now;
+            var raw = java.lang.management.ManagementFactory.getOperatingSystemMXBean()
+                    instanceof com.sun.management.OperatingSystemMXBean bean ? bean.getCpuLoad() : 0;
+            cpuSmooth = smoothLoad(cpuSmooth, raw);
+        }
+
+        return cpuSmooth;
+    }
+
+    static final long CPU_PERIOD_MS = 500;
+
+    /** Следующее сглаженное значение; неизмеренное (−1, NaN) пропускаем. */
+    static double smoothLoad(double previous, double raw) {
+        if (Double.isNaN(raw) || raw < 0) {
+            return previous;
+        }
+
+        return previous + (Math.min(1, raw) - previous) * 0.35;
     }
 
     /**

@@ -947,4 +947,23 @@ class DeviceTest {
         assertEquals(Color.BLACK, DevicePage.exitColor("ровный цвет", green, 100, false), "была выключена — так и остаётся");
         assertNull(DevicePage.exitColor("оставить как есть", green, 100, true));
     }
+
+    @Test
+    void cpuLoadIsSmoothed() {
+        // Один всплеск до 100% не красит всё в красный сразу
+        var load = DevicePage.smoothLoad(0.1, 1.0);
+        assertTrue(load > 0.1 && load < 0.5, String.valueOf(load));
+        // Неизмеренное не сбивает
+        assertEquals(0.4, DevicePage.smoothLoad(0.4, -1));
+        assertEquals(0.4, DevicePage.smoothLoad(0.4, Double.NaN));
+
+        // Долгая нагрузка доходит до своего значения
+        var steady = 0.0;
+
+        for (var i = 0; i < 20; i++) {
+            steady = DevicePage.smoothLoad(steady, 0.8);
+        }
+
+        assertEquals(0.8, steady, 0.01);
+    }
 }

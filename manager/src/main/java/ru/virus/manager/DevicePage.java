@@ -208,6 +208,7 @@ final class DevicePage extends Ui.Card {
                 watchPrograms();
                 updateDim();
             }).start();
+            new Timer(10_000, e -> followAccent()).start();
         }
 
         if (LIGHTING && openRgbEngine()) {
@@ -623,6 +624,15 @@ final class DevicePage extends Ui.Card {
         colorRow.add(Ui.muted("Цвет", 13f));
         colorRow.add(glowColor);
         colorRow.add(presets);
+        var accent = new Ui.Switch(settings.followAccent);
+        accent.setToolTipText("Основной цвет — цвет оформления Windows, как в «Динамическом освещении»");
+        accent.onChange(on -> {
+            settings.followAccent = on;
+            settings.save();
+            followAccent();
+        });
+        colorRow.add(accent);
+        colorRow.add(Ui.muted("как в Windows", 13f));
         colorRow.add(Ui.muted("Второй", 13f));
         colorRow.add(glowColor2);
         colorRow.add(Ui.muted("Скорость", 13f));
@@ -899,6 +909,25 @@ final class DevicePage extends Ui.Card {
 
     private java.awt.Point lastPointer;
     private long lastActivity = System.currentTimeMillis();
+
+    /** Цвет как в Windows: поменялся акцент — поменялся и основной цвет подсветки. */
+    private void followAccent() {
+        if (!settings.followAccent) {
+            return;
+        }
+
+        worker.submit(() -> {
+            var accent = WindowsAccent.read();
+
+            if (accent != null && !accent.equals(glow.color)) {
+                SwingUtilities.invokeLater(() -> {
+                    glow.color = accent;
+                    glowColor.setColor(accent);
+                    glowChanged();
+                });
+            }
+        });
+    }
 
     /** Ночь и простой — во множитель яркости; режим плавно перетечёт сам. */
     private void updateDim() {
@@ -2645,6 +2674,8 @@ final class DevicePage extends Ui.Card {
         final Map<String, String> appRules = new LinkedHashMap<>();
         /** Создана ли задача Планировщика, которая запускает OpenRGB от администратора. */
         boolean openRgbTask;
+        /** Основной цвет берётся из цвета оформления Windows. */
+        boolean followAccent;
         /** Ночь: с какого по какой час приглушать и до скольких процентов. */
         boolean nightOn;
         int nightFrom = 0;
@@ -2703,6 +2734,7 @@ final class DevicePage extends Ui.Card {
                     }
 
                     settings.nightOn = Boolean.TRUE.equals(json.get("nightOn"));
+                    settings.followAccent = Boolean.TRUE.equals(json.get("followAccent"));
                     settings.openRgbTask = Boolean.TRUE.equals(json.get("openRgbTask"));
                     settings.nightFrom = json.get("nightFrom") instanceof Number n ? n.intValue() : 0;
                     settings.nightTo = json.get("nightTo") instanceof Number n ? n.intValue() : 8;
@@ -2789,6 +2821,7 @@ final class DevicePage extends Ui.Card {
             json.put("canvas", canvas);
             json.put("canvasOrder", canvasOrder);
             json.put("nightOn", nightOn);
+            json.put("followAccent", followAccent);
             json.put("openRgbTask", openRgbTask);
             json.put("nightFrom", nightFrom);
             json.put("nightTo", nightTo);

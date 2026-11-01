@@ -732,4 +732,12 @@ class DeviceTest {
         assertEquals(SignalRgb.MODES.stream().map(SignalRgb.Mode::id).collect(java.util.stream.Collectors.toSet()),
                 new java.util.HashSet<>(grouped));
     }
+
+    @Test
+    void windowsAccentIsReadFromRegistry() {
+        var out = "\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\DWM\r\n    AccentColor    REG_DWORD    0xff3a2bd4\r\n";
+        // 0xAABBGGRR: красный d4, зелёный 2b, синий 3a
+        assertEquals(new Color(0xd4, 0x2b, 0x3a), WindowsAccent.parse(out));
+        assertEquals(null, WindowsAccent.parse("ERROR: The system was unable to find the specified registry key"));
+    }
 }

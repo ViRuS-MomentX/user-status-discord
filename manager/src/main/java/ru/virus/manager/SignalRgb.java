@@ -66,7 +66,8 @@ final class SignalRgb {
             new Mode(17, "Конфетти", true, false),
             new Mode(18, "Температура", false, false),
             new Mode(19, "Градиент", true, true),
-            new Mode(20, "Естественный свет", false, false));
+            new Mode(20, "Естественный свет", false, false),
+            new Mode(21, "Отклик на ввод", true, true));
 
     /** Что делает режим — подсказка на плитке, как описание эффекта в SignalRGB. */
     static String describe(int id) {
@@ -89,6 +90,7 @@ final class SignalRgb {
             case 15 -> "Огонёк ездит туда-обратно, как сканер у K.I.T.T.";
             case 16 -> "Огоньки бегут шагами, как гирлянда над входом в театр.";
             case 17 -> "Случайные цветные вспышки, тающие сами по себе.";
+            case 21 -> "Каждое нажатие клавиши или клик пускает волну от центра; в покое — тихо тлеет. Как Type Lighting в iCUE.";
             case 20 -> "Цвет следует за временем суток: днём холодный белый, вечером тёплый, ночью совсем тёплый — как Natural Light у Philips Hue.";
             case 19 -> "Неподвижный плавный переход от первого цвета ко второму через все устройства.";
             case 18 -> "Цвет по температуре видеокарты: 40° — зелёный, 65° — жёлтый, 85° — красный.";
@@ -477,6 +479,14 @@ final class SignalRgb {
         private String screen() {
             if (mode == 18) {
                 return ",\"temp\":\"" + hex(GpuSensor.color(GpuSensor.celsius())) + "\"";
+            }
+
+            if (mode == 21) {
+                // Сколько мс назад были нажатия — волны эффект дорисует по своим часам
+                var now = System.currentTimeMillis();
+                var ages = java.util.Arrays.stream(InputPulse.presses()).filter(press -> press > 0 && now - press < 700)
+                        .mapToObj(press -> String.valueOf(now - press)).toList();
+                return ",\"presses\":[" + String.join(",", ages) + "]";
             }
 
             if (mode == 20) {

@@ -73,7 +73,7 @@ final class Glow {
 
     /** Режимы, которым нужно настоящее место светодиода: экран и звук. */
     static boolean positional(int mode) {
-        return mode == 12 || mode == 13 || mode == 7 || mode == 15;
+        return mode == 12 || mode == 13 || mode == 7 || mode == 15 || mode == 21;
     }
 
     /** Эффекты, которым есть что делать с высотой: на клавиатуре они идут по строкам и столбцам. */
@@ -212,6 +212,8 @@ final class Glow {
             case 19 -> mix(a, b, x);
             // Естественный свет: цветовая температура по часам, как Natural Light у Hue и f.lux
             case 20 -> kelvin(daylight(java.time.LocalTime.now()));
+            // Отклик на ввод: волна от каждого нажатия, в покое — тление вторым цветом
+            case 21 -> mix(scale(b, 0.18), a, InputPulse.wave(InputPulse.presses(), x, System.currentTimeMillis()));
             default -> a;
         };
     }

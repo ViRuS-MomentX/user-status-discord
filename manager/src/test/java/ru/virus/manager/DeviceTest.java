@@ -1027,4 +1027,15 @@ class DeviceTest {
         var day = Glow.kelvin(6500);
         assertTrue(day.getRed() > 240 && day.getGreen() > 240 && day.getBlue() > 230, "днём — почти белый: " + day);
     }
+
+    @Test
+    void keyPressSendsAWave() {
+        var press = 1_000_000L;
+        long[] presses = {press};
+        assertTrue(InputPulse.wave(presses, 0.5, press) > 0.9, "сразу после нажатия — вспышка в центре");
+        assertTrue(InputPulse.wave(presses, 0.0, press) < 0.1, "до краёв ещё не дошла");
+        assertTrue(InputPulse.wave(presses, 0.0, press + 430) > 0.2, "через полсекунды — у краёв");
+        assertEquals(0, InputPulse.wave(presses, 0.5, press + 2000), "погасла");
+        assertTrue(InputPulse.script().contains("GetLastInputInfo"));
+    }
 }

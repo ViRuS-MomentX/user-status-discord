@@ -2,7 +2,7 @@
 	<title>VIRUS</title>
 	<meta description="Режимы подсветки V.I.R.U.S.: режим, цвета и скорость меняются из приложения V.I.R.U.S. без открытия SignalRGB." />
 	<meta publisher="V.I.R.U.S." />
-	<meta property="mode" label="Режим (0-20)" type="number" min="0" max="20" default="3">
+	<meta property="mode" label="Режим (0-21)" type="number" min="0" max="21" default="3">
 	<meta property="speed" label="Скорость" type="number" min="1" max="100" default="50">
 	<meta property="color" label="Цвет" type="color" default="#39ff8a" min="0" max="360" />
 	<meta property="color2" label="Второй цвет" type="color" default="#8a2be2" min="0" max="360" />
@@ -247,6 +247,23 @@
 			case 18:
 				// Температура видеокарты: цвет присылает V.I.R.U.S.
 				fill(s.temp || css(a));
+				break;
+			case 21:
+				// Отклик на ввод: V.I.R.U.S. присылает, сколько мс назад были нажатия
+				var since = Date.now() - lastLive;
+				var presses = (s.presses || []).map(function (age) { return Number(age) + since; });
+				for (var x4 = 0; x4 < W; x4 += 4) {
+					var dist = Math.abs(x4 / W - 0.5) * 2;
+					var power = 0;
+					for (var p = 0; p < presses.length; p++) {
+						var age = presses[p];
+						if (age >= 0 && age <= 700) {
+							power += Math.exp(-Math.pow((dist - age / 450) / 0.18, 2)) * (1 - age / 700);
+						}
+					}
+					ctx.fillStyle = css(mix([b[0] * 0.18, b[1] * 0.18, b[2] * 0.18], a, Math.min(1, power)));
+					ctx.fillRect(x4, 0, 4, H);
+				}
 				break;
 			case 20:
 				// Естественный свет: цвет по часам — V.I.R.U.S. присылает его готовым

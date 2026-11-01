@@ -126,7 +126,7 @@ final class DevicePage extends Ui.Card {
      * режимы не запускаются, порт для эффекта SignalRGB не открывается. Код
      * остаётся — вернуть всё можно, поставив true.
      */
-    static final boolean LIGHTING = false;
+    static final boolean LIGHTING = true;
 
     DevicePage(MatrixBackground background, Path home, Consumer<String> toast, Supplier<String> bridgeApi) {
         super(new BorderLayout(0, 14));
@@ -162,6 +162,7 @@ final class DevicePage extends Ui.Card {
         urlFallback = new Timer(700, e -> pushByUrl());
         urlFallback.setRepeats(false);
         animator = new RgbAnimator(glow, text -> SwingUtilities.invokeLater(() -> animatorStatus.setText(text)));
+        animator.zoneSizes = Map.copyOf(settings.zoneSizes);
         setBorder(BorderFactory.createEmptyBorder(20, 22, 20, 22));
         Ui.rippleThrough(this, background);
 
@@ -664,6 +665,8 @@ final class DevicePage extends Ui.Card {
         stack.add(left(modeTiles));
         stack.add(Box.createVerticalStrut(10));
         stack.add(left(colorRow));
+        stack.add(Box.createVerticalStrut(10));
+        stack.add(left(colorCorrection()));
         signalOnly.add(Box.createVerticalStrut(16));
         signalOnly.add(left(effectsHead));
         signalOnly.add(Box.createVerticalStrut(6));
@@ -1551,7 +1554,8 @@ final class DevicePage extends Ui.Card {
         rgbStatus.setText("Подключаюсь…");
         worker.submit(() -> {
             try (var rgb = new OpenRgb(settings.host, OpenRgb.PORT)) {
-                var found = rgb.devices();
+                var listed = rgb.devices();
+                var found = OpenRgb.applySizes(rgb, listed, settings.zoneSizes) ? rgb.devices() : listed;
                 SwingUtilities.invokeLater(() -> showDevices(found));
             } catch (IOException | RuntimeException e) {
                 SwingUtilities.invokeLater(() -> {
@@ -1560,6 +1564,124 @@ final class DevicePage extends Ui.Card {
                 });
             }
         });
+    }
+
+    /** Разъём ARGB: сколько на нём светодиодов. 0 — OpenRGB не красит то, что к нему подключено. */
+    private JComponent zoneRow(OpenRgb.Device device, OpenRgb.Zone zone) {
+        var key = OpenRgb.key(device, zone);
+        var wanted = settings.zoneSizes.getOrDefault(key, zone.count());
+        var spinner = new javax.swing.JSpinner(new javax.swing.SpinnerNumberModel(
+                Math.max(zone.min(), Math.min(zone.max(), wanted)), zone.min(), zone.max(), 1));
+        spinner.setPreferredSize(new Dimension(80, spinner.getPreferredSize().height));
+        var apply = Ui.button("Задать");
+        apply.addActionListener(e -> resizeZone(device, zone, (Integer) spinner.getValue()));
+
+        var label = Ui.label("<html>&nbsp;&nbsp;&nbsp;&nbsp;разъём «" + ConfigPage.escape(zone.name()) + "» "
+                + "<font color='" + (zone.count() == 0 ? "#FFB547'>светодиодов не задано — то, что на нём, не горит"
+                : "#7C8C84'>светодиодов: " + zone.count()) + "</font></html>", Theme.ui.deriveFont(12.5f), Theme.TEXT);
+        var controls = Ui.transparent(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        controls.add(spinner);
+        controls.add(apply);
+
+        var row = Ui.transparent(new BorderLayout(10, 0));
+        row.setBorder(BorderFactory.createEmptyBorder(2, 2, 6, 2));
+        row.setAlignmentX(LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
+        row.add(label, BorderLayout.CENTER);
+        row.add(controls, BorderLayout.EAST);
+        return row;
+    }
+
+    private void resizeZone(OpenRgb.Device device, OpenRgb.Zone zone, int size) {
+        settings.zoneSizes.put(OpenRgb.key(device, zone), size);
+        settings.save();
+        animator.zoneSizes = Map.copyOf(settings.zoneSizes);
+
+        worker.submit(() -> {
+            try (var rgb = new OpenRgb(settings.host, OpenRgb.PORT)) {
+                rgb.resize(device, zone, size);
+                var fresh = rgb.devices();
+                SwingUtilities.invokeLater(() -> {
+                    showDevices(fresh);
+                    toast.accept("Разъём «" + zone.name() + "»: светодиодов " + size + ".");
+                });
+
+                // Режим подхватит новое число светодиодов только с нового подключения
+                if (animator.running()) {
+                    animator.stop();
+                    animator.start(settings.host);
+                }
+            } catch (IOException | RuntimeException e) {
+                SwingUtilities.invokeLater(() -> toast.accept("Не задалось: " + e.getMessage()));
+            }
+        });
+    }
+
+    /**
+     * Цветокоррекция: гамма и баланс белого. Без неё светодиоды показывают
+     * экранные цвета выцветшими — красный уходит в розовый.
+     */
+    private JComponent colorCorrection() {
+        var gamma = new JSlider(10, 30, (int) Math.round(settings.gamma * 10));
+        var gammaValue = Ui.label(String.format(java.util.Locale.ROOT, "%.1f", settings.gamma),
+                Theme.mono.deriveFont(12.5f), Theme.ACCENT);
+        gamma.setOpaque(false);
+        gamma.setPreferredSize(new Dimension(130, 28));
+        gamma.setToolTipText("1.0 — без поправки (цвета блеклые), 2.2 — как экран, 2.8 — насыщеннее, но темнее");
+        gamma.addChangeListener(e -> {
+            settings.gamma = gamma.getValue() / 10.0;
+            gammaValue.setText(String.format(java.util.Locale.ROOT, "%.1f", settings.gamma));
+            settings.applyColor();
+
+            if (!gamma.getValueIsAdjusting()) {
+                settings.save();
+            }
+        });
+
+        var row = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        row.add(Ui.muted("Цветокоррекция: гамма", 13f));
+        row.add(gamma);
+        row.add(gammaValue);
+        row.add(Box.createHorizontalStrut(10));
+
+        var sliders = new java.util.ArrayList<JSlider>();
+
+        for (var channel : List.of("R", "G", "B")) {
+            var value = switch (channel) {
+                case "R" -> settings.balanceRed;
+                case "G" -> settings.balanceGreen;
+                default -> settings.balanceBlue;
+            };
+            var slider = new JSlider(40, 100, value);
+            slider.setOpaque(false);
+            slider.setPreferredSize(new Dimension(80, 28));
+            slider.setToolTipText("Баланс белого: если белый отдаёт синим — убавь B, если розовым — R");
+            slider.addChangeListener(e -> {
+                switch (channel) {
+                    case "R" -> settings.balanceRed = slider.getValue();
+                    case "G" -> settings.balanceGreen = slider.getValue();
+                    default -> settings.balanceBlue = slider.getValue();
+                }
+
+                settings.applyColor();
+
+                if (!slider.getValueIsAdjusting()) {
+                    settings.save();
+                }
+            });
+            sliders.add(slider);
+            row.add(Ui.label(channel, Theme.mono.deriveFont(Font.BOLD, 12.5f),
+                    channel.equals("R") ? Theme.ERROR : channel.equals("G") ? Theme.ACCENT : new Color(0x5A, 0x8C, 0xFF)));
+            row.add(slider);
+        }
+
+        var reset = Ui.ghost("Сбросить");
+        reset.addActionListener(e -> {
+            gamma.setValue(22);
+            sliders.forEach(slider -> slider.setValue(100));
+        });
+        row.add(reset);
+        return row;
     }
 
     private void showDevices(List<OpenRgb.Device> found) {
@@ -1585,6 +1707,10 @@ final class DevicePage extends Ui.Card {
             paint.addActionListener(e -> paint(List.of(device), lit()));
             row.add(paint, BorderLayout.EAST);
             rgbDevices.add(row);
+
+            for (var zone : device.resizable()) {
+                rgbDevices.add(zoneRow(device, zone));
+            }
         }
 
         var hint = Ui.muted("<html><body style='width:640px'><b>Нет клавиатуры, вентиляторов или памяти?</b><br>"
@@ -1592,9 +1718,9 @@ final class DevicePage extends Ui.Card {
                 + "платы.<br>"
                 + "2. В OpenRGB: Settings → <b>Supported Devices</b> — проверь, что нужные устройства включены, "
                 + "и нажми Rescan.<br>"
-                + "3. Вентиляторы, подключённые к ARGB-разъёму платы (часто так подключают JONSBO), — это зона "
-                + "«MSI Mystic Light»: выбери её в OpenRGB, нажми <b>Resize</b> и укажи число светодиодов, затем "
-                + "сохрани профиль.<br>"
+                + "3. Вентиляторы на ARGB-разъёме платы — это зоны под устройством платы выше («разъём …»). "
+                + "Впиши, сколько на нём светодиодов (не знаешь — 40), и нажми «Задать»: V.I.R.U.S. будет "
+                + "ставить это число сам при каждом подключении.<br>"
                 + "4. Устройства, которых OpenRGB не знает (возможно, Attack Shark X98), смотри в «Все "
                 + "устройства с подсветкой» ниже: если там написано «Windows красит сама» — цвет ставится в "
                 + "«Динамическом освещении» Windows, иначе — программой производителя.</body></html>", 12.5f);
@@ -1829,6 +1955,13 @@ final class DevicePage extends Ui.Card {
         int brightness = 100;
         boolean applyOnStart;
         int glowMode = 3;
+        /** Цветокоррекция для светодиодов: гамма и баланс белого по каналам, %. */
+        double gamma = 2.2;
+        int balanceRed = 100;
+        int balanceGreen = 100;
+        int balanceBlue = 100;
+        /** Сколько светодиодов на разъёмах ARGB: «устройство|зона» → число. */
+        final Map<String, Integer> zoneSizes = new LinkedHashMap<>();
         /** Чем играть режимы: «openrgb» или «signalrgb». */
         String engine = "openrgb";
         int glowBrightness = 100;
@@ -1851,6 +1984,18 @@ final class DevicePage extends Ui.Card {
                     settings.brightness = json.get("brightness") instanceof Number n ? n.intValue() : 100;
                     settings.applyOnStart = Boolean.TRUE.equals(json.get("applyOnStart"));
                     settings.glowMode = json.get("glowMode") instanceof Number n ? n.intValue() : 3;
+                    settings.gamma = json.get("gamma") instanceof Number n ? n.doubleValue() : 2.2;
+                    settings.balanceRed = json.get("balanceRed") instanceof Number n ? n.intValue() : 100;
+                    settings.balanceGreen = json.get("balanceGreen") instanceof Number n ? n.intValue() : 100;
+                    settings.balanceBlue = json.get("balanceBlue") instanceof Number n ? n.intValue() : 100;
+
+                    if (json.get("zoneSizes") instanceof Map<?, ?> sizes) {
+                        sizes.forEach((key, value) -> {
+                            if (value instanceof Number n) {
+                                settings.zoneSizes.put(String.valueOf(key), n.intValue());
+                            }
+                        });
+                    }
                     settings.engine = String.valueOf(json.getOrDefault("engine", "openrgb"));
                     settings.glowBrightness = json.get("glowBrightness") instanceof Number n ? n.intValue() : 100;
                     settings.glowOn = !Boolean.FALSE.equals(json.get("glowOn"));
@@ -1866,7 +2011,16 @@ final class DevicePage extends Ui.Card {
                 // испорченный файл — начинаем с умолчаний
             }
 
+            settings.applyColor();
             return settings;
+        }
+
+        /** Цветокоррекцию — в общий конвейер цвета: им пользуются и режимы, и «Покрасить всё». */
+        void applyColor() {
+            LedColor.gamma = Math.max(1, Math.min(3, gamma));
+            LedColor.red = balanceRed / 100.0;
+            LedColor.green = balanceGreen / 100.0;
+            LedColor.blue = balanceBlue / 100.0;
         }
 
         void save() {
@@ -1877,6 +2031,11 @@ final class DevicePage extends Ui.Card {
             json.put("brightness", brightness);
             json.put("applyOnStart", applyOnStart);
             json.put("glowMode", glowMode);
+            json.put("gamma", gamma);
+            json.put("balanceRed", balanceRed);
+            json.put("balanceGreen", balanceGreen);
+            json.put("balanceBlue", balanceBlue);
+            json.put("zoneSizes", zoneSizes);
             json.put("engine", engine);
             json.put("glowBrightness", glowBrightness);
             json.put("glowOn", glowOn);

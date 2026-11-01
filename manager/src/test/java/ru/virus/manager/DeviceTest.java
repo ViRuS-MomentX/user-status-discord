@@ -183,9 +183,11 @@ class DeviceTest {
         var body = ByteBuffer.wrap(leds.body()).order(ByteOrder.LITTLE_ENDIAN);
         assertEquals(leds.body().length, body.getInt());
         assertEquals(98, body.getShort());
-        assertEquals(10, body.get());
-        assertEquals(20, body.get());
-        assertEquals(30, body.get());
+        // На светодиод уходит цвет с гамма-коррекцией: экранные 10/20/30 — это почти темнота
+        var led = LedColor.correct(new Color(10, 20, 30));
+        assertEquals(led.getRed(), body.get());
+        assertEquals(led.getGreen(), body.get());
+        assertEquals(led.getBlue(), body.get());
 
         deadline = System.currentTimeMillis() + 3000;
         while (got.stream().noneMatch(p -> p.id() == OpenRgb.UPDATE_MODE) && System.currentTimeMillis() < deadline) {
@@ -202,7 +204,7 @@ class DeviceTest {
         assertEquals(7, m.getInt(), "значение режима — как прислал OpenRGB");
         m.position(m.position() + 8 * 4);
         assertEquals(1, m.getShort());
-        assertEquals((byte) 200, m.get());
+        assertEquals((byte) LedColor.correct(new Color(200, 0, 100)).getRed(), m.get());
     }
 
     @Test
@@ -341,5 +343,62 @@ class DeviceTest {
         }
 
         assertEquals(new Color(128, 0, 0), Glow.frame(0, 0, 1, Color.RED, Color.BLUE, 0, 50, true, 0)[0]);
+    }
+
+    @Test
+    void redStaysRedOnLeds() {
+        LedColor.gamma = 2.2;
+        LedColor.red = LedColor.green = LedColor.blue = 1;
+
+        // Красный пресет: без поправки зелёный и синий горели на 1/8 — розовый
+        var red = LedColor.correct(new Color(0xFF, 0x20, 0x20));
+        assertEquals(255, red.getRed());
+        assertTrue(red.getGreen() <= 3 && red.getBlue() <= 3, red.toString());
+
+        // Белый и чёрный не меняются, середина темнеет (так глаз и видит)
+        assertEquals(Color.WHITE, LedColor.correct(Color.WHITE));
+        assertEquals(Color.BLACK, LedColor.correct(Color.BLACK));
+        assertTrue(LedColor.correct(new Color(128, 128, 128)).getRed() < 64);
+
+        // Баланс белого: синий приглушён
+        LedColor.blue = 0.8;
+        assertEquals(204, LedColor.correct(Color.WHITE).getBlue());
+        LedColor.blue = 1;
+
+        LedColor.gamma = 1;
+        assertEquals(new Color(0xFF, 0x20, 0x20), LedColor.correct(new Color(0xFF, 0x20, 0x20)), "гамма 1 — как есть");
+        LedColor.gamma = 2.2;
+    }
+
+    @Test
+    void argbHeaderZonesAreResizable() throws Exception {
+        var got = fakeOpenRgb();
+
+        try (var rgb = new OpenRgb("127.0.0.1", rgbServer.getLocalPort())) {
+            var devices = rgb.devices();
+            var board = devices.get(2);
+            assertEquals(1, board.zones().size());
+            var zone = board.zones().getFirst();
+            assertEquals("Keys", zone.name());
+            assertTrue(devices.get(1).resizable().isEmpty(), "у клавиатуры зону не растянуть");
+
+            // Разъём с 0 светодиодов, можно до 120
+            var header = new OpenRgb.Zone(0, "JRAINBOW1", 1, 0, 120, 0);
+            var argb = new OpenRgb.Device(2, "MSI MYSTIC LIGHT", "материнская плата", 0, List.of(), List.of(header));
+            assertEquals(List.of(header), argb.resizable());
+            assertTrue(OpenRgb.applySizes(rgb, List.of(argb), java.util.Map.of("MSI MYSTIC LIGHT|JRAINBOW1", 500)));
+            assertFalse(OpenRgb.applySizes(rgb, List.of(argb), java.util.Map.of()), "размер не задан — не трогаем");
+        }
+
+        var deadline = System.currentTimeMillis() + 3000;
+        while (got.stream().noneMatch(p -> p.id() == OpenRgb.RESIZE_ZONE) && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+
+        var resize = got.stream().filter(p -> p.id() == OpenRgb.RESIZE_ZONE).findFirst().orElseThrow();
+        assertEquals(2, resize.device());
+        var body = ByteBuffer.wrap(resize.body()).order(ByteOrder.LITTLE_ENDIAN);
+        assertEquals(0, body.getInt(), "номер зоны");
+        assertEquals(120, body.getInt(), "больше, чем умеет разъём, не задаём");
     }
 }

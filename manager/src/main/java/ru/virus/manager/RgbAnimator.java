@@ -21,6 +21,8 @@ final class RgbAnimator {
     private final SignalRgb.Live settings;
     private final Consumer<String> status;
     private volatile String host = "127.0.0.1";
+    /** Размеры разъёмов ARGB, заданные хозяином: «устройство|зона» → светодиодов. */
+    volatile java.util.Map<String, Integer> zoneSizes = java.util.Map.of();
     /** Порт OpenRGB; в тестах — поддельного. */
     volatile int port = OpenRgb.PORT;
     private volatile Thread thread;
@@ -59,6 +61,12 @@ final class RgbAnimator {
         while (thread == me) {
             try (var rgb = new OpenRgb(host, port)) {
                 var devices = rgb.devices();
+
+                // Вентиляторы на разъёмах платы горят, только когда у зоны задано число светодиодов
+                if (OpenRgb.applySizes(rgb, devices, zoneSizes)) {
+                    devices = rgb.devices();
+                }
+
                 var animated = devices.stream().filter(device -> device.leds() > 0).toList();
                 var still = devices.stream().filter(device -> device.leds() == 0 && device.solid() != null).toList();
 

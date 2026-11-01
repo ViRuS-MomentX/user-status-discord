@@ -32,16 +32,26 @@ final class OpenRgb implements AutoCloseable {
     static final int SET_CLIENT_NAME = 50;
     static final int UPDATE_LEDS = 1050;
     static final int SET_CUSTOM_MODE = 1100;
+    static final int RESIZE_ZONE = 1000;
     static final int UPDATE_MODE = 1101;
 
     /** У режима цвета свои — задаются вместе с режимом, а не по светодиодам. */
     static final int COLORS_MODE_SPECIFIC = 2;
 
     /** Устройство: номер у OpenRGB, имя, сколько светодиодов, его режимы. */
-    record Device(int index, String name, String kind, int leds, List<Mode> modes) {
+    record Device(int index, String name, String kind, int leds, List<Mode> modes, List<Zone> zones) {
 
         Device(int index, String name, String kind, int leds) {
-            this(index, name, kind, leds, List.of());
+            this(index, name, kind, leds, List.of(), List.of());
+        }
+
+        Device(int index, String name, String kind, int leds, List<Mode> modes) {
+            this(index, name, kind, leds, modes, List.of());
+        }
+
+        /** Зоны, у которых можно задать число светодиодов, — разъёмы ARGB на плате. */
+        List<Zone> resizable() {
+            return zones.stream().filter(Zone::resizable).toList();
         }
 
         /**
@@ -64,6 +74,18 @@ final class OpenRgb implements AutoCloseable {
         /** Можно ли покрасить хоть как-то. */
         boolean paintable() {
             return leds > 0 || solid() != null;
+        }
+    }
+
+    /**
+     * Зона устройства. У разъёмов ARGB на плате OpenRGB не знает, сколько
+     * светодиодов подключено, и ставит 0 — тогда вентиляторы на нём не горят,
+     * пока не задать число (ResizeZone, как кнопка Resize в самом OpenRGB).
+     */
+    record Zone(int index, String name, int type, int min, int max, int count) {
+
+        boolean resizable() {
+            return max > min;
         }
     }
 
@@ -121,10 +143,52 @@ final class OpenRgb implements AutoCloseable {
         body.putShort((short) device.leds());
 
         for (var i = 0; i < device.leds(); i++) {
-            body.put((byte) color.getRed()).put((byte) color.getGreen()).put((byte) color.getBlue()).put((byte) 0);
+            put(body, color);
         }
 
         send(device.index(), UPDATE_LEDS, body.array());
+    }
+
+    /** Задать число светодиодов на разъёме — после этого устройство надо перечитать. */
+    void resize(Device device, Zone zone, int size) throws IOException {
+        var body = le(ByteBuffer.allocate(8));
+        body.putInt(zone.index()).putInt(Math.max(zone.min(), Math.min(zone.max(), size)));
+        send(device.index(), RESIZE_ZONE, body.array());
+    }
+
+    /** Ключ размера зоны в настройках: «устройство|зона». */
+    static String key(Device device, Zone zone) {
+        return device.name() + "|" + zone.name();
+    }
+
+    /**
+     * Задать сохранённые размеры разъёмов ARGB. OpenRGB сам их не помнит,
+     * пока в нём не сохранили профиль, — поэтому ставим при каждом подключении.
+     *
+     * @return что-то поменяли — список устройств надо перечитать
+     */
+    static boolean applySizes(OpenRgb rgb, List<Device> devices, java.util.Map<String, Integer> sizes)
+            throws IOException {
+        var changed = false;
+
+        for (var device : devices) {
+            for (var zone : device.resizable()) {
+                var wanted = sizes.get(key(device, zone));
+
+                if (wanted != null && wanted != zone.count()) {
+                    rgb.resize(device, zone, wanted);
+                    changed = true;
+                }
+            }
+        }
+
+        return changed;
+    }
+
+    /** Цвет для светодиода — с гамма-коррекцией и балансом белого. */
+    private static void put(ByteBuffer body, Color color) {
+        var led = LedColor.correct(color);
+        body.put((byte) led.getRed()).put((byte) led.getGreen()).put((byte) led.getBlue()).put((byte) 0);
     }
 
     /** Включить «свой» режим: без него поверх наших кадров играет встроенный эффект. */
@@ -140,8 +204,7 @@ final class OpenRgb implements AutoCloseable {
         body.putShort((short) count);
 
         for (var i = 0; i < count; i++) {
-            body.put((byte) colors[i].getRed()).put((byte) colors[i].getGreen()).put((byte) colors[i].getBlue())
-                    .put((byte) 0);
+            put(body, colors[i]);
         }
 
         send(device.index(), UPDATE_LEDS, body.array());
@@ -168,7 +231,7 @@ final class OpenRgb implements AutoCloseable {
         body.putShort((short) count);
 
         for (var i = 0; i < count; i++) {
-            body.put((byte) color.getRed()).put((byte) color.getGreen()).put((byte) color.getBlue()).put((byte) 0);
+            put(body, color);
         }
 
         send(device.index(), UPDATE_MODE, body.array());
@@ -204,10 +267,11 @@ final class OpenRgb implements AutoCloseable {
         }
 
         var zones = Short.toUnsignedInt(buffer.getShort());
+        var zoneList = new ArrayList<Zone>();
 
         for (var i = 0; i < zones; i++) {
-            string(buffer);
-            buffer.position(buffer.position() + 4 * 4); // тип, светодиодов мин/макс/сколько
+            var zoneName = string(buffer);
+            zoneList.add(new Zone(i, zoneName, buffer.getInt(), buffer.getInt(), buffer.getInt(), buffer.getInt()));
             var matrix = Short.toUnsignedInt(buffer.getShort());
             buffer.position(buffer.position() + matrix);
         }
@@ -220,7 +284,7 @@ final class OpenRgb implements AutoCloseable {
         }
 
         var colors = Short.toUnsignedInt(buffer.getShort());
-        return new Device(index, name, kind(type), colors, List.copyOf(modeList));
+        return new Device(index, name, kind(type), colors, List.copyOf(modeList), List.copyOf(zoneList));
     }
 
     private static String kind(int type) {

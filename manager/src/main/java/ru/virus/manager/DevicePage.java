@@ -254,6 +254,10 @@ final class DevicePage extends Ui.Card {
             animator.start(settings.host);
         }
 
+        if (LIGHTING) {
+            Runtime.getRuntime().addShutdownHook(new Thread(this::farewell, "virus-rgb-farewell"));
+        }
+
         live = new Timer(2000, e -> {
             if (isShowing()) {
                 refreshLoad();
@@ -1231,7 +1235,17 @@ final class DevicePage extends Ui.Card {
             updateDim();
         });
         lockedRow.add(lockedSwitch);
-        lockedRow.add(Ui.muted("гасить, пока экран заблокирован (Win+L), — включится сама, когда войдёшь", 13f));
+        lockedRow.add(Ui.muted("гасить, пока экран заблокирован (Win+L)", 13f));
+        lockedRow.add(Box.createHorizontalStrut(16));
+        lockedRow.add(Ui.muted("при выходе из V.I.R.U.S.:", 13f));
+        var exit = new javax.swing.JComboBox<>(EXIT_CHOICES.toArray(String[]::new));
+        exit.setSelectedItem(settings.exitLight);
+        exit.setToolTipText("Без этого OpenRGB застынет на последнем кадре эффекта");
+        exit.addActionListener(e -> {
+            settings.exitLight = (String) exit.getSelectedItem();
+            settings.save();
+        });
+        lockedRow.add(exit);
 
         var rows = Ui.transparent(null);
         rows.setLayout(new BoxLayout(rows, BoxLayout.Y_AXIS));
@@ -1517,6 +1531,47 @@ final class DevicePage extends Ui.Card {
                 SwingUtilities.invokeLater(() -> toast.accept("SignalRGB: " + e.getMessage()));
             }
         });
+    }
+
+    /** Что делать с подсветкой при выходе: ровный цвет, погасить, оставить как есть. */
+    static final List<String> EXIT_CHOICES = List.of("ровный цвет", "погасить", "оставить как есть");
+
+    /**
+     * Цвет, который останется после выхода; null — ничего не трогать. Как у
+     * iCUE и SignalRGB: без этого OpenRGB застывает на последнем кадре —
+     * половина кометы, недорисованная волна.
+     */
+    static Color exitColor(String choice, Color color, int brightness, boolean on) {
+        if ("оставить как есть".equals(choice)) {
+            return null;
+        }
+
+        if ("погасить".equals(choice) || !on) {
+            return Color.BLACK;
+        }
+
+        return Glow.scale(color, Math.max(0, Math.min(100, brightness)) / 100.0);
+    }
+
+    /** При выходе из V.I.R.U.S. — спокойная подсветка вместо застывшего кадра. */
+    private void farewell() {
+        if (!openRgbEngine() || !animator.running()) {
+            return;
+        }
+
+        var color = exitColor(settings.exitLight, glow.color, glow.effective(), glow.on);
+
+        if (color == null) {
+            return;
+        }
+
+        animator.stop();
+
+        try (var rgb = new OpenRgb(settings.host, OpenRgb.PORT)) {
+            paintEach(rgb, rgb.devices(), color, settings.deviceLevels);
+        } catch (IOException | RuntimeException e) {
+            // OpenRGB уже закрыт — красить нечего
+        }
     }
 
     /** Переключатель «как в Windows». */
@@ -3011,6 +3066,7 @@ final class DevicePage extends Ui.Card {
         /** Простой: через сколько минут без движения мыши гасить; 0 — не гасить. */
         int idleMinutes = 0;
         boolean offWhenLocked = true;
+        String exitLight = "ровный цвет";
         /** Единый холст и порядок устройств на нём. */
         boolean canvas;
         final List<String> canvasOrder = new ArrayList<>();
@@ -3072,6 +3128,8 @@ final class DevicePage extends Ui.Card {
                     settings.nightLevel = json.get("nightLevel") instanceof Number n ? n.intValue() : 20;
                     settings.idleMinutes = json.get("idleMinutes") instanceof Number n ? n.intValue() : 0;
                     settings.offWhenLocked = !Boolean.FALSE.equals(json.get("offWhenLocked"));
+                    settings.exitLight = json.get("exitLight") instanceof String exit && EXIT_CHOICES.contains(exit)
+                            ? exit : "ровный цвет";
 
                     settings.canvas = Boolean.TRUE.equals(json.get("canvas"));
 
@@ -3163,6 +3221,7 @@ final class DevicePage extends Ui.Card {
             json.put("nightLevel", nightLevel);
             json.put("idleMinutes", idleMinutes);
             json.put("offWhenLocked", offWhenLocked);
+            json.put("exitLight", exitLight);
             json.put("profiles", profiles.stream().map(LightProfiles.Profile::toJson).toList());
             json.put("appRules", appRules);
             json.put("engine", engine);

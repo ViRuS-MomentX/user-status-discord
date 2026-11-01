@@ -18,6 +18,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DeviceTest {
@@ -936,5 +937,14 @@ class DeviceTest {
         // Совсем чёрный экран — не полосы
         var black = new java.awt.image.BufferedImage(320, 180, java.awt.image.BufferedImage.TYPE_INT_RGB);
         assertEquals(0, ScreenSampler.detect(black)[0]);
+    }
+
+    @Test
+    void lightsSettleDownOnExit() {
+        var green = new Color(0, 200, 100);
+        assertEquals(new Color(0, 100, 50), DevicePage.exitColor("ровный цвет", green, 50, true));
+        assertEquals(Color.BLACK, DevicePage.exitColor("погасить", green, 100, true));
+        assertEquals(Color.BLACK, DevicePage.exitColor("ровный цвет", green, 100, false), "была выключена — так и остаётся");
+        assertNull(DevicePage.exitColor("оставить как есть", green, 100, true));
     }
 }

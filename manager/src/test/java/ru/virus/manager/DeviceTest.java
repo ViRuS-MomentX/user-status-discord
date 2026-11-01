@@ -533,4 +533,31 @@ class DeviceTest {
         assertTrue(middle.getBlue() > middle.getRed(), "переход быстрый в начале — к середине ближе к новому");
         assertEquals(to, RgbAnimator.blend(new Color[2], to, 0.5), "число светодиодов поменялось — сразу новое");
     }
+
+    @Test
+    void screenModeFollowsThePicture() {
+        // Экран: левая половина красная, правая синяя
+        var image = new java.awt.image.BufferedImage(320, 180, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        var g = image.createGraphics();
+        g.setColor(new Color(200, 40, 40));
+        g.fillRect(0, 0, 160, 180);
+        g.setColor(new Color(40, 40, 200));
+        g.fillRect(160, 0, 160, 180);
+        g.dispose();
+        ScreenSampler.take(image);
+
+        var left = ScreenSampler.at(0.1, 0.5, true);
+        var right = ScreenSampler.at(0.9, 0.5, false);
+        assertTrue(left.getRed() > 150 && left.getBlue() < 60, "слева красный: " + left);
+        assertTrue(right.getBlue() > 150 && right.getRed() < 60, "справа синий: " + right);
+
+        // Насыщенность усилена: серовато-красный становится ярче красным, чёрный остаётся чёрным
+        var vivid = ScreenSampler.vivid(new Color(180, 120, 120));
+        assertTrue(vivid.getRed() - vivid.getGreen() > 60, vivid.toString());
+        assertEquals(Color.BLACK, ScreenSampler.vivid(Color.BLACK));
+
+        var places = List.of(new OpenRgb.Place(0.1, 0.5, false), new OpenRgb.Place(0.9, 0.5, false));
+        var frame = Glow.frame(12, 0, places, Color.GREEN, Color.GREEN, 0, 100, true, 0);
+        assertTrue(frame[0].getRed() > frame[0].getBlue() && frame[1].getBlue() > frame[1].getRed());
+    }
 }

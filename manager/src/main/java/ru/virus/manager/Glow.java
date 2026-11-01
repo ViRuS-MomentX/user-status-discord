@@ -53,6 +53,11 @@ final class Glow {
 
     /** Эффекты, которым есть что делать с высотой: на клавиатуре они идут по строкам и столбцам. */
     static Color pixel(int mode, double t, double x, double y, boolean grid, int i, Color a, Color b, double cpu) {
+        // Экран: клавиатура повторяет картинку целиком, лента и вентилятор — по столбцам
+        if (mode == 12) {
+            return ScreenSampler.at(x, y, !grid);
+        }
+
         if (grid) {
             switch (mode) {
                 case 5 -> {

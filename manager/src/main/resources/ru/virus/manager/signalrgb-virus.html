@@ -2,7 +2,7 @@
 	<title>VIRUS</title>
 	<meta description="Режимы подсветки V.I.R.U.S.: режим, цвета и скорость меняются из приложения V.I.R.U.S. без открытия SignalRGB." />
 	<meta publisher="V.I.R.U.S." />
-	<meta property="mode" label="Режим (0-11)" type="number" min="0" max="11" default="3">
+	<meta property="mode" label="Режим (0-12)" type="number" min="0" max="12" default="3">
 	<meta property="speed" label="Скорость" type="number" min="1" max="100" default="50">
 	<meta property="color" label="Цвет" type="color" default="#39ff8a" min="0" max="360" />
 	<meta property="color2" label="Второй цвет" type="color" default="#8a2be2" min="0" max="360" />
@@ -162,6 +162,15 @@
 				break;
 			case 11:
 				twinkle(a, b);
+				break;
+			case 12:
+				// Экран: V.I.R.U.S. присылает цвета столбцов монитора
+				var cols = s.screen || [];
+				for (var k = 0; k < cols.length; k++) {
+					ctx.fillStyle = cols[k];
+					ctx.fillRect(Math.floor(k * W / cols.length), 0, Math.ceil(W / cols.length), H);
+				}
+				if (cols.length == 0) fill(css(a));
 				break;
 			default:
 				fill(css(a));

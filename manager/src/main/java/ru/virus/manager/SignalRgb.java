@@ -57,7 +57,8 @@ final class SignalRgb {
             new Mode(8, "Северное сияние", false, false),
             new Mode(9, "Пульс", true, false),
             new Mode(10, "Нагрузка ЦП", false, false),
-            new Mode(11, "Звёзды", true, true));
+            new Mode(11, "Звёзды", true, true),
+            new Mode(12, "Экран", false, false));
 
     private final HttpClient http = HttpClient.newBuilder()
             .proxy(HttpClient.Builder.NO_PROXY)
@@ -393,7 +394,24 @@ final class SignalRgb {
         String json() {
             var load = cpu.getAsDouble();
             return "{\"mode\":" + mode + ",\"speed\":" + speed + ",\"color\":\"" + hex(color) + "\",\"color2\":\""
-                    + hex(color2) + "\",\"brightness\":" + brightness + ",\"on\":" + on + ",\"cpu\":" + String.format(java.util.Locale.ROOT, "%.3f", Math.max(0, load)) + "}";
+                    + hex(color2) + "\",\"brightness\":" + brightness + ",\"on\":" + on + ",\"cpu\":"
+                    + String.format(java.util.Locale.ROOT, "%.3f", Math.max(0, load)) + screen() + "}";
+        }
+
+        /** Режим «Экран»: цвета столбцов экрана — эффект в SignalRGB рисует их сам. */
+        private String screen() {
+            if (mode != 12) {
+                return "";
+            }
+
+            var columns = new StringBuilder(",\"screen\":[");
+
+            for (var column = 0; column < ScreenSampler.COLUMNS; column++) {
+                var x = (column + 0.5) / ScreenSampler.COLUMNS;
+                columns.append(column == 0 ? "" : ",").append('"').append(hex(ScreenSampler.at(x, 0.5, true))).append('"');
+            }
+
+            return columns.append(']').toString();
         }
 
         boolean heard() {

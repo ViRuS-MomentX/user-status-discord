@@ -887,4 +887,14 @@ class DeviceTest {
         assertEquals(java.awt.Color.BLUE, Glow.mix(java.awt.Color.RED, java.awt.Color.BLUE, 1));
         assertEquals(new java.awt.Color(40, 90, 200), Glow.mix(new java.awt.Color(40, 90, 200), new java.awt.Color(40, 90, 200), 0.3));
     }
+
+    @Test
+    void palettesAreDistinctPairs() {
+        var names = new java.util.HashSet<String>();
+
+        for (var palette : DevicePage.PALETTES) {
+            assertTrue(names.add(palette.name()), "без повторов: " + palette.name());
+            assertFalse(palette.a().equals(palette.b()), palette.name() + " — два разных цвета");
+        }
+    }
 }

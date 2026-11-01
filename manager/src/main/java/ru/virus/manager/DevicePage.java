@@ -106,6 +106,42 @@ final class DevicePage extends Ui.Card {
     /** Группы режимов, как в библиотеке SignalRGB: подпись → номера. */
     static final Map<String, List<Integer>> MODE_GROUPS = groups();
 
+    /** Пара цветов для двухцветных режимов. */
+    record Palette(String name, Color a, Color b) {
+    }
+
+    /** Готовые пары — по мотивам палитр WLED и пресетов SignalRGB. */
+    static final List<Palette> PALETTES = List.of(
+            new Palette("Закат", new Color(0xFF3A00), new Color(0x9B00FF)),
+            new Palette("Океан", new Color(0x00E5FF), new Color(0x0030FF)),
+            new Palette("Лес", new Color(0x00FF40), new Color(0xB8FF00)),
+            new Palette("Лава", new Color(0xFF0000), new Color(0xFF9000)),
+            new Palette("Неон", new Color(0xFF00C8), new Color(0x00F0FF)),
+            new Palette("Лёд", new Color(0xFFFFFF), new Color(0x00A0FF)),
+            new Palette("Киберпанк", new Color(0xFFE600), new Color(0xFF0050)),
+            new Palette("V.I.R.U.S.", new Color(0x39FF8A), new Color(0x8A2BE2)));
+
+    /** Значок палитры: две половинки цвета. */
+    private record PaletteIcon(Color a, Color b) implements javax.swing.Icon {
+        @Override
+        public void paintIcon(java.awt.Component c, java.awt.Graphics g, int x, int y) {
+            for (var i = 0; i < 28; i++) {
+                g.setColor(Glow.mix(a, b, i / 27.0));
+                g.fillRect(x + i, y, 1, 12);
+            }
+        }
+
+        @Override
+        public int getIconWidth() {
+            return 28;
+        }
+
+        @Override
+        public int getIconHeight() {
+            return 12;
+        }
+    }
+
     private static Map<String, List<Integer>> groups() {
         var groups = new LinkedHashMap<String, List<Integer>>();
         groups.put("Спокойные", List.of(0, 19, 1, 4, 8, 11));
@@ -674,6 +710,34 @@ final class DevicePage extends Ui.Card {
         colorRow.add(Ui.muted("как в Windows", 13f));
         colorRow.add(Ui.muted("Второй", 13f));
         colorRow.add(glowColor2);
+
+        // Готовые пары, как палитры WLED: подобраны так, чтобы градиент и переливы смотрелись
+        var palettes = Ui.ghost("Палитры");
+        palettes.setToolTipText("Готовые пары цветов для двухцветных режимов");
+        palettes.addActionListener(e -> {
+            var menu = new javax.swing.JPopupMenu();
+
+            for (var palette : PALETTES) {
+                var item = new javax.swing.JMenuItem(palette.name(), new PaletteIcon(palette.a(), palette.b()));
+                item.addActionListener(a -> {
+                    // Выбрал палитру — цвет Windows больше не перебивает её
+                    if (settings.followAccent) {
+                        settings.followAccent = false;
+                        accent.setOn(false);
+                    }
+
+                    glow.color = palette.a();
+                    glow.color2 = palette.b();
+                    glowColor.setColor(palette.a());
+                    glowColor2.setColor(palette.b());
+                    glowChanged();
+                });
+                menu.add(item);
+            }
+
+            menu.show(palettes, 0, palettes.getHeight());
+        });
+        colorRow.add(palettes);
         var patternRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 10, 0));
         patternRow.add(Ui.muted("Узор: скорость", 13f));
         patternRow.add(glowSpeed);

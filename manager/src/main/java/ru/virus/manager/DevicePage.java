@@ -169,6 +169,7 @@ final class DevicePage extends Ui.Card {
         animator = new RgbAnimator(glow, text -> SwingUtilities.invokeLater(() -> animatorStatus.setText(text)));
         animator.zoneSizes = Map.copyOf(settings.zoneSizes);
         animator.levels = Map.copyOf(settings.deviceLevels);
+        animator.modes = Map.copyOf(settings.deviceModes);
         // OpenRGB закрыли или он ещё не стартовал после перезагрузки — поднимаем его задачей, без окна UAC
         animator.whenMissing = () -> {
             if (settings.openRgbTask) {
@@ -1878,6 +1879,30 @@ final class DevicePage extends Ui.Card {
         return box;
     }
 
+    /** Свой режим у устройства, как в iCUE и SignalRGB: клавиатура — «Экран», вентиляторы — «Радуга». */
+    private JComponent modeControl(OpenRgb.Device device) {
+        var names = new java.util.ArrayList<String>();
+        names.add("как у всех");
+        SignalRgb.MODES.forEach(mode -> names.add(mode.name()));
+        var box = new javax.swing.JComboBox<>(names.toArray(String[]::new));
+        var own = settings.deviceModes.get(device.name());
+        box.setSelectedItem(own == null ? "как у всех" : SignalRgb.mode(own).name());
+        box.setPreferredSize(new Dimension(150, box.getPreferredSize().height));
+        box.addActionListener(e -> {
+            var index = box.getSelectedIndex();
+
+            if (index <= 0) {
+                settings.deviceModes.remove(device.name());
+            } else {
+                settings.deviceModes.put(device.name(), SignalRgb.MODES.get(index - 1).id());
+            }
+
+            settings.save();
+            animator.modes = Map.copyOf(settings.deviceModes);
+        });
+        return box;
+    }
+
     /** Порядок цветов, как в WLED: красный горит зелёным — значит, устройству нужен GRB. */
     private JComponent orderControl(OpenRgb.Device device) {
         var box = new javax.swing.JComboBox<>(LedColor.ORDERS.toArray(String[]::new));
@@ -2038,9 +2063,9 @@ final class DevicePage extends Ui.Card {
 
         for (var device : found) {
             var row = Ui.transparent(new BorderLayout(10, 0));
-            row.setBorder(BorderFactory.createEmptyBorder(8, 2, 8, 2));
+            row.setBorder(BorderFactory.createEmptyBorder(8, 2, 2, 2));
             row.setAlignmentX(LEFT_ALIGNMENT);
-            row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
+            row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 38));
             var how = device.leds() > 0 ? "светодиодов: " + device.leds()
                     : device.solid() != null ? "цвет режимом «" + device.solid().name() + "»"
                     : "OpenRGB не даёт задать цвет — см. подсказку ниже";
@@ -2052,11 +2077,22 @@ final class DevicePage extends Ui.Card {
             paint.addActionListener(e -> paint(List.of(device), lit()));
             var controls = Ui.transparent(new FlowLayout(FlowLayout.RIGHT, 6, 0));
             controls.add(levelControl(device));
-            controls.add(orderControl(device));
-            controls.add(testButton(device));
             controls.add(paint);
             row.add(controls, BorderLayout.EAST);
             rgbDevices.add(row);
+
+            // Вторая строка: свой режим, порядок цветов, проверка
+            var tune = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 6, 0));
+            tune.setBorder(BorderFactory.createEmptyBorder(0, 14, 8, 2));
+            tune.setAlignmentX(LEFT_ALIGNMENT);
+            tune.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+            tune.add(Ui.muted("режим", 12.5f));
+            tune.add(modeControl(device));
+            tune.add(Box.createHorizontalStrut(8));
+            tune.add(Ui.muted("порядок цветов", 12.5f));
+            tune.add(orderControl(device));
+            tune.add(testButton(device));
+            rgbDevices.add(tune);
 
             for (var zone : device.resizable()) {
                 rgbDevices.add(zoneRow(device, zone));
@@ -2401,6 +2437,8 @@ final class DevicePage extends Ui.Card {
         int nightLevel = 20;
         /** Простой: через сколько минут без движения мыши гасить; 0 — не гасить. */
         int idleMinutes = 0;
+        /** Свой режим у устройства: имя → номер режима; нет в списке — общий. */
+        final Map<String, Integer> deviceModes = new LinkedHashMap<>();
         /** Порядок цветов по устройствам: «GRB» и т.п. — для лент и вентиляторов на WS2812. */
         final Map<String, String> colorOrders = new LinkedHashMap<>();
         /** Яркость по устройствам, %: 0 — не трогать устройство вовсе. */
@@ -2452,6 +2490,14 @@ final class DevicePage extends Ui.Card {
                     settings.nightTo = json.get("nightTo") instanceof Number n ? n.intValue() : 8;
                     settings.nightLevel = json.get("nightLevel") instanceof Number n ? n.intValue() : 20;
                     settings.idleMinutes = json.get("idleMinutes") instanceof Number n ? n.intValue() : 0;
+
+                    if (json.get("deviceModes") instanceof Map<?, ?> modes) {
+                        modes.forEach((key, value) -> {
+                            if (value instanceof Number n) {
+                                settings.deviceModes.put(String.valueOf(key), n.intValue());
+                            }
+                        });
+                    }
 
                     if (json.get("colorOrders") instanceof Map<?, ?> orders) {
                         orders.forEach((key, value) -> settings.colorOrders.put(String.valueOf(key), String.valueOf(value)));
@@ -2515,6 +2561,7 @@ final class DevicePage extends Ui.Card {
             json.put("zoneSizes", zoneSizes);
             json.put("deviceLevels", deviceLevels);
             json.put("colorOrders", colorOrders);
+            json.put("deviceModes", deviceModes);
             json.put("nightOn", nightOn);
             json.put("openRgbTask", openRgbTask);
             json.put("nightFrom", nightFrom);

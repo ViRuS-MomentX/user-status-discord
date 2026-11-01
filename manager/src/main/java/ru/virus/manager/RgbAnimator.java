@@ -41,6 +41,9 @@ final class RgbAnimator {
     /** Смена режима или цвета — плавным переходом, как в iCUE и SignalRGB, а не скачком. */
     static final long FADE_MS = 400;
 
+    /** Свой режим у устройства: имя → номер режима. Нет в списке — общий. */
+    volatile java.util.Map<String, Integer> modes = java.util.Map.of();
+
     /** Что сделать, если OpenRGB не отвечает: поднять его задачей Планировщика. Не чаще раза в минуту. */
     volatile Runnable whenMissing = () -> { };
     private long missingAt;
@@ -127,7 +130,7 @@ final class RgbAnimator {
 
     /** Что видно глазу: режим, цвета, вкл/выкл. Поменялось — пора плавного перехода. */
     private String look() {
-        return settings.mode + "|" + settings.color.getRGB() + "|" + settings.color2.getRGB() + "|" + settings.on
+        return settings.mode + "|" + modes + "|" + settings.color.getRGB() + "|" + settings.color2.getRGB() + "|" + settings.on
                 + "|" + settings.dim;
     }
 
@@ -211,7 +214,8 @@ final class RgbAnimator {
 
             for (var d = 0; d < animated.size(); d++) {
                 var device = animated.get(d);
-                var frame = Glow.frame(settings.mode, time, places.get(d), settings.color, settings.color2, cpu,
+                var frame = Glow.frame(modes.getOrDefault(device.name(), settings.mode), time, places.get(d),
+                        settings.color, settings.color2, cpu,
                         settings.effective() * level(device) / 100, settings.on, d);
 
                 if (fade < 1 && from[d] != null) {

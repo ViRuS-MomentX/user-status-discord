@@ -621,4 +621,36 @@ class DeviceTest {
         assertTrue(script.contains("'\"\\\"C:\\Program Files\\OpenRGB\\OpenRGB.exe\\\" --server --startminimized\"'"), script);
         assertTrue(script.contains("'\"V.I.R.U.S. OpenRGB\"'"), script);
     }
+
+    @Test
+    void eachDeviceCanHaveItsOwnMode() throws Exception {
+        var got = fakeOpenRgb();
+        var settings = new SignalRgb.Live(() -> 0);
+        settings.mode = 3;                       // у всех — радужная волна
+        settings.color = Color.RED;
+        var animator = new RgbAnimator(settings, text -> { });
+        animator.port = rgbServer.getLocalPort();
+        animator.modes = java.util.Map.of("JONSBO CR-1000", 0);   // а у JONSBO — статичный красный
+        animator.start("127.0.0.1");
+
+        try {
+            var deadline = System.currentTimeMillis() + 5000;
+
+            while (got.stream().filter(p -> p.id() == OpenRgb.UPDATE_LEDS && p.device() == 1).count() < 5
+                    && System.currentTimeMillis() < deadline) {
+                Thread.sleep(50);
+            }
+        } finally {
+            animator.stop();
+        }
+
+        var jonsbo = got.stream().filter(p -> p.id() == OpenRgb.UPDATE_LEDS && p.device() == 0).toList();
+        var keyboard = got.stream().filter(p -> p.id() == OpenRgb.UPDATE_LEDS && p.device() == 1).toList();
+        assertEquals(1, jonsbo.size(), "статичный режим — один кадр, без повторов");
+        var body = ByteBuffer.wrap(jonsbo.getFirst().body()).order(ByteOrder.LITTLE_ENDIAN);
+        body.getInt();
+        body.getShort();
+        assertEquals((byte) 255, body.get(), "JONSBO красный");
+        assertTrue(keyboard.size() >= 5, "клавиатура играет волну");
+    }
 }

@@ -630,6 +630,10 @@ class DeviceTest {
         settings.idleMinutes = 10;
         assertEquals(0, DevicePage.dimFor(settings, 12, 11 * 60_000L), "хозяина нет 11 минут — темно");
         assertEquals(100, DevicePage.dimFor(settings, 12, 60_000L));
+        assertEquals(0, DevicePage.dimFor(settings, 12, Long.MAX_VALUE), "экран заблокирован — темно");
+        assertEquals(12, IdleWatch.parse("12 locked"));
+        assertTrue(IdleWatch.parseLocked("12 locked"));
+        assertFalse(IdleWatch.parseLocked("12"));
 
         // Таймер сна: от полной до нуля ровно за отведённое время
         assertEquals(100, DevicePage.sleepLevel(0, 60_000, 0));

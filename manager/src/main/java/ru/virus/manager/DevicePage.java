@@ -1008,6 +1008,11 @@ final class DevicePage extends Ui.Card {
             }
         }
 
+        // Экран заблокирован — хозяин ушёл: гасим, как SignalRGB и iCUE; разблокировал — вернётся само
+        if (settings.offWhenLocked && IdleWatch.locked()) {
+            idle = Long.MAX_VALUE;
+        }
+
         var dim = dimFor(settings, java.time.LocalTime.now().getHour(), idle);
 
         if (sleepUntil > 0) {
@@ -1061,7 +1066,8 @@ final class DevicePage extends Ui.Card {
 
     /** Множитель яркости, %: ночью — ночная яркость, в простое — 0. */
     static int dimFor(Settings settings, int hour, long idleMillis) {
-        if (settings.idleMinutes > 0 && idleMillis >= settings.idleMinutes * 60_000L) {
+        if (idleMillis == Long.MAX_VALUE
+                || settings.idleMinutes > 0 && idleMillis >= settings.idleMinutes * 60_000L) {
             return 0;
         }
 
@@ -1114,7 +1120,24 @@ final class DevicePage extends Ui.Card {
         row.add(Ui.muted("гасить, если не трогали компьютер", 13f));
         row.add(idle);
         row.add(Ui.muted("мин (0 — не гасить)", 13f));
-        return row;
+        var lockedRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        var lockedSwitch = new Ui.Switch(settings.offWhenLocked);
+        lockedSwitch.onChange(on -> {
+            settings.offWhenLocked = on;
+            settings.save();
+            updateDim();
+        });
+        lockedRow.add(lockedSwitch);
+        lockedRow.add(Ui.muted("гасить, пока экран заблокирован (Win+L), — включится сама, когда войдёшь", 13f));
+
+        var rows = Ui.transparent(null);
+        rows.setLayout(new BoxLayout(rows, BoxLayout.Y_AXIS));
+        row.setAlignmentX(LEFT_ALIGNMENT);
+        lockedRow.setAlignmentX(LEFT_ALIGNMENT);
+        rows.add(row);
+        rows.add(Box.createVerticalStrut(6));
+        rows.add(lockedRow);
+        return rows;
     }
 
     /** Меню «Подсветка» в трее — пересобирается, когда меняются профили. */
@@ -2855,6 +2878,7 @@ final class DevicePage extends Ui.Card {
         int nightLevel = 20;
         /** Простой: через сколько минут без движения мыши гасить; 0 — не гасить. */
         int idleMinutes = 0;
+        boolean offWhenLocked = true;
         /** Единый холст и порядок устройств на нём. */
         boolean canvas;
         final List<String> canvasOrder = new ArrayList<>();
@@ -2915,6 +2939,7 @@ final class DevicePage extends Ui.Card {
                     settings.nightTo = json.get("nightTo") instanceof Number n ? n.intValue() : 8;
                     settings.nightLevel = json.get("nightLevel") instanceof Number n ? n.intValue() : 20;
                     settings.idleMinutes = json.get("idleMinutes") instanceof Number n ? n.intValue() : 0;
+                    settings.offWhenLocked = !Boolean.FALSE.equals(json.get("offWhenLocked"));
 
                     settings.canvas = Boolean.TRUE.equals(json.get("canvas"));
 
@@ -3005,6 +3030,7 @@ final class DevicePage extends Ui.Card {
             json.put("nightTo", nightTo);
             json.put("nightLevel", nightLevel);
             json.put("idleMinutes", idleMinutes);
+            json.put("offWhenLocked", offWhenLocked);
             json.put("profiles", profiles.stream().map(LightProfiles.Profile::toJson).toList());
             json.put("appRules", appRules);
             json.put("engine", engine);

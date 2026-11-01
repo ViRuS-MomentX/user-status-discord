@@ -18,6 +18,8 @@ final class IdleWatch {
 
     /** Секунд без ввода; −1 — неизвестно (тогда решает запасной способ — по мыши). */
     private static volatile long seconds = -1;
+    /** Экран заблокирован (Win+L, заставка с паролем) — по последнему ответу помощника. */
+    private static volatile boolean locked;
     private static volatile long wanted;
     private static Thread thread;
 
@@ -27,6 +29,12 @@ final class IdleWatch {
     static long seconds() {
         demand();
         return seconds;
+    }
+
+    /** Заблокирован ли экран; неизвестно — false, чтобы зря не гасить. */
+    static boolean locked() {
+        demand();
+        return locked;
     }
 
     private static synchronized void demand() {
@@ -60,11 +68,13 @@ final class IdleWatch {
 
                         if (parsed >= 0) {
                             seconds = parsed;
+                            locked = parseLocked(line);
                         }
                     }
                 }
             } catch (Exception e) {
                 seconds = -1;
+                locked = false;
             } finally {
                 if (process != null) {
                     process.destroy();
@@ -79,17 +89,28 @@ final class IdleWatch {
         }
 
         seconds = -1;
+        locked = false;
     }
 
     static long parse(String line) {
         try {
-            return Long.parseLong(line.strip());
+            return Long.parseLong(line.strip().split("\\s+")[0]);
         } catch (NumberFormatException e) {
             return -1;
         }
     }
 
-    /** Печатает секунды без ввода раз в 5 секунд; через 10 минут выходит — его перезапустят. */
+    /** Строка помощника «12 locked» — экран заблокирован. */
+    static boolean parseLocked(String line) {
+        return line.strip().endsWith(" locked");
+    }
+
+    /**
+     * Печатает секунды без ввода и, если экран заблокирован, слово «locked».
+     * Блокировку узнаём, как это делают программы подсветки: на экране
+     * блокировки входной рабочий стол — чужой, переключиться на него нельзя.
+     * Раз в 5 секунд; через 10 минут выходит — его перезапустят.
+     */
     static String script() {
         return "$ErrorActionPreference='Stop';"
                 + "Add-Type -TypeDefinition @'\n"
@@ -97,12 +118,20 @@ final class IdleWatch {
                 + "public static class VirusIdle {\n"
                 + "  [StructLayout(LayoutKind.Sequential)] struct LastInput { public uint Size; public uint Time; }\n"
                 + "  [DllImport(\"user32.dll\")] static extern bool GetLastInputInfo(ref LastInput info);\n"
+                + "  [DllImport(\"user32.dll\")] static extern IntPtr OpenInputDesktop(uint flags, bool inherit, uint access);\n"
+                + "  [DllImport(\"user32.dll\")] static extern bool SwitchDesktop(IntPtr desktop);\n"
+                + "  [DllImport(\"user32.dll\")] static extern bool CloseDesktop(IntPtr desktop);\n"
+                + "  static bool Locked() {\n"
+                + "    var desktop = OpenInputDesktop(0, false, 0x0100);\n"
+                + "    if (desktop == IntPtr.Zero) return true;\n"
+                + "    var mine = SwitchDesktop(desktop); CloseDesktop(desktop); return !mine;\n"
+                + "  }\n"
                 + "  public static void Run() {\n"
                 + "    var until = DateTime.Now.AddMinutes(10);\n"
                 + "    while (DateTime.Now < until) {\n"
                 + "      var info = new LastInput(); info.Size = (uint) Marshal.SizeOf(info);\n"
                 + "      if (GetLastInputInfo(ref info)) {\n"
-                + "        Console.WriteLine(((uint) Environment.TickCount - info.Time) / 1000);\n"
+                + "        Console.WriteLine(((uint) Environment.TickCount - info.Time) / 1000 + (Locked() ? \" locked\" : \"\"));\n"
                 + "      }\n"
                 + "      Thread.Sleep(5000);\n"
                 + "    }\n"

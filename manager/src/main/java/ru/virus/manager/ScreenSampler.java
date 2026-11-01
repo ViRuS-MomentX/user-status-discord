@@ -123,11 +123,15 @@ final class ScreenSampler {
 
     /** Разложить снимок на сетку средних цветов. */
     static void take(BufferedImage image) {
+        var border = settle(detect(image));
         var cells = new Color[ROWS][COLUMNS];
         var sums = new long[COLUMNS][3];
         var counts = new int[COLUMNS];
-        var width = image.getWidth();
-        var height = image.getHeight();
+        // Считаем только картинку, без чёрных полос
+        var left = border[1];
+        var top = border[0];
+        var width = image.getWidth() - 2 * left;
+        var height = image.getHeight() - 2 * top;
         // Каждый пиксель не нужен: хватает сетки через 8 точек — в 64 раза меньше работы
         var step = 8;
 
@@ -137,10 +141,10 @@ final class ScreenSampler {
                 long g = 0;
                 long b = 0;
                 var n = 0;
-                var x0 = column * width / COLUMNS;
-                var x1 = (column + 1) * width / COLUMNS;
-                var y0 = row * height / ROWS;
-                var y1 = (row + 1) * height / ROWS;
+                var x0 = left + column * width / COLUMNS;
+                var x1 = left + (column + 1) * width / COLUMNS;
+                var y0 = top + row * height / ROWS;
+                var y1 = top + (row + 1) * height / ROWS;
 
                 for (var y = y0; y < y1; y += step) {
                     for (var x = x0; x < x1; x += step) {
@@ -174,6 +178,89 @@ final class ScreenSampler {
         grid = cells;
         columns = line;
         takenAt = System.currentTimeMillis();
+    }
+
+    /** Ярче этого — уже картинка, а не полоса (запас на шум сжатия видео). */
+    private static final int BLACK = 24;
+    /** Сколько снимков подряд полосы должны быть одинаковыми, чтобы им поверить. */
+    private static final int STABLE = 3;
+
+    private static int[] border = {0, 0};
+    private static int[] candidate = {0, 0};
+    private static int seen;
+
+    /**
+     * Чёрные полосы фильма — сверху/снизу и слева/справа, в пикселях: {верх, бок}.
+     * Как Blackborder detector у Hyperion: полоса — строка, где все точки
+     * почти чёрные; берём меньшую из двух сторон (полосы симметричны) и не
+     * больше трети экрана. Совсем чёрный экран — не полосы, а тёмная сцена.
+     */
+    static int[] detect(BufferedImage image) {
+        var width = image.getWidth();
+        var height = image.getHeight();
+        var top = 0;
+
+        while (top < height / 3 && blackRow(image, top) && blackRow(image, height - 1 - top)) {
+            top++;
+        }
+
+        var side = 0;
+
+        while (side < width / 3 && blackColumn(image, side) && blackColumn(image, width - 1 - side)) {
+            side++;
+        }
+
+        // Дошли до трети — значит, тёмная сцена или чёрный экран, а не полосы
+        return new int[] {top >= height / 3 ? 0 : top, side >= width / 3 ? 0 : side};
+    }
+
+    private static boolean blackRow(BufferedImage image, int y) {
+        for (var x = 0; x < image.getWidth(); x += 8) {
+            if (!dark(image.getRGB(x, y))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static boolean blackColumn(BufferedImage image, int x) {
+        for (var y = 0; y < image.getHeight(); y += 8) {
+            if (!dark(image.getRGB(x, y))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static boolean dark(int rgb) {
+        return ((rgb >> 16) & 0xFF) < BLACK && ((rgb >> 8) & 0xFF) < BLACK && (rgb & 0xFF) < BLACK;
+    }
+
+    /**
+     * Полосы меняем, только когда они продержались несколько снимков: в
+     * тёмной сцене края на миг чернеют, и без этого подсветка дёргалась бы.
+     */
+    static synchronized int[] settle(int[] found) {
+        if (java.util.Arrays.equals(found, border)) {
+            seen = 0;
+            return border;
+        }
+
+        if (java.util.Arrays.equals(found, candidate)) {
+            seen++;
+        } else {
+            candidate = found;
+            seen = 1;
+        }
+
+        if (seen >= STABLE) {
+            border = found;
+            seen = 0;
+        }
+
+        return border;
     }
 
     /**

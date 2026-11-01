@@ -572,7 +572,10 @@ class DeviceTest {
         g.setColor(new Color(40, 40, 200));
         g.fillRect(160, 0, 160, 180);
         g.dispose();
-        ScreenSampler.take(image);
+        // Несколько снимков: прошлый снимок не мешает (сглаживание), полосы устоялись
+        for (var i = 0; i < 4; i++) {
+            ScreenSampler.take(image);
+        }
 
         var left = ScreenSampler.at(0.1, 0.5, true);
         var right = ScreenSampler.at(0.9, 0.5, false);
@@ -907,5 +910,31 @@ class DeviceTest {
         assertTrue(half.getRed() > 0 && half.getRed() < 255, half.toString());
         assertEquals(now, ScreenSampler.smooth(now, before, 1));
         assertEquals(now, ScreenSampler.smooth(now, null, 0), "первый снимок — сразу");
+    }
+
+    @Test
+    void blackBarsOfMoviesAreIgnored() {
+        // Фильм 21:9 на экране 16:9: сверху и снизу по 40 строк чёрного, картинка — оранжевая
+        var image = new java.awt.image.BufferedImage(320, 180, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        var g = image.createGraphics();
+        g.setColor(Color.BLACK);
+        g.fillRect(0, 0, 320, 180);
+        g.setColor(new Color(230, 120, 20));
+        g.fillRect(0, 40, 320, 100);
+        g.dispose();
+
+        assertEquals(40, ScreenSampler.detect(image)[0]);
+        assertEquals(0, ScreenSampler.detect(image)[1]);
+
+        for (var i = 0; i < 4; i++) {
+            ScreenSampler.take(image);
+        }
+
+        var top = ScreenSampler.at(0.5, 0.0, false);
+        assertTrue(top.getRed() > 150, "верхний край — цвет картинки, а не чёрная полоса: " + top);
+
+        // Совсем чёрный экран — не полосы
+        var black = new java.awt.image.BufferedImage(320, 180, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        assertEquals(0, ScreenSampler.detect(black)[0]);
     }
 }

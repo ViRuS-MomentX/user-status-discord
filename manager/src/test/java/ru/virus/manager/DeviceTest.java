@@ -835,4 +835,13 @@ class DeviceTest {
         assertEquals(Color.RED, RgbAnimator.overlay(frame, Color.RED, 1)[0]);
         assertEquals(Color.BLUE, RgbAnimator.overlay(frame, Color.RED, 0)[0]);
     }
+
+    @Test
+    void signalReachesSignalRgbEffect() {
+        var live = new SignalRgb.Live(() -> 0);
+        assertFalse(live.json().contains("flash"), "сигнала нет — и в ответе его нет");
+        live.flash(Color.RED);
+        assertTrue(live.json().contains("\"flash\":\"#ff0000\""), live.json());
+        assertTrue(live.json().contains("\"flashLeft\":"), live.json());
+    }
 }

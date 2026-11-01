@@ -434,7 +434,13 @@ final class SignalRgb {
             var load = cpu.getAsDouble();
             return "{\"mode\":" + mode + ",\"speed\":" + speed + ",\"color\":\"" + hex(color) + "\",\"color2\":\""
                     + hex(color2) + "\",\"brightness\":" + effective() + ",\"on\":" + on + ",\"cpu\":"
-                    + String.format(java.util.Locale.ROOT, "%.3f", Math.max(0, load)) + screen() + "}";
+                    + String.format(java.util.Locale.ROOT, "%.3f", Math.max(0, load)) + screen() + flash() + "}";
+        }
+
+        /** Сигнал о событии: цвет и сколько ему осталось — эффект в SignalRGB дорисует импульсы по своим часам. */
+        private String flash() {
+            var left = flashUntil - System.currentTimeMillis();
+            return left <= 0 ? "" : ",\"flash\":\"" + hex(flashColor) + "\",\"flashLeft\":" + left;
         }
 
         /** Режим «Экран»: цвета столбцов экрана — эффект в SignalRGB рисует их сам. */

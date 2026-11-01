@@ -724,4 +724,12 @@ class DeviceTest {
         var warm = GpuSensor.color(65);
         assertTrue(warm.getRed() > 200 && warm.getGreen() > 150, "тёплая — жёлтая: " + warm);
     }
+
+    @Test
+    void everyModeIsInExactlyOneGroup() {
+        var grouped = DevicePage.MODE_GROUPS.values().stream().flatMap(List::stream).toList();
+        assertEquals(SignalRgb.MODES.size(), grouped.size(), "каждый режим — в группе, без повторов");
+        assertEquals(SignalRgb.MODES.stream().map(SignalRgb.Mode::id).collect(java.util.stream.Collectors.toSet()),
+                new java.util.HashSet<>(grouped));
+    }
 }

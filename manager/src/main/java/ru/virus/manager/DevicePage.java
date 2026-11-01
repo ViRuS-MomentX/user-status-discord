@@ -99,7 +99,20 @@ final class DevicePage extends Ui.Card {
     private final JLabel signalStatus = Ui.muted("Не подключено.", 13f);
     private final Ui.Switch signalOn = new Ui.Switch(true);
     private final JSlider signalBrightness = new JSlider(0, 100, 100);
-    private final JPanel modeTiles = Ui.transparent(new GridLayout(0, 6, 8, 8));
+    private final JPanel modeTiles = Ui.transparent(null);
+    /** Кнопки режимов по номеру — чтобы профиль мог подсветить свою. */
+    private final Map<Integer, JToggleButton> tileById = new LinkedHashMap<>();
+
+    /** Группы режимов, как в библиотеке SignalRGB: подпись → номера. */
+    static final Map<String, List<Integer>> MODE_GROUPS = groups();
+
+    private static Map<String, List<Integer>> groups() {
+        var groups = new LinkedHashMap<String, List<Integer>>();
+        groups.put("Спокойные", List.of(0, 1, 4, 8, 11));
+        groups.put("Динамичные", List.of(2, 3, 5, 6, 7, 9, 14, 15, 16, 17));
+        groups.put("Реагируют", List.of(12, 13, 10, 18));
+        return java.util.Collections.unmodifiableMap(groups);
+    }
     private final JPanel profileRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 6, 0));
     /** Профиль, который включила программа из правил; null — включён вручную. */
     private String autoProfile;
@@ -526,15 +539,27 @@ final class DevicePage extends Ui.Card {
 
         // Режимы V.I.R.U.S.
         var group = new ButtonGroup();
+        modeTiles.setLayout(new BoxLayout(modeTiles, BoxLayout.Y_AXIS));
 
-        for (var mode : SignalRgb.MODES) {
-            var tile = new JToggleButton(mode.name());
-            tile.setFont(Theme.ui.deriveFont(13f));
-            tile.setFocusable(false);
-            tile.setSelected(mode.id() == glow.mode);
-            tile.addActionListener(e -> chooseMode(mode));
-            group.add(tile);
-            modeTiles.add(tile);
+        for (var entry : MODE_GROUPS.entrySet()) {
+            var caption = Ui.muted(entry.getKey(), 12f);
+            caption.setBorder(BorderFactory.createEmptyBorder(4, 2, 4, 0));
+            modeTiles.add(left(caption));
+            var grid = Ui.transparent(new GridLayout(0, 6, 8, 8));
+
+            for (var id : entry.getValue()) {
+                var mode = SignalRgb.mode(id);
+                var tile = new JToggleButton(mode.name());
+                tile.setFont(Theme.ui.deriveFont(13f));
+                tile.setFocusable(false);
+                tile.setSelected(mode.id() == glow.mode);
+                tile.addActionListener(e -> chooseMode(mode));
+                group.add(tile);
+                tileById.put(id, tile);
+                grid.add(tile);
+            }
+
+            modeTiles.add(left(grid));
         }
 
         glowColor.setColor(glow.color);
@@ -1014,12 +1039,10 @@ final class DevicePage extends Ui.Card {
         glowColor2.setColor(profile.color2());
         glowSpeed.setValue(profile.speed());
 
-        var tiles = modeTiles.getComponents();
+        var tile = tileById.get(profile.mode());
 
-        for (var i = 0; i < SignalRgb.MODES.size() && i < tiles.length; i++) {
-            if (tiles[i] instanceof JToggleButton tile) {
-                tile.setSelected(SignalRgb.MODES.get(i).id() == profile.mode());
-            }
+        if (tile != null) {
+            tile.setSelected(true);
         }
 
         chooseMode(SignalRgb.mode(profile.mode()));

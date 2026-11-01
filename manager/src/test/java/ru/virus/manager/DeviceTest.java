@@ -1006,4 +1006,12 @@ class DeviceTest {
         settings.nightLevel = 20;
         assertEquals(20, DevicePage.dimFor(settings, 2, 11 * 60_000L), "ночью в простое — не ярче ночного");
     }
+
+    @Test
+    void dimmingGlidesInsteadOfSnapping() {
+        assertEquals(95, RgbAnimator.approach(100, 0, 100), 0.001, "за 0,1 с — только 5%");
+        assertEquals(0, RgbAnimator.approach(100, 0, 5000), 0.001, "дошли — дальше не уходим");
+        assertEquals(25, RgbAnimator.approach(20, 100, 100), 0.001, "и обратно так же плавно");
+        assertEquals(30, RgbAnimator.approach(30, 30, 33), 0.001);
+    }
 }

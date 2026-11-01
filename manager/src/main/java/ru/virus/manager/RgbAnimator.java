@@ -142,6 +142,18 @@ final class RgbAnimator {
         }
     }
 
+    /** За сколько приглушение проходит путь от полной яркости до нуля. */
+    static final double DIM_FADE_MS = 2000;
+
+    /**
+     * Шаг приглушения к цели: ровно, 100% за {@link #DIM_FADE_MS}. Как плавное
+     * затемнение у iCUE и Hue — ночь и простой приходят мягко, а не щелчком.
+     */
+    static double approach(double shown, double target, double elapsedMs) {
+        var step = 100 * Math.max(0, elapsedMs) / DIM_FADE_MS;
+        return shown < target ? Math.min(target, shown + step) : Math.max(target, shown - step);
+    }
+
     /** Кадр опоздал так сильно, что это не задержка, а сон или гибернация. */
     static final long WAKE_GAP_MS = 10_000;
 
@@ -166,8 +178,7 @@ final class RgbAnimator {
 
     /** Что видно глазу: режим, цвета, вкл/выкл. Поменялось — пора плавного перехода. */
     private String look() {
-        return settings.mode + "|" + settings.reverse + "|" + settings.scale + "|" + modes + "|" + settings.color.getRGB() + "|" + settings.color2.getRGB() + "|" + settings.on
-                + "|" + settings.dim;
+        return settings.mode + "|" + settings.reverse + "|" + settings.scale + "|" + modes + "|" + settings.color.getRGB() + "|" + settings.color2.getRGB() + "|" + settings.on;
     }
 
     /** Кадр посередине перехода: от старого к новому, сглаженно (быстро в начале, мягко в конце). */
@@ -254,6 +265,8 @@ final class RgbAnimator {
         var time = 0.0;
         var last = start;
         var lastWall = System.currentTimeMillis();
+        // Приглушение (ночь, простой, блокировка) плывёт медленно, а не щёлкает
+        var dimShown = (double) Math.max(0, Math.min(100, settings.dim));
         var places = canvas(animated, canvas, order);
         var sent = new Color[animated.size()][];
         var sentAt = new long[animated.size()];
@@ -279,6 +292,8 @@ final class RgbAnimator {
                 return;
             }
 
+            dimShown = approach(dimShown, Math.max(0, Math.min(100, settings.dim)), (now - last) / 1e6);
+            var brightness = (int) Math.round(settings.brightness * dimShown / 100);
             time += (now - last) / 1e9 * Math.max(1, Math.min(100, settings.speed)) / 50.0;
             last = now;
             var cpu = settings.cpu();
@@ -303,7 +318,7 @@ final class RgbAnimator {
                         : Glow.shape(places.get(d), settings.reverse, settings.scale);
                 var frame = Glow.frame(deviceMode, time, shaped,
                         settings.color, settings.color2, cpu,
-                        settings.effective() * level(device) / 100, settings.on, d);
+                        brightness * level(device) / 100, settings.on, d);
 
                 if (fade < 1 && from[d] != null) {
                     frame = blend(from[d], frame, fade);
@@ -325,7 +340,7 @@ final class RgbAnimator {
             for (var s = 0; s < still.size(); s++) {
                 var device = still.get(s);
                 var color = Glow.frame(modes.getOrDefault(device.name(), settings.mode), time, STILL_PLACE,
-                        settings.color, settings.color2, cpu, settings.effective() * level(device) / 100, settings.on,
+                        settings.color, settings.color2, cpu, brightness * level(device) / 100, settings.on,
                         100 + s)[0];
 
                 if (!color.equals(stillSent[s]) && millis - stillAt[s] >= STILL_MS) {

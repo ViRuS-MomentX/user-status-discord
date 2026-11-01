@@ -943,7 +943,18 @@ final class DevicePage extends Ui.Card {
             lastActivity = System.currentTimeMillis();
         }
 
-        glow.dim = dimFor(settings, java.time.LocalTime.now().getHour(), System.currentTimeMillis() - lastActivity);
+        // Простой — как его считает Windows (любой ввод); не вышло узнать — по мыши
+        var idle = System.currentTimeMillis() - lastActivity;
+
+        if (settings.idleMinutes > 0) {
+            var system = IdleWatch.seconds();
+
+            if (system >= 0) {
+                idle = system * 1000;
+            }
+        }
+
+        glow.dim = dimFor(settings, java.time.LocalTime.now().getHour(), idle);
     }
 
     /** Множитель яркости, %: ночью — ночная яркость, в простое — 0. */
@@ -998,7 +1009,7 @@ final class DevicePage extends Ui.Card {
         row.add(level);
         row.add(Ui.muted("%", 13f));
         row.add(Box.createHorizontalStrut(16));
-        row.add(Ui.muted("гасить, если мышь не двигалась", 13f));
+        row.add(Ui.muted("гасить, если не трогали компьютер", 13f));
         row.add(idle);
         row.add(Ui.muted("мин (0 — не гасить)", 13f));
         return row;

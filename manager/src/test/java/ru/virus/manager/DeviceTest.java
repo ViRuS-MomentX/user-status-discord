@@ -740,4 +740,11 @@ class DeviceTest {
         assertEquals(new Color(0xd4, 0x2b, 0x3a), WindowsAccent.parse(out));
         assertEquals(null, WindowsAccent.parse("ERROR: The system was unable to find the specified registry key"));
     }
+
+    @Test
+    void idleIsCountedByAnyInput() {
+        assertEquals(125, IdleWatch.parse("125\r"));
+        assertEquals(-1, IdleWatch.parse("Add-Type : ошибка"));
+        assertTrue(IdleWatch.script().contains("GetLastInputInfo"));
+    }
 }

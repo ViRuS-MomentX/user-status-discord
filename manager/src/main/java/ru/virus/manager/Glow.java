@@ -1,6 +1,7 @@
 package ru.virus.manager;
 
 import java.awt.Color;
+import java.util.List;
 
 /**
  * Режимы V.I.R.U.S. для лент и вентиляторов: те же двенадцать, что в
@@ -31,6 +32,54 @@ final class Glow {
         }
 
         return colors;
+    }
+
+    /**
+     * Кадр по местам светодиодов: у клавиатуры — по карте клавиш, у ленты и
+     * вентилятора — вдоль зоны.
+     */
+    static Color[] frame(int mode, double t, List<OpenRgb.Place> places, Color a, Color b, double cpu,
+                         int brightness, boolean on, int seed) {
+        var colors = new Color[places.size()];
+        var level = on ? Math.max(0, Math.min(100, brightness)) / 100.0 : 0;
+
+        for (var i = 0; i < colors.length; i++) {
+            var place = places.get(i);
+            colors[i] = scale(pixel(mode, t, place.x(), place.y(), place.grid(), i + seed * 131, a, b, cpu), level);
+        }
+
+        return colors;
+    }
+
+    /** Эффекты, которым есть что делать с высотой: на клавиатуре они идут по строкам и столбцам. */
+    static Color pixel(int mode, double t, double x, double y, boolean grid, int i, Color a, Color b, double cpu) {
+        if (grid) {
+            switch (mode) {
+                case 5 -> {
+                    // Матрица: капли падают по столбцам клавиатуры, у каждого столбца свой темп
+                    var column = (int) Math.round(x * 64);
+                    var head = fract(y * 1.2 + hash(column) * 3 - t * (0.5 + hash(column + 7) * 0.4));
+                    var v = Math.pow(head, 6);
+                    return v > 0.9 ? mix(a, Color.WHITE, 0.6) : scale(a, v);
+                }
+                case 6 -> {
+                    // Огонь: снизу жарче, вверх гаснет
+                    var flicker = 0.4 + 0.6 * noise(i, t * 6);
+                    var heat = Math.max(0, Math.min(1, y * 1.3 - 0.2 + flicker * 0.4));
+                    return scale(mix(new Color(255, 30, 0), new Color(255, 200, 60), heat * noise(i + 77, t * 3)), heat);
+                }
+                case 8 -> {
+                    var w = 0.5 + 0.5 * Math.sin(x * 10 + t) * Math.sin(y * 6 - t * 0.7);
+                    return scale(mix(new Color(0, 255, 140), new Color(140, 40, 255), w),
+                            0.35 + 0.65 * Math.abs(Math.sin(x * 4 + y * 3 + t * 0.5)));
+                }
+                default -> {
+                    // остальные — как на ленте
+                }
+            }
+        }
+
+        return pixel(mode, t, x, i, a, b, cpu);
     }
 
     static Color pixel(int mode, double t, double x, int i, Color a, Color b, double cpu) {

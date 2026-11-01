@@ -130,6 +130,7 @@ final class RgbAnimator {
         var start = System.nanoTime();
         var time = 0.0;
         var last = start;
+        var places = animated.stream().map(OpenRgb.Device::places).toList();
         var sent = new Color[animated.size()][];
         var sentAt = new long[animated.size()];
         var stillSent = new Color[still.size()];
@@ -143,7 +144,7 @@ final class RgbAnimator {
 
             for (var d = 0; d < animated.size(); d++) {
                 var device = animated.get(d);
-                var frame = Glow.frame(settings.mode, time, device.leds(), settings.color, settings.color2, cpu,
+                var frame = Glow.frame(settings.mode, time, places.get(d), settings.color, settings.color2, cpu,
                         settings.brightness * level(device) / 100, settings.on, d);
 
                 if (due(frame, sent[d], millis - sentAt[d], slow(device))) {

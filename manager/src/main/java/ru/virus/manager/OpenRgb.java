@@ -49,6 +49,55 @@ final class OpenRgb implements AutoCloseable {
             this(index, name, kind, leds, modes, List.of());
         }
 
+        /**
+         * Где каждый светодиод — для эффектов, как холст у SignalRGB. У
+         * клавиатуры — по карте клавиш (волна идёт слева направо по
+         * клавиатуре, а не по номерам клавиш), у ленты и вентилятора — вдоль
+         * своей зоны: каждый вентилятор получает весь эффект целиком.
+         */
+        List<Place> places() {
+            var result = new ArrayList<Place>();
+            var offset = 0;
+
+            for (var zone : zones) {
+                var zoneLeds = new Place[zone.count()];
+
+                if (zone.grid()) {
+                    for (var row = 0; row < zone.rows(); row++) {
+                        for (var column = 0; column < zone.columns(); column++) {
+                            var at = row * zone.columns() + column;
+                            var led = at < zone.matrix().length ? zone.matrix()[at] : -1;
+
+                            if (led >= 0 && led < zoneLeds.length) {
+                                zoneLeds[led] = new Place((column + 0.5) / zone.columns(),
+                                        (row + 0.5) / zone.rows(), true);
+                            }
+                        }
+                    }
+                }
+
+                for (var i = 0; i < zoneLeds.length; i++) {
+                    if (zoneLeds[i] == null) {
+                        zoneLeds[i] = new Place(zoneLeds.length == 1 ? 0.5 : (double) i / zoneLeds.length, 0.5, false);
+                    }
+                }
+
+                result.addAll(List.of(zoneLeds));
+                offset += zone.count();
+            }
+
+            // Описание зон не сошлось со светодиодами — тогда просто вдоль устройства
+            if (offset != leds) {
+                result.clear();
+
+                for (var i = 0; i < leds; i++) {
+                    result.add(new Place(leds == 1 ? 0.5 : (double) i / leds, 0.5, false));
+                }
+            }
+
+            return result;
+        }
+
         /** Зоны, у которых можно задать число светодиодов, — разъёмы ARGB на плате. */
         List<Zone> resizable() {
             return zones.stream().filter(Zone::resizable).toList();
@@ -82,11 +131,24 @@ final class OpenRgb implements AutoCloseable {
      * светодиодов подключено, и ставит 0 — тогда вентиляторы на нём не горят,
      * пока не задать число (ResizeZone, как кнопка Resize в самом OpenRGB).
      */
-    record Zone(int index, String name, int type, int min, int max, int count) {
+    record Zone(int index, String name, int type, int min, int max, int count, int rows, int columns, int[] matrix) {
+
+        Zone(int index, String name, int type, int min, int max, int count) {
+            this(index, name, type, min, max, count, 0, 0, null);
+        }
 
         boolean resizable() {
             return max > min;
         }
+
+        /** Есть ли карта: где на клавиатуре какая клавиша. */
+        boolean grid() {
+            return matrix != null && rows > 0 && columns > 0;
+        }
+    }
+
+    /** Где светодиод: x и y от 0 до 1. grid — у клавиатуры, где есть строки и столбцы. */
+    record Place(double x, double y, boolean grid) {
     }
 
     /** Режим подсветки — все поля, потому что OpenRGB ждёт его обратно целиком. */
@@ -271,9 +333,30 @@ final class OpenRgb implements AutoCloseable {
 
         for (var i = 0; i < zones; i++) {
             var zoneName = string(buffer);
-            zoneList.add(new Zone(i, zoneName, buffer.getInt(), buffer.getInt(), buffer.getInt(), buffer.getInt()));
+            var zoneType = buffer.getInt();
+            var min = buffer.getInt();
+            var max = buffer.getInt();
+            var count = buffer.getInt();
             var matrix = Short.toUnsignedInt(buffer.getShort());
-            buffer.position(buffer.position() + matrix);
+            var end = buffer.position() + matrix;
+            var rows = 0;
+            var columns = 0;
+            int[] map = null;
+
+            // Карта клавиш: высота, ширина и номер светодиода в каждой ячейке (пусто — 0xFFFFFFFF)
+            if (matrix >= 8) {
+                rows = buffer.getInt();
+                columns = buffer.getInt();
+                var cells = Math.min((matrix - 8) / 4, rows * columns);
+                map = new int[Math.max(0, cells)];
+
+                for (var c = 0; c < map.length; c++) {
+                    map[c] = buffer.getInt();
+                }
+            }
+
+            buffer.position(end);
+            zoneList.add(new Zone(i, zoneName, zoneType, min, max, count, rows, columns, map));
         }
 
         var leds = Short.toUnsignedInt(buffer.getShort());

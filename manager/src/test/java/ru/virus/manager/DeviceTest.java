@@ -442,4 +442,32 @@ class DeviceTest {
                         && (p.id() == OpenRgb.UPDATE_LEDS || p.id() == OpenRgb.SET_CUSTOM_MODE)),
                 "клавиатура с «не трогать» осталась родной программе");
     }
+
+    @Test
+    void ledsArePlacedLikeOnACanvas() {
+        // Клавиатура 2×3: в ячейках номера клавиш, одна ячейка пустая
+        var keys = new OpenRgb.Zone(0, "Keys", 2, 5, 5, 5, 2, 3, new int[] {0, 1, 2, 4, 3, -1});
+        var keyboard = new OpenRgb.Device(0, "KB", "клавиатура", 5, List.of(), List.of(keys));
+        var places = keyboard.places();
+        assertEquals(5, places.size());
+        assertTrue(places.get(0).grid());
+        assertEquals(0.5 / 3, places.get(0).x(), 1e-9, "клавиша 0 — слева сверху");
+        assertEquals(0.25, places.get(0).y(), 1e-9);
+        assertEquals(2.5 / 3, places.get(2).x(), 1e-9, "клавиша 2 — справа сверху");
+        assertEquals(1.5 / 3, places.get(3).x(), 1e-9, "клавиша 3 — во втором ряду посередине");
+        assertEquals(0.75, places.get(3).y(), 1e-9);
+
+        // Плата с двумя разъёмами: каждый вентилятор получает эффект целиком
+        var fans = new OpenRgb.Device(1, "MB", "материнская плата", 6, List.of(), List.of(
+                new OpenRgb.Zone(0, "JRAINBOW1", 1, 0, 120, 3), new OpenRgb.Zone(1, "JRAINBOW2", 1, 0, 120, 3)));
+        var line = fans.places();
+        assertEquals(0.0, line.get(0).x(), 1e-9);
+        assertEquals(0.0, line.get(3).x(), 1e-9, "второй разъём начинается заново");
+        assertFalse(line.get(0).grid());
+
+        // На клавиатуре «матрица» падает по столбцам — кадр не пустой и разный во времени
+        var a = Glow.frame(5, 1.0, places, new Color(0x39FF8A), Color.BLUE, 0, 100, true, 0);
+        var b = Glow.frame(5, 1.7, places, new Color(0x39FF8A), Color.BLUE, 0, 100, true, 0);
+        assertFalse(java.util.Arrays.equals(a, b));
+    }
 }

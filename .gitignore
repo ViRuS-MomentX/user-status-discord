@@ -8,3 +8,4 @@ parody-samples.json.broken
 parody-state.json
 parody-state.json.tmp
 parody-memory/
+manager/src/main/resources/ru/virus/manager/build.txt

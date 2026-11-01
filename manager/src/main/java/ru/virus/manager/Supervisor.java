@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -62,7 +63,7 @@ final class Supervisor {
     private void seed() throws IOException {
         var memo = home.resolve("virus-seeded.txt");
         var seeded = Files.isRegularFile(memo)
-                ? new java.util.HashSet<>(Files.readAllLines(memo, StandardCharsets.UTF_8)) : new java.util.HashSet<String>();
+                ? new java.util.HashSet<>(Files.readAllLines(memo, StandardCharsets.UTF_8)) : new HashSet<String>();
 
         if (!seeded.contains(ServerTools.ID)) {
             if (!processes.containsKey(ServerTools.ID)) {
@@ -129,12 +130,37 @@ final class Supervisor {
         save();
     }
 
+    /** Файл со списком работавших процессов — чтобы после обновления запустить их снова. */
+    static final String RESUME = "resume.txt";
+
     void startAutostart() {
+        var resume = home.resolve(RESUME);
+        var again = new HashSet<String>();
+
+        try {
+            if (Files.isRegularFile(resume)) {
+                again.addAll(Files.readAllLines(resume, StandardCharsets.UTF_8));
+                Files.delete(resume);
+            }
+        } catch (IOException ignored) {
+            // нет списка — запустим только автозапуск
+        }
+
         for (var process : all()) {
-            if (process.spec().autostart()) {
+            if (process.spec().autostart() || again.contains(process.spec().id())) {
                 process.start();
             }
         }
+    }
+
+    /** Запомнить, что сейчас работает: после обновления V.I.R.U.S. запустит это сам. */
+    void rememberRunning() throws IOException {
+        var running = all().stream()
+                .filter(process -> process.state() == ManagedProcess.State.RUNNING
+                        || process.state() == ManagedProcess.State.WAITING)
+                .map(process -> process.spec().id())
+                .toList();
+        Files.write(home.resolve(RESUME), running, StandardCharsets.UTF_8);
     }
 
     /** Останавливает всех и ждёт — при выходе из V.I.R.U.S. */

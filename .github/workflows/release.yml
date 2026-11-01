@@ -1,0 +1,61 @@
+name: Сборка для автообновления
+
+# Каждый пуш в рабочую ветку собирает V.I.R.U.S.zip и выкладывает его
+# релизом build-N. V.I.R.U.S. у хозяина раз в 5 минут смотрит на последний
+# релиз и, если он новее, ставит его сам.
+on:
+  push:
+    branches: [main, claude/zealous-keller-kt34r6]
+    paths: ['bot/**', 'manager/**', 'cloudflare/**', '.github/workflows/release.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      # Номер сборки едет внутри virus.jar — по нему V.I.R.U.S. понимает, что релиз новее
+      - name: Номер сборки
+        run: echo "${{ github.run_number }}" > manager/src/main/resources/ru/virus/manager/build.txt
+
+      - name: Бот
+        working-directory: bot
+        run: mvn -B -q package
+
+      - name: V.I.R.U.S.
+        working-directory: manager
+        run: mvn -B -q package
+
+      - name: Архив
+        run: |
+          mkdir -p "out/V.I.R.U.S."
+          cp manager/target/virus.jar bot/target/voice-bridge-bot.jar manager/virus.bat bot/run.bat \
+             bot/config.properties.example cloudflare/worker.js "out/V.I.R.U.S./"
+          cd out && zip -qr V.I.R.U.S.zip "V.I.R.U.S."
+
+      - name: Релиз
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git log -1 --format=%B > notes.txt
+          gh release create "build-${{ github.run_number }}" out/V.I.R.U.S.zip \
+            --target "${{ github.sha }}" \
+            --title "V.I.R.U.S. — сборка ${{ github.run_number }}" \
+            --notes-file notes.txt --latest
+          # Старые сборки не копим: хватит десяти последних
+          gh release list --limit 100 --json tagName --jq '.[].tagName' | grep '^build-' | tail -n +11 | \
+            while read -r tag; do gh release delete "$tag" --yes --cleanup-tag; done

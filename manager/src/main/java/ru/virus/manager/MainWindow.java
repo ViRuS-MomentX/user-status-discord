@@ -304,8 +304,14 @@ final class MainWindow extends JFrame {
         });
 
         if (Updater.justUpdated(supervisor.home())) {
-            new Timer(1500, e -> toast("V.I.R.U.S. обновлён.")) {{ setRepeats(false); }}.start();
+            var build = AutoUpdate.current();
+            new Timer(1500, e -> toast(build > 0 ? "V.I.R.U.S. обновлён до сборки " + build + "." : "V.I.R.U.S. обновлён."))
+                    {{ setRepeats(false); }}.start();
         }
+
+        // Обновления с GitHub: через полминуты после запуска, дальше раз в 5 минут
+        new Timer(30_000, e -> worker.submit(this::checkUpdate)) {{ setRepeats(false); }}.start();
+        new Timer(5 * 60_000, e -> worker.submit(this::checkUpdate)).start();
 
         // Лишние копии ботов — когда наши уже запустились, чтобы не принять их за чужие
         new Timer(20_000, e -> findDuplicates(true)) {{ setRepeats(false); }}.start();
@@ -338,6 +344,81 @@ final class MainWindow extends JFrame {
         prefs.putBoolean("side-hidden", !side.isVisible());
         revalidate();
         repaint();
+    }
+
+    private final AutoUpdate autoUpdate = new AutoUpdate();
+    /** Обновление уже скачано и ждёт, пока можно будет перезапуститься. */
+    private volatile int pendingBuild = -1;
+
+    /**
+     * Есть ли на GitHub сборка новее. Есть — скачать, разложить и
+     * перезапуститься в неё; работавшие процессы запустятся снова сами.
+     */
+    private void checkUpdate() {
+        if (!SystemInfo.isWindows()) {
+            return;
+        }
+
+        try {
+            var current = AutoUpdate.current();
+
+            if (pendingBuild < 0) {
+                var release = autoUpdate.latest();
+
+                if (!AutoUpdate.newer(release, current)) {
+                    return;
+                }
+
+                // Неудачная попытка этой же сборки — не чаще раза в час, чтобы не крутиться
+                var tried = prefs.getInt("update-tried", -1);
+
+                if (tried == release.build()
+                        && System.currentTimeMillis() - prefs.getLong("update-tried-at", 0) < 3_600_000L) {
+                    return;
+                }
+
+                var zip = autoUpdate.download(release, supervisor.home());
+                Updater.stage(supervisor.home(), List.of(zip));
+                java.nio.file.Files.deleteIfExists(zip);
+                pendingBuild = release.build();
+            }
+
+            SwingUtilities.invokeLater(this::applyUpdate);
+        } catch (Exception e) {
+            // Нет сети до GitHub — попробуем в следующий раз, без шума
+            System.out.println("[" + Virus.NAME + "] Обновление с GitHub не проверилось: " + e.getMessage());
+        }
+    }
+
+    /** Перезапуск в скачанную сборку — когда ничего не потеряется. */
+    private void applyUpdate() {
+        if (pendingBuild < 0) {
+            return;
+        }
+
+        // Несохранённый конфиг и заливка плагина важнее: обновимся на следующей проверке
+        if (configPage.isDirty() || watches.values().stream().anyMatch(PluginWatch::deploying)) {
+            toast("Скачано обновление V.I.R.U.S. (сборка " + pendingBuild + ") — поставлю, как только сохранишь конфиг.");
+            return;
+        }
+
+        var build = pendingBuild;
+        toast("Обновляюсь до сборки " + build + " — перезапуск через 10 секунд.");
+        Virus.notifyTray("V.I.R.U.S. обновляется", "Сборка " + build + " с GitHub. Процессы запустятся снова сами.");
+
+        new Timer(10_000, e -> {
+            try {
+                prefs.putInt("update-tried", build);
+                prefs.putLong("update-tried-at", System.currentTimeMillis());
+                supervisor.rememberRunning();
+                Updater.launch(supervisor.home());
+                setVisible(false);
+                new Thread(quit, "virus-update").start();
+            } catch (java.io.IOException ex) {
+                pendingBuild = -1;
+                toast("Обновление не запустилось: " + ex.getMessage());
+            }
+        }) {{ setRepeats(false); }}.start();
     }
 
     /** Обновление из присланного архива: разложить, закрыться, перенести, запуститься. */

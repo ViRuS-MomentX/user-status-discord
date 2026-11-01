@@ -110,15 +110,17 @@ final class RgbAnimator {
                 }
 
                 var wanted = devices.stream().filter(device -> level(device) > 0).toList();
-                var animated = wanted.stream().filter(device -> device.leds() > 0).toList();
-                var still = wanted.stream().filter(device -> device.leds() == 0 && device.solid() != null).toList();
+                // Кадры — тем, кто понимает цвет каждого светодиода; остальным (платы и память без
+                // режима Direct) — цвет эффекта целиком через их режим «один цвет», иначе они не горят
+                var animated = wanted.stream().filter(device -> device.leds() > 0 && device.streams()).toList();
+                var still = wanted.stream().filter(device -> !animated.contains(device) && device.solid() != null)
+                        .toList();
 
                 for (var device : animated) {
                     rgb.customMode(device);
                 }
 
-                status.accept("Режим играет на устройствах: " + animated.size()
-                        + (still.isEmpty() ? "" : " (ещё " + still.size() + " — только одним цветом)"));
+                status.accept(summary(devices, animated, still));
                 loop(rgb, animated, still, devices.size(), me);
 
                 // Список устройств поменялся — переподключаемся сразу, без паузы
@@ -152,6 +154,33 @@ final class RgbAnimator {
     static double approach(double shown, double target, double elapsedMs) {
         var step = 100 * Math.max(0, elapsedMs) / DIM_FADE_MS;
         return shown < target ? Math.min(target, shown + step) : Math.max(target, shown - step);
+    }
+
+    /** Что горит и что нет — с причиной, чтобы не гадать, почему погасло устройство. */
+    String summary(List<OpenRgb.Device> devices, List<OpenRgb.Device> animated, List<OpenRgb.Device> still) {
+        var text = new StringBuilder("Режим играет на устройствах: " + animated.size());
+
+        if (!still.isEmpty()) {
+            text.append(", одним цветом: ").append(still.size());
+        }
+
+        var skipped = new java.util.ArrayList<String>();
+
+        for (var device : devices) {
+            if (animated.contains(device) || still.contains(device)) {
+                continue;
+            }
+
+            skipped.add(device.name() + (level(device) == 0 ? " — стоит «не трогать»"
+                    : device.leds() == 0 && device.solid() == null ? " — 0 светодиодов, задай число у разъёма"
+                    : " — OpenRGB не даёт его красить"));
+        }
+
+        if (!skipped.isEmpty()) {
+            text.append(". Не горят: ").append(String.join("; ", skipped));
+        }
+
+        return text.toString();
     }
 
     /** Кадр опоздал так сильно, что это не задержка, а сон или гибернация. */

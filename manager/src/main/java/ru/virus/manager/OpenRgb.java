@@ -44,6 +44,7 @@ final class OpenRgb implements AutoCloseable {
 
     /** У режима цвета свои — задаются вместе с режимом, а не по светодиодам. */
     static final int COLORS_MODE_SPECIFIC = 2;
+    static final int COLORS_PER_LED = 1;
 
     /** Устройство: номер у OpenRGB, имя, сколько светодиодов, его режимы. */
     record Device(int index, String name, String kind, int leds, List<Mode> modes, List<Zone> zones) {
@@ -127,9 +128,25 @@ final class OpenRgb implements AutoCloseable {
             return null;
         }
 
+        /**
+         * Понимает ли устройство цвет каждого светодиода (кадры анимации).
+         * Свой режим OpenRGB ищет так: Direct, потом Custom, а если их нет —
+         * берёт Static, где цвета по светодиодам молча игнорируются. Так у
+         * многих плат и планок памяти: кадры уходят, а горит заводской цвет.
+         * Таких красим целиком — режимом «один цвет».
+         */
+        boolean streams() {
+            if (modes.isEmpty()) {
+                return true;
+            }
+
+            return modes.stream().anyMatch(mode -> mode.colorMode() == COLORS_PER_LED
+                    || mode.name().equalsIgnoreCase("direct") || mode.name().equalsIgnoreCase("custom"));
+        }
+
         /** Можно ли покрасить хоть как-то. */
         boolean paintable() {
-            return leds > 0 || solid() != null;
+            return leds > 0 && streams() || solid() != null;
         }
     }
 
@@ -240,7 +257,7 @@ final class OpenRgb implements AutoCloseable {
 
     /** Красит все светодиоды устройства в один цвет. */
     void paint(Device device, Color color) throws IOException {
-        if (device.leds() == 0) {
+        if (device.leds() == 0 || !device.streams() && device.solid() != null) {
             paintMode(device, color);
             return;
         }

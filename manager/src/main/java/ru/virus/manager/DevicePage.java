@@ -221,7 +221,11 @@ final class DevicePage extends Ui.Card {
 
         urlFallback = new Timer(700, e -> pushByUrl());
         urlFallback.setRepeats(false);
-        animator = new RgbAnimator(glow, text -> SwingUtilities.invokeLater(() -> animatorStatus.setText(text)));
+        animator = new RgbAnimator(glow, text -> SwingUtilities.invokeLater(() -> {
+            // Длинный список «не горят» переносится, а не обрезается многоточием
+            animatorStatus.setText("<html><body style='width:640px'>" + ConfigPage.escape(text) + "</body></html>");
+            animatorStatus.setToolTipText(text);
+        }));
         animator.zoneSizes = Map.copyOf(settings.zoneSizes);
         animator.levels = Map.copyOf(settings.deviceLevels);
         animator.modes = Map.copyOf(settings.deviceModes);

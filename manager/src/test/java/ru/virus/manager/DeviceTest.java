@@ -1048,4 +1048,23 @@ class DeviceTest {
         assertEquals(rotation.getFirst(), DevicePage.nextInRotation(rotation.getLast()), "по кругу");
         assertEquals(rotation.getFirst(), DevicePage.nextInRotation(13), "был реагирующий — с начала");
     }
+
+    @Test
+    void devicesWithoutDirectModeArePaintedWhole() {
+        var staticOnly = new OpenRgb.Mode(0, "Static", 1, 0, 0, 0, 1, 1, 0, 0, OpenRgb.COLORS_MODE_SPECIFIC);
+        var rainbow = new OpenRgb.Mode(1, "Rainbow", 2, 0, 0, 0, 0, 0, 0, 0, 0);
+        var direct = new OpenRgb.Mode(0, "Direct", 0, 0, 0, 0, 0, 0, 0, 0, OpenRgb.COLORS_PER_LED);
+
+        // Память с 8 светодиодами, но без Direct: кадры она бы молча проглотила
+        var memory = new OpenRgb.Device(0, "ENE DRAM", "память", 8, List.of(staticOnly, rainbow));
+        assertFalse(memory.streams(), "поштучно не умеет");
+        assertTrue(memory.paintable(), "но одним цветом — да");
+
+        var gpu = new OpenRgb.Device(1, "GIGABYTE RTX", "видеокарта", 20, List.of(direct, staticOnly));
+        assertTrue(gpu.streams());
+
+        // Ни поштучно, ни одним цветом — честно «не умеет»
+        var stubborn = new OpenRgb.Device(2, "Board", "материнская плата", 5, List.of(rainbow));
+        assertFalse(stubborn.paintable());
+    }
 }

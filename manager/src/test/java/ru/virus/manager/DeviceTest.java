@@ -560,4 +560,18 @@ class DeviceTest {
         var frame = Glow.frame(12, 0, places, Color.GREEN, Color.GREEN, 0, 100, true, 0);
         assertTrue(frame[0].getRed() > frame[0].getBlue() && frame[1].getBlue() > frame[1].getRed());
     }
+
+    @Test
+    void soundModeReactsToLevels() {
+        assertTrue(AudioMeter.feed("0.800 0.200"));
+        assertFalse(AudioMeter.feed("Exception: no audio device"), "ошибка — не уровни");
+        assertEquals(1.0, AudioMeter.smooth(0.2, 1.0), "удар — сразу");
+        assertTrue(AudioMeter.smooth(1.0, 0.0) > 0.7, "спад — плавный");
+
+        // Лента: левый канал громкий — горит левый край, правый тихий — правый почти тёмный
+        var dim = Glow.scale(Color.GREEN, 0.04);
+        assertFalse(Glow.sound(0.05, 0.5, false, 0, Color.GREEN, Color.RED).equals(dim), "левый край горит");
+        assertEquals(dim, Glow.sound(0.6, 0.5, false, 0, Color.GREEN, Color.RED), "правая середина — тихо");
+        assertTrue(AudioMeter.script().contains("GetChannelsPeakValues"));
+    }
 }

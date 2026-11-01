@@ -58,6 +58,10 @@ final class Glow {
             return ScreenSampler.at(x, y, !grid);
         }
 
+        if (mode == 13) {
+            return sound(x, y, grid, i, a, b);
+        }
+
         if (grid) {
             switch (mode) {
                 case 5 -> {
@@ -85,6 +89,27 @@ final class Glow {
         }
 
         return pixel(mode, t, x, i, a, b, cpu);
+    }
+
+    /**
+     * «Звук»: на ленте и вентиляторе — индикатор уровня (левый канал с одного
+     * края, правый с другого), на клавиатуре — столбики эквалайзера снизу
+     * вверх. Цвет идёт от первого (тихо) ко второму (громко).
+     */
+    static Color sound(double x, double y, boolean grid, int i, Color a, Color b) {
+        var left = AudioMeter.left();
+        var right = AudioMeter.right();
+
+        if (grid) {
+            // Каждому столбцу — своя доля громкости, чтобы было похоже на эквалайзер
+            var level = (x < 0.5 ? left : right) * (0.65 + 0.35 * hash((int) Math.round(x * 64)));
+            var height = 1 - y;
+            return height <= level ? mix(a, b, height) : scale(a, 0.04);
+        }
+
+        var fromEdge = x < 0.5 ? x * 2 : (1 - x) * 2;
+        var level = x < 0.5 ? left : right;
+        return fromEdge <= level ? mix(a, b, fromEdge) : scale(a, 0.04);
     }
 
     static Color pixel(int mode, double t, double x, int i, Color a, Color b, double cpu) {

@@ -2,7 +2,7 @@
 	<title>VIRUS</title>
 	<meta description="Режимы подсветки V.I.R.U.S.: режим, цвета и скорость меняются из приложения V.I.R.U.S. без открытия SignalRGB." />
 	<meta publisher="V.I.R.U.S." />
-	<meta property="mode" label="Режим (0-12)" type="number" min="0" max="12" default="3">
+	<meta property="mode" label="Режим (0-13)" type="number" min="0" max="13" default="3">
 	<meta property="speed" label="Скорость" type="number" min="1" max="100" default="50">
 	<meta property="color" label="Цвет" type="color" default="#39ff8a" min="0" max="360" />
 	<meta property="color2" label="Второй цвет" type="color" default="#8a2be2" min="0" max="360" />
@@ -171,6 +171,15 @@
 					ctx.fillRect(Math.floor(k * W / cols.length), 0, Math.ceil(W / cols.length), H);
 				}
 				if (cols.length == 0) fill(css(a));
+				break;
+			case 13:
+				// Звук: левый канал — с левого края, правый — с правого
+				fill(css(a, 0.04));
+				var half = W / 2;
+				var lw = half * Math.max(0, Math.min(1, Number(s.left) || 0));
+				var rw = half * Math.max(0, Math.min(1, Number(s.right) || 0));
+				for (var px = 0; px < lw; px += 4) { ctx.fillStyle = css(mix(a, b, px / half)); ctx.fillRect(px, 0, 4, H); }
+				for (var qx = 0; qx < rw; qx += 4) { ctx.fillStyle = css(mix(a, b, qx / half)); ctx.fillRect(W - qx - 4, 0, 4, H); }
 				break;
 			default:
 				fill(css(a));

@@ -100,6 +100,11 @@ final class DevicePage extends Ui.Card {
     private final Ui.Switch signalOn = new Ui.Switch(true);
     private final JSlider signalBrightness = new JSlider(0, 100, 100);
     private final JPanel modeTiles = Ui.transparent(new GridLayout(0, 6, 8, 8));
+    private final JPanel profileRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 6, 0));
+    /** Профиль, который включила программа из правил; null — включён вручную. */
+    private String autoProfile;
+    /** Что было до того, как программа переключила профиль, — вернуть, когда она закроется. */
+    private LightProfiles.Profile beforeAuto;
     private final JPanel effectTiles = new Ui.FitWidth();
     private final javax.swing.JTextField effectFilter = new javax.swing.JTextField();
     private final Swatch glowColor = new Swatch(30);
@@ -175,6 +180,10 @@ final class DevicePage extends Ui.Card {
         }
 
         add(body, BorderLayout.CENTER);
+
+        if (LIGHTING) {
+            new Timer(5000, e -> watchPrograms()).start();
+        }
 
         if (LIGHTING && openRgbEngine()) {
             // Режим, выбранный в прошлый раз, играет сразу с запуском V.I.R.U.S.
@@ -667,6 +676,9 @@ final class DevicePage extends Ui.Card {
         stack.add(Box.createVerticalStrut(10));
         stack.add(left(new GlowPreview(glow)));
         stack.add(Box.createVerticalStrut(10));
+        stack.add(left(profileRow));
+        showProfiles();
+        stack.add(Box.createVerticalStrut(10));
         stack.add(left(colorRow));
         stack.add(Box.createVerticalStrut(10));
         stack.add(left(colorCorrection()));
@@ -820,6 +832,135 @@ final class DevicePage extends Ui.Card {
             } catch (IOException e) {
                 SwingUtilities.invokeLater(() -> toast.accept("SignalRGB: " + e.getMessage()));
             }
+        });
+    }
+
+    /** Профили: кнопки, «сохранить как», правила для программ. */
+    private void showProfiles() {
+        profileRow.removeAll();
+        profileRow.add(Ui.muted("Профили", 13f));
+
+        for (var profile : settings.profiles) {
+            var chip = Ui.button(profile.name() + (profile.name().equals(autoProfile) ? " ●" : ""));
+            chip.setToolTipText("Включить. Правой кнопкой — удалить");
+            chip.addActionListener(e -> {
+                autoProfile = null;
+                beforeAuto = null;
+                applyProfile(profile);
+            });
+            chip.addMouseListener(new MouseAdapter() {
+                @Override
+                public void mousePressed(MouseEvent e) {
+                    if (SwingUtilities.isRightMouseButton(e) && javax.swing.JOptionPane.showConfirmDialog(DevicePage.this,
+                            "Удалить профиль «" + profile.name() + "»?", Virus.NAME, javax.swing.JOptionPane.OK_CANCEL_OPTION)
+                            == javax.swing.JOptionPane.OK_OPTION) {
+                        settings.profiles.remove(profile);
+                        settings.save();
+                        showProfiles();
+                    }
+                }
+            });
+            profileRow.add(chip);
+        }
+
+        var save = Ui.ghost("+ Сохранить как…");
+        save.addActionListener(e -> {
+            var name = javax.swing.JOptionPane.showInputDialog(this, "Как назвать профиль? Например: Игра, Ночь, Работа",
+                    Virus.NAME, javax.swing.JOptionPane.QUESTION_MESSAGE);
+
+            if (name == null || name.isBlank()) {
+                return;
+            }
+
+            settings.profiles.removeIf(old -> old.name().equalsIgnoreCase(name.strip()));
+            settings.profiles.add(current(name.strip()));
+            settings.save();
+            showProfiles();
+            toast.accept("Профиль «" + name.strip() + "» сохранён.");
+        });
+        profileRow.add(save);
+
+        var rules = Ui.ghost("Для программ…");
+        rules.setToolTipText("Запустил игру — подсветка переключилась сама");
+        rules.addActionListener(e -> editRules());
+        profileRow.add(rules);
+        profileRow.revalidate();
+        profileRow.repaint();
+    }
+
+    private LightProfiles.Profile current(String name) {
+        return new LightProfiles.Profile(name, glow.mode, glow.color, glow.color2, glow.speed);
+    }
+
+    private void applyProfile(LightProfiles.Profile profile) {
+        glow.color = profile.color();
+        glow.color2 = profile.color2();
+        glow.speed = profile.speed();
+        glowColor.setColor(profile.color());
+        glowColor2.setColor(profile.color2());
+        glowSpeed.setValue(profile.speed());
+
+        var tiles = modeTiles.getComponents();
+
+        for (var i = 0; i < SignalRgb.MODES.size() && i < tiles.length; i++) {
+            if (tiles[i] instanceof JToggleButton tile) {
+                tile.setSelected(SignalRgb.MODES.get(i).id() == profile.mode());
+            }
+        }
+
+        chooseMode(SignalRgb.mode(profile.mode()));
+        showProfiles();
+    }
+
+    private void editRules() {
+        var area = new javax.swing.JTextArea(LightProfiles.rulesText(settings.appRules), 8, 36);
+        area.setFont(Theme.mono.deriveFont(13f));
+        var names = settings.profiles.stream().map(LightProfiles.Profile::name).toList();
+        var panel = Ui.transparent(new BorderLayout(0, 8));
+        panel.add(new JLabel("<html>По строке: <b>программа.exe = Профиль</b>. Например:<br>"
+                + "<tt>MarvelRivals.exe = Игра</tt><br>Профили: " + (names.isEmpty() ? "пока нет — сохрани сначала"
+                : ConfigPage.escape(String.join(", ", names))) + "</html>"), BorderLayout.NORTH);
+        panel.add(new JScrollPane(area), BorderLayout.CENTER);
+
+        if (javax.swing.JOptionPane.showConfirmDialog(this, panel, "Подсветка для программ",
+                javax.swing.JOptionPane.OK_CANCEL_OPTION, javax.swing.JOptionPane.PLAIN_MESSAGE)
+                == javax.swing.JOptionPane.OK_OPTION) {
+            settings.appRules.clear();
+            settings.appRules.putAll(LightProfiles.parseRules(area.getText()));
+            settings.save();
+            toast.accept("Правил: " + settings.appRules.size() + ".");
+        }
+    }
+
+    /** Раз в 5 секунд: не запущена ли программа из правил — тогда её профиль; закрылась — прежний. */
+    private void watchPrograms() {
+        if (settings.appRules.isEmpty()) {
+            return;
+        }
+
+        worker.submit(() -> {
+            var want = LightProfiles.wanted(settings.appRules, LightProfiles.running());
+
+            SwingUtilities.invokeLater(() -> {
+                if (want != null && !want.equals(autoProfile)) {
+                    settings.profiles.stream().filter(p -> p.name().equalsIgnoreCase(want)).findFirst().ifPresent(p -> {
+                        if (autoProfile == null) {
+                            beforeAuto = current("до программы");
+                        }
+
+                        autoProfile = p.name();
+                        applyProfile(p);
+                        toast.accept("Подсветка: профиль «" + p.name() + "» — запущена программа из правил.");
+                    });
+                } else if (want == null && autoProfile != null) {
+                    autoProfile = null;
+
+                    if (beforeAuto != null) {
+                        applyProfile(beforeAuto);
+                        beforeAuto = null;
+                    }
+                }
+            });
         });
     }
 
@@ -2030,6 +2171,9 @@ final class DevicePage extends Ui.Card {
         int balanceRed = 100;
         int balanceGreen = 100;
         int balanceBlue = 100;
+        /** Сохранённые профили подсветки и правила «программа → профиль». */
+        final List<LightProfiles.Profile> profiles = new ArrayList<>();
+        final Map<String, String> appRules = new LinkedHashMap<>();
         /** Яркость по устройствам, %: 0 — не трогать устройство вовсе. */
         final Map<String, Integer> deviceLevels = new LinkedHashMap<>();
         /** Сколько светодиодов на разъёмах ARGB: «устройство|зона» → число. */
@@ -2060,6 +2204,18 @@ final class DevicePage extends Ui.Card {
                     settings.balanceRed = json.get("balanceRed") instanceof Number n ? n.intValue() : 100;
                     settings.balanceGreen = json.get("balanceGreen") instanceof Number n ? n.intValue() : 100;
                     settings.balanceBlue = json.get("balanceBlue") instanceof Number n ? n.intValue() : 100;
+
+                    if (json.get("profiles") instanceof List<?> list) {
+                        for (var item : list) {
+                            if (item instanceof Map<?, ?> map) {
+                                settings.profiles.add(LightProfiles.Profile.fromJson(map));
+                            }
+                        }
+                    }
+
+                    if (json.get("appRules") instanceof Map<?, ?> rules) {
+                        rules.forEach((key, value) -> settings.appRules.put(String.valueOf(key), String.valueOf(value)));
+                    }
 
                     if (json.get("deviceLevels") instanceof Map<?, ?> levels) {
                         levels.forEach((key, value) -> {
@@ -2117,6 +2273,8 @@ final class DevicePage extends Ui.Card {
             json.put("balanceBlue", balanceBlue);
             json.put("zoneSizes", zoneSizes);
             json.put("deviceLevels", deviceLevels);
+            json.put("profiles", profiles.stream().map(LightProfiles.Profile::toJson).toList());
+            json.put("appRules", appRules);
             json.put("engine", engine);
             json.put("glowBrightness", glowBrightness);
             json.put("glowOn", glowOn);

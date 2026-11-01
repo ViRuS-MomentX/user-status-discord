@@ -63,7 +63,8 @@ final class SignalRgb {
             new Mode(14, "Комета", true, false),
             new Mode(15, "Сканер", true, false),
             new Mode(16, "Театр", true, true),
-            new Mode(17, "Конфетти", true, false));
+            new Mode(17, "Конфетти", true, false),
+            new Mode(18, "Температура", false, false));
 
     private final HttpClient http = HttpClient.newBuilder()
             .proxy(HttpClient.Builder.NO_PROXY)
@@ -412,6 +413,10 @@ final class SignalRgb {
 
         /** Режим «Экран»: цвета столбцов экрана — эффект в SignalRGB рисует их сам. */
         private String screen() {
+            if (mode == 18) {
+                return ",\"temp\":\"" + hex(GpuSensor.color(GpuSensor.celsius())) + "\"";
+            }
+
             if (mode == 13) {
                 return String.format(java.util.Locale.ROOT, ",\"left\":%.3f,\"right\":%.3f", AudioMeter.left(),
                         AudioMeter.right());

@@ -2,7 +2,7 @@
 	<title>VIRUS</title>
 	<meta description="Режимы подсветки V.I.R.U.S.: режим, цвета и скорость меняются из приложения V.I.R.U.S. без открытия SignalRGB." />
 	<meta publisher="V.I.R.U.S." />
-	<meta property="mode" label="Режим (0-17)" type="number" min="0" max="17" default="3">
+	<meta property="mode" label="Режим (0-18)" type="number" min="0" max="18" default="3">
 	<meta property="speed" label="Скорость" type="number" min="1" max="100" default="50">
 	<meta property="color" label="Цвет" type="color" default="#39ff8a" min="0" max="360" />
 	<meta property="color2" label="Второй цвет" type="color" default="#8a2be2" min="0" max="360" />
@@ -214,6 +214,10 @@
 					ctx.fillStyle = css(a, fl);
 					ctx.fillRect((k * 97) % W, (k * 53) % H, 14, 14);
 				}
+				break;
+			case 18:
+				// Температура видеокарты: цвет присылает V.I.R.U.S.
+				fill(s.temp || css(a));
 				break;
 			default:
 				fill(css(a));

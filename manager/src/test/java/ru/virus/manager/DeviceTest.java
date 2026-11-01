@@ -712,4 +712,16 @@ class DeviceTest {
 
         assertEquals(new Color(0, 255, 0), Glow.shiftHue(Color.RED, 120));
     }
+
+    @Test
+    void temperatureColors() {
+        assertEquals(62, GpuSensor.parse("62\r\n"));
+        assertEquals(-1, GpuSensor.parse("NVIDIA-SMI has failed"));
+        var cold = GpuSensor.color(35);
+        var hot = GpuSensor.color(90);
+        assertTrue(cold.getGreen() > 200 && cold.getRed() < 50, "холодная — зелёная: " + cold);
+        assertEquals(Color.RED, hot, "горячая — красная");
+        var warm = GpuSensor.color(65);
+        assertTrue(warm.getRed() > 200 && warm.getGreen() > 150, "тёплая — жёлтая: " + warm);
+    }
 }

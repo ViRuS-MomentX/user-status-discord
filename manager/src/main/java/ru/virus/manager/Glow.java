@@ -177,6 +177,12 @@ final class Glow {
                 var shifted = shiftHue(a, (hash(i * 31 + (int) Math.floor(t * 0.7 + hash(i) * 7)) - 0.5) * 120);
                 yield scale(shifted, flash);
             }
+            case 18 -> {
+                // Температура видеокарты; если горячо — ещё и тревожно пульсирует
+                var degrees = GpuSensor.celsius();
+                var color = GpuSensor.color(degrees);
+                yield degrees >= 85 ? scale(color, 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(t * 6))) : color;
+            }
             default -> a;
         };
     }

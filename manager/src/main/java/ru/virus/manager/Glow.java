@@ -225,11 +225,44 @@ final class Glow {
         return Color.getHSBColor((float) (((degrees % 360) + 360) % 360 / 360), 1f, 1f);
     }
 
+    /**
+     * Смесь двух цветов в линейном свете, как у Philips Hue и LIFX. Обычная
+     * смесь чисел sRGB проваливается посередине: красный с синим дают 128, а
+     * после гамма-поправки это ~22% света — тёмная грязная полоса в градиенте
+     * и «моргание» на плавном переходе. Здесь середина светит вполсилы, как и
+     * ждёт глаз.
+     */
     static Color mix(Color a, Color b, double k) {
         k = Math.max(0, Math.min(1, k));
-        return new Color((int) Math.round(a.getRed() + (b.getRed() - a.getRed()) * k),
-                (int) Math.round(a.getGreen() + (b.getGreen() - a.getGreen()) * k),
-                (int) Math.round(a.getBlue() + (b.getBlue() - a.getBlue()) * k));
+
+        if (k == 0) {
+            return a;
+        }
+
+        if (k == 1) {
+            return b;
+        }
+
+        return new Color(channel(a.getRed(), b.getRed(), k), channel(a.getGreen(), b.getGreen(), k),
+                channel(a.getBlue(), b.getBlue(), k));
+    }
+
+    /** Линейный свет канала 0–255 — таблица, чтобы не считать степень 30 раз в секунду на каждый светодиод. */
+    private static final double[] LINEAR = new double[256];
+
+    static {
+        for (var i = 0; i < 256; i++) {
+            LINEAR[i] = Math.pow(i / 255.0, 2.2);
+        }
+    }
+
+    private static int channel(int a, int b, double k) {
+        if (a == b) {
+            return a;
+        }
+
+        var light = LINEAR[a] + (LINEAR[b] - LINEAR[a]) * k;
+        return (int) Math.round(Math.pow(light, 1 / 2.2) * 255);
     }
 
     static Color scale(Color color, double k) {

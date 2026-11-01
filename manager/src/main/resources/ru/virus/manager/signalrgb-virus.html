@@ -75,8 +75,13 @@
 		return "rgb(" + Math.round(a[0] * k) + "," + Math.round(a[1] * k) + "," + Math.round(a[2] * k) + ")";
 	}
 
+	// Смесь в линейном свете — середина перехода не проваливается в темноту
+	function lin(c, d, k) {
+		return Math.pow(Math.pow(c / 255, 2.2) * (1 - k) + Math.pow(d / 255, 2.2) * k, 1 / 2.2) * 255;
+	}
+
 	function mix(a, b, k) {
-		return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+		return [lin(a[0], b[0], k), lin(a[1], b[1], k), lin(a[2], b[2], k)];
 	}
 
 	function fill(style) {

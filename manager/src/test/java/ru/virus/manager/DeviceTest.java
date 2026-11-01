@@ -876,4 +876,15 @@ class DeviceTest {
         assertEquals(b, Glow.pixel(19, 5, 1.0, 0, a, b, 0));
         assertEquals(Glow.pixel(19, 0, 0.5, 0, a, b, 0), Glow.pixel(19, 9, 0.5, 0, a, b, 0), "градиент неподвижен");
     }
+
+    @Test
+    void mixingKeepsTheMiddleBright() {
+        var middle = Glow.mix(java.awt.Color.RED, java.awt.Color.BLUE, 0.5);
+        // В sRGB вышло бы 128 — после гамма-поправки почти темнота; в линейном свете ~186
+        assertTrue(middle.getRed() > 170 && middle.getBlue() > 170, middle.toString());
+        assertEquals(middle.getRed(), middle.getBlue());
+        assertEquals(java.awt.Color.RED, Glow.mix(java.awt.Color.RED, java.awt.Color.BLUE, 0));
+        assertEquals(java.awt.Color.BLUE, Glow.mix(java.awt.Color.RED, java.awt.Color.BLUE, 1));
+        assertEquals(new java.awt.Color(40, 90, 200), Glow.mix(new java.awt.Color(40, 90, 200), new java.awt.Color(40, 90, 200), 0.3));
+    }
 }

@@ -665,6 +665,8 @@ final class DevicePage extends Ui.Card {
         stack.add(Box.createVerticalStrut(6));
         stack.add(left(modeTiles));
         stack.add(Box.createVerticalStrut(10));
+        stack.add(left(new GlowPreview(glow)));
+        stack.add(Box.createVerticalStrut(10));
         stack.add(left(colorRow));
         stack.add(Box.createVerticalStrut(10));
         stack.add(left(colorCorrection()));

@@ -520,4 +520,17 @@ class DeviceTest {
             animator.stop();
         }
     }
+
+    @Test
+    void modeChangeFadesInsteadOfJumping() {
+        var from = new Color[] {Color.RED};
+        var to = new Color[] {Color.BLUE};
+
+        assertEquals(Color.RED, RgbAnimator.blend(from, to, 0)[0]);
+        assertEquals(Color.BLUE, RgbAnimator.blend(from, to, 1)[0]);
+        var middle = RgbAnimator.blend(from, to, 0.5)[0];
+        assertTrue(middle.getRed() > 0 && middle.getBlue() > 0, "посередине — смесь: " + middle);
+        assertTrue(middle.getBlue() > middle.getRed(), "переход быстрый в начале — к середине ближе к новому");
+        assertEquals(to, RgbAnimator.blend(new Color[2], to, 0.5), "число светодиодов поменялось — сразу новое");
+    }
 }

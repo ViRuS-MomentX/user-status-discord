@@ -38,6 +38,9 @@ final class RgbAnimator {
      * раньше, так и играл бы на половине.
      */
     static final long RECHECK_MS = 10_000;
+    /** Смена режима или цвета — плавным переходом, как в iCUE и SignalRGB, а не скачком. */
+    static final long FADE_MS = 400;
+
     /** То же, но меняется в проверках. */
     volatile long recheckMs = RECHECK_MS;
 
@@ -113,6 +116,28 @@ final class RgbAnimator {
         }
     }
 
+    /** Что видно глазу: режим, цвета, вкл/выкл. Поменялось — пора плавного перехода. */
+    private String look() {
+        return settings.mode + "|" + settings.color.getRGB() + "|" + settings.color2.getRGB() + "|" + settings.on;
+    }
+
+    /** Кадр посередине перехода: от старого к новому, сглаженно (быстро в начале, мягко в конце). */
+    static Color[] blend(Color[] from, Color[] to, double progress) {
+        if (from.length != to.length) {
+            return to;
+        }
+
+        var k = Math.max(0, Math.min(1, progress));
+        var eased = 1 - (1 - k) * (1 - k);
+        var result = new Color[to.length];
+
+        for (var i = 0; i < to.length; i++) {
+            result[i] = Glow.mix(from[i], to[i], eased);
+        }
+
+        return result;
+    }
+
     private int level(OpenRgb.Device device) {
         return Math.max(0, Math.min(100, levels.getOrDefault(device.name(), 100)));
     }
@@ -149,6 +174,11 @@ final class RgbAnimator {
         var sent = new Color[animated.size()][];
         var sentAt = new long[animated.size()];
         var stillSent = new Color[still.size()];
+        // Для плавного перехода: что горело в момент смены и когда она была
+        var shown = new Color[animated.size()][];
+        var from = new Color[animated.size()][];
+        var look = look();
+        var fadeStart = -FADE_MS;
 
         while (thread == me) {
             var now = System.nanoTime();
@@ -156,11 +186,29 @@ final class RgbAnimator {
             last = now;
             var cpu = settings.cpu();
             var millis = now / 1_000_000;
+            var nextLook = look();
+
+            if (!nextLook.equals(look)) {
+                look = nextLook;
+                fadeStart = millis;
+
+                for (var d = 0; d < animated.size(); d++) {
+                    from[d] = shown[d];
+                }
+            }
+
+            var fade = (millis - fadeStart) / (double) FADE_MS;
 
             for (var d = 0; d < animated.size(); d++) {
                 var device = animated.get(d);
                 var frame = Glow.frame(settings.mode, time, places.get(d), settings.color, settings.color2, cpu,
                         settings.brightness * level(device) / 100, settings.on, d);
+
+                if (fade < 1 && from[d] != null) {
+                    frame = blend(from[d], frame, fade);
+                }
+
+                shown[d] = frame;
 
                 if (due(frame, sent[d], millis - sentAt[d], slow(device))) {
                     rgb.leds(device, frame);

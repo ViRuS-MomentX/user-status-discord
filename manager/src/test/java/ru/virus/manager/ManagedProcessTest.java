@@ -72,7 +72,8 @@ class ManagedProcessTest {
         process.start();
 
         await(() -> process.state() == ManagedProcess.State.WAITING, "ожидания перезапуска");
-        assertTrue(logged(process, "Перезапущу через 5 с"));
+        // Строка в журнале появляется чуть позже смены состояния — ждём её, а не проверяем сразу
+        await(() -> logged(process, "Перезапущу через 5 с"), "записи о перезапуске");
         await(() -> (int) process.toJson().get("restarts") == 1, "перезапуска");
     }
 

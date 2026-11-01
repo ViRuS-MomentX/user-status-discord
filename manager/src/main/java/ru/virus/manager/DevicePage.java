@@ -1782,6 +1782,65 @@ final class DevicePage extends Ui.Card {
         return box;
     }
 
+    /** Порядок цветов, как в WLED: красный горит зелёным — значит, устройству нужен GRB. */
+    private JComponent orderControl(OpenRgb.Device device) {
+        var box = new javax.swing.JComboBox<>(LedColor.ORDERS.toArray(String[]::new));
+        box.setSelectedItem(settings.colorOrders.getOrDefault(device.name(), "RGB"));
+        box.setToolTipText("Порядок цветов. Нажми «Проверка»: если вместо красного горит другой цвет — поменяй");
+        box.setPreferredSize(new Dimension(72, box.getPreferredSize().height));
+        box.addActionListener(e -> {
+            var order = String.valueOf(box.getSelectedItem());
+
+            if (order.equals("RGB")) {
+                settings.colorOrders.remove(device.name());
+            } else {
+                settings.colorOrders.put(device.name(), order);
+            }
+
+            settings.applyColor();
+            settings.save();
+        });
+        return box;
+    }
+
+    /**
+     * «Проверка», как «опознать» в iCUE и OpenRGB: устройство по очереди
+     * горит красным, зелёным, синим и белым — видно, какое это и верен ли
+     * порядок цветов. Режим на это время встаёт на паузу.
+     */
+    private JComponent testButton(OpenRgb.Device device) {
+        var test = Ui.ghost("Проверка");
+        test.setToolTipText("Красный → зелёный → синий → белый на этом устройстве");
+        test.setEnabled(device.paintable());
+        test.addActionListener(e -> {
+            test.setEnabled(false);
+            worker.submit(() -> {
+                var wasPlaying = animator.running();
+                animator.stop();
+
+                try (var rgb = new OpenRgb(settings.host, OpenRgb.PORT)) {
+                    for (var color : List.of(Color.RED, Color.GREEN, Color.BLUE, Color.WHITE)) {
+                        rgb.paint(device, color);
+                        Thread.sleep(800);
+                    }
+                } catch (Exception ex) {
+                    SwingUtilities.invokeLater(() -> toast.accept("Проверка не прошла: " + ex.getMessage()));
+                } finally {
+                    if (wasPlaying) {
+                        animator.start(settings.host);
+                    }
+
+                    SwingUtilities.invokeLater(() -> {
+                        test.setEnabled(true);
+                        toast.accept("Было: красный, зелёный, синий, белый. Если цвета шли не так — поменяй порядок "
+                                + "у «" + device.name() + "».");
+                    });
+                }
+            });
+        });
+        return test;
+    }
+
     private void resizeZone(OpenRgb.Device device, OpenRgb.Zone zone, int size) {
         settings.zoneSizes.put(OpenRgb.key(device, zone), size);
         settings.save();
@@ -1897,6 +1956,8 @@ final class DevicePage extends Ui.Card {
             paint.addActionListener(e -> paint(List.of(device), lit()));
             var controls = Ui.transparent(new FlowLayout(FlowLayout.RIGHT, 6, 0));
             controls.add(levelControl(device));
+            controls.add(orderControl(device));
+            controls.add(testButton(device));
             controls.add(paint);
             row.add(controls, BorderLayout.EAST);
             rgbDevices.add(row);
@@ -2174,6 +2235,8 @@ final class DevicePage extends Ui.Card {
         /** Сохранённые профили подсветки и правила «программа → профиль». */
         final List<LightProfiles.Profile> profiles = new ArrayList<>();
         final Map<String, String> appRules = new LinkedHashMap<>();
+        /** Порядок цветов по устройствам: «GRB» и т.п. — для лент и вентиляторов на WS2812. */
+        final Map<String, String> colorOrders = new LinkedHashMap<>();
         /** Яркость по устройствам, %: 0 — не трогать устройство вовсе. */
         final Map<String, Integer> deviceLevels = new LinkedHashMap<>();
         /** Сколько светодиодов на разъёмах ARGB: «устройство|зона» → число. */
@@ -2217,6 +2280,10 @@ final class DevicePage extends Ui.Card {
                         rules.forEach((key, value) -> settings.appRules.put(String.valueOf(key), String.valueOf(value)));
                     }
 
+                    if (json.get("colorOrders") instanceof Map<?, ?> orders) {
+                        orders.forEach((key, value) -> settings.colorOrders.put(String.valueOf(key), String.valueOf(value)));
+                    }
+
                     if (json.get("deviceLevels") instanceof Map<?, ?> levels) {
                         levels.forEach((key, value) -> {
                             if (value instanceof Number n) {
@@ -2257,6 +2324,7 @@ final class DevicePage extends Ui.Card {
             LedColor.red = balanceRed / 100.0;
             LedColor.green = balanceGreen / 100.0;
             LedColor.blue = balanceBlue / 100.0;
+            LedColor.orders = Map.copyOf(colorOrders);
         }
 
         void save() {
@@ -2273,6 +2341,7 @@ final class DevicePage extends Ui.Card {
             json.put("balanceBlue", balanceBlue);
             json.put("zoneSizes", zoneSizes);
             json.put("deviceLevels", deviceLevels);
+            json.put("colorOrders", colorOrders);
             json.put("profiles", profiles.stream().map(LightProfiles.Profile::toJson).toList());
             json.put("appRules", appRules);
             json.put("engine", engine);

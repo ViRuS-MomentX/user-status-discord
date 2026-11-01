@@ -210,7 +210,7 @@ final class OpenRgb implements AutoCloseable {
         body.putShort((short) device.leds());
 
         for (var i = 0; i < device.leds(); i++) {
-            put(body, color);
+            put(body, color, device);
         }
 
         send(device.index(), UPDATE_LEDS, body.array());
@@ -253,8 +253,8 @@ final class OpenRgb implements AutoCloseable {
     }
 
     /** Цвет для светодиода — с гамма-коррекцией и балансом белого. */
-    private static void put(ByteBuffer body, Color color) {
-        var led = LedColor.correct(color);
+    private static void put(ByteBuffer body, Color color, Device device) {
+        var led = LedColor.reorder(LedColor.correct(color), LedColor.orders.get(device.name()));
         body.put((byte) led.getRed()).put((byte) led.getGreen()).put((byte) led.getBlue()).put((byte) 0);
     }
 
@@ -271,7 +271,7 @@ final class OpenRgb implements AutoCloseable {
         body.putShort((short) count);
 
         for (var i = 0; i < count; i++) {
-            put(body, colors[i]);
+            put(body, colors[i], device);
         }
 
         send(device.index(), UPDATE_LEDS, body.array());
@@ -298,7 +298,7 @@ final class OpenRgb implements AutoCloseable {
         body.putShort((short) count);
 
         for (var i = 0; i < count; i++) {
-            put(body, color);
+            put(body, color, device);
         }
 
         send(device.index(), UPDATE_MODE, body.array());

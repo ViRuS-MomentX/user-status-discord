@@ -22,6 +22,33 @@ final class LedColor {
     static volatile double green = 1;
     static volatile double blue = 1;
 
+    /**
+     * Порядок цветов у устройства, как в настройках WLED: многие ARGB-ленты и
+     * вентиляторы на чипах WS2812 ждут GRB, и без перестановки красный горит
+     * зелёным. Имя устройства → «GRB», «BRG»…; нет в списке — RGB.
+     */
+    static volatile java.util.Map<String, String> orders = java.util.Map.of();
+    static final java.util.List<String> ORDERS = java.util.List.of("RGB", "GRB", "BRG", "RBG", "GBR", "BGR");
+
+    /** Переставить каналы так, чтобы устройство с порядком {@code order} показало {@code color}. */
+    static Color reorder(Color color, String order) {
+        if (order == null || order.equals("RGB") || order.length() != 3) {
+            return color;
+        }
+
+        var channels = new int[3];
+
+        for (var i = 0; i < 3; i++) {
+            channels[i] = switch (order.charAt(i)) {
+                case 'R' -> color.getRed();
+                case 'G' -> color.getGreen();
+                default -> color.getBlue();
+            };
+        }
+
+        return new Color(channels[0], channels[1], channels[2]);
+    }
+
     private static double tableGamma = -1;
     private static int[] table = new int[256];
 

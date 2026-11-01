@@ -574,4 +574,15 @@ class DeviceTest {
         assertEquals(dim, Glow.sound(0.6, 0.5, false, 0, Color.GREEN, Color.RED), "правая середина — тихо");
         assertTrue(AudioMeter.script().contains("GetChannelsPeakValues"));
     }
+
+    @Test
+    void colorOrderLikeWled() {
+        var red = Color.RED;
+        assertEquals(red, LedColor.reorder(red, null));
+        assertEquals(red, LedColor.reorder(red, "RGB"));
+        // Устройство GRB читает первый байт как зелёный — значит, красное значение уходит вторым
+        assertEquals(new Color(0, 255, 0), LedColor.reorder(red, "GRB"));
+        assertEquals(new Color(30, 10, 20), LedColor.reorder(new Color(10, 20, 30), "BRG"));
+        assertEquals(6, LedColor.ORDERS.size());
+    }
 }

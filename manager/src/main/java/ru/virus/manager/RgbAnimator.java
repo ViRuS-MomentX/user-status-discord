@@ -142,6 +142,13 @@ final class RgbAnimator {
         }
     }
 
+    /** Кадр опоздал так сильно, что это не задержка, а сон или гибернация. */
+    static final long WAKE_GAP_MS = 10_000;
+
+    static boolean woke(long gapNanos) {
+        return gapNanos / 1_000_000 >= WAKE_GAP_MS;
+    }
+
     /** Сигнал поверх кадра: весь кадр тянется к цвету сигнала. */
     static Color[] overlay(Color[] frame, Color color, double level) {
         if (level <= 0) {
@@ -246,6 +253,7 @@ final class RgbAnimator {
         var start = System.nanoTime();
         var time = 0.0;
         var last = start;
+        var lastWall = System.currentTimeMillis();
         var places = canvas(animated, canvas, order);
         var sent = new Color[animated.size()][];
         var sentAt = new long[animated.size()];
@@ -259,6 +267,18 @@ final class RgbAnimator {
 
         while (thread == me) {
             var now = System.nanoTime();
+
+            // Компьютер спал: после пробуждения плата и память сами вернулись к встроенному
+            // эффекту — заново берём их под свой режим, как iCUE и SignalRGB после сна
+            var wall = System.currentTimeMillis();
+            var slept = Math.max(now - last, (wall - lastWall) * 1_000_000L);
+            lastWall = wall;
+
+            if (woke(slept)) {
+                status.accept("Компьютер проснулся — заново включаю подсветку на устройствах.");
+                return;
+            }
+
             time += (now - last) / 1e9 * Math.max(1, Math.min(100, settings.speed)) / 50.0;
             last = now;
             var cpu = settings.cpu();

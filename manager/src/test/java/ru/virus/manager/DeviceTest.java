@@ -984,4 +984,11 @@ class DeviceTest {
         // Пик забывается медленно, а не сразу
         assertTrue(AudioMeter.track(0.8, 0) > 0.79);
     }
+
+    @Test
+    void wakingUpRetakesTheDevices() {
+        assertFalse(RgbAnimator.woke(33_000_000L), "обычный кадр");
+        assertFalse(RgbAnimator.woke(2_000_000_000L), "подтормозило — не сон");
+        assertTrue(RgbAnimator.woke(60_000_000_000L), "минута без кадров — компьютер спал");
+    }
 }

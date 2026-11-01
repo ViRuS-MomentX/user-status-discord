@@ -747,4 +747,14 @@ class DeviceTest {
         assertEquals(-1, IdleWatch.parse("Add-Type : ошибка"));
         assertTrue(IdleWatch.script().contains("GetLastInputInfo"));
     }
+
+    @Test
+    void patternCanRunBackwardsAndRepeat() {
+        var places = List.of(new OpenRgb.Place(0.25, 0.5, false), new OpenRgb.Place(0.75, 0.5, false));
+        assertEquals(places, Glow.shape(places, false, 1), "без настроек — как есть");
+        assertEquals(0.75, Glow.shape(places, true, 1).getFirst().x(), 1e-9, "обратно — зеркально");
+        assertEquals(0.5, Glow.shape(places, false, 2).getFirst().x(), 1e-9, "масштаб 2 — узор вдвое чаще");
+        assertTrue(Glow.positional(12) && Glow.positional(13), "экран и звук не трогаем");
+        assertFalse(Glow.positional(3));
+    }
 }

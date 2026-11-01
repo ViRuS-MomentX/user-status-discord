@@ -71,7 +71,8 @@ final class GlowPreview extends JComponent {
     }
 
     private Color[] frame(List<OpenRgb.Place> places, int seed) {
-        return Glow.frame(settings.mode, time, places, settings.color, settings.color2, settings.cpu(),
+        var shaped = Glow.positional(settings.mode) ? places : Glow.shape(places, settings.reverse, settings.scale);
+        return Glow.frame(settings.mode, time, shaped, settings.color, settings.color2, settings.cpu(),
                 Math.max(25, settings.brightness), settings.on, seed);
     }
 

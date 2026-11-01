@@ -51,6 +51,31 @@ final class Glow {
         return colors;
     }
 
+    /**
+     * Направление и масштаб узора: зеркально по ширине и «сжатие», чтобы
+     * радуга или волна повторялась несколько раз. «Экран», «Звук», «Полицию»
+     * и «Сканер» так не трогаем — им важно настоящее место.
+     */
+    static List<OpenRgb.Place> shape(List<OpenRgb.Place> places, boolean reverse, double scale) {
+        if (!reverse && scale == 1) {
+            return places;
+        }
+
+        var result = new java.util.ArrayList<OpenRgb.Place>(places.size());
+
+        for (var place : places) {
+            var x = reverse ? 1 - place.x() : place.x();
+            result.add(new OpenRgb.Place(x * scale, place.y(), place.grid()));
+        }
+
+        return result;
+    }
+
+    /** Режимы, которым нужно настоящее место светодиода: экран и звук. */
+    static boolean positional(int mode) {
+        return mode == 12 || mode == 13 || mode == 7 || mode == 15;
+    }
+
     /** Эффекты, которым есть что делать с высотой: на клавиатуре они идут по строкам и столбцам. */
     static Color pixel(int mode, double t, double x, double y, boolean grid, int i, Color a, Color b, double cpu) {
         // Экран: клавиатура повторяет картинку целиком, лента и вентилятор — по столбцам

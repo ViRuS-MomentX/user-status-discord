@@ -367,6 +367,9 @@ final class SignalRgb {
         volatile Color color2 = new Color(0x8A2BE2);
         /** Яркость и вкл/выкл самого эффекта — работают и без API SignalRGB. */
         volatile int brightness = 100;
+        /** Узор: в обратную сторону и сколько раз помещается на устройстве (как Reverse и Scale в WLED/SignalRGB). */
+        volatile boolean reverse;
+        volatile double scale = 1;
         /** Приглушение по расписанию и простою, %: ночью и без хозяина — тусклее или темно. */
         volatile int dim = 100;
         volatile boolean on = true;

@@ -162,6 +162,8 @@ final class DevicePage extends Ui.Card {
         glow.speed = settings.glowSpeed;
         glow.color = settings.glowColor;
         glow.color2 = settings.glowColor2;
+        glow.reverse = settings.glowReverse;
+        glow.scale = Math.max(1, Math.min(4, settings.glowScale));
 
         if ("openrgb".equals(settings.engine)) {
             glow.on = settings.glowOn;
@@ -635,8 +637,34 @@ final class DevicePage extends Ui.Card {
         colorRow.add(Ui.muted("как в Windows", 13f));
         colorRow.add(Ui.muted("Второй", 13f));
         colorRow.add(glowColor2);
-        colorRow.add(Ui.muted("Скорость", 13f));
-        colorRow.add(glowSpeed);
+        var patternRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        patternRow.add(Ui.muted("Узор: скорость", 13f));
+        patternRow.add(glowSpeed);
+
+        // Направление и масштаб узора — как Reverse в WLED и Scale в SignalRGB
+        var reverse = new Ui.Switch(glow.reverse);
+        reverse.setToolTipText("Узор бежит в другую сторону");
+        reverse.onChange(on -> {
+            glow.reverse = on;
+            settings.glowReverse = on;
+            settings.save();
+        });
+        var scale = new JSlider(10, 40, (int) Math.round(glow.scale * 10));
+        scale.setOpaque(false);
+        scale.setPreferredSize(new Dimension(90, 28));
+        scale.setToolTipText("Сколько раз узор помещается на устройстве: 1 — одна радуга на всё, 4 — четыре коротких");
+        scale.addChangeListener(e -> {
+            glow.scale = scale.getValue() / 10.0;
+            settings.glowScale = glow.scale;
+
+            if (!scale.getValueIsAdjusting()) {
+                settings.save();
+            }
+        });
+        patternRow.add(reverse);
+        patternRow.add(Ui.muted("в обратную сторону", 13f));
+        patternRow.add(Ui.muted("масштаб", 13f));
+        patternRow.add(scale);
 
         // Все эффекты SignalRGB
         effectTiles.setLayout(new GridLayout(0, 4, 8, 8));
@@ -733,6 +761,8 @@ final class DevicePage extends Ui.Card {
         showProfiles();
         stack.add(Box.createVerticalStrut(10));
         stack.add(left(colorRow));
+        stack.add(Box.createVerticalStrut(10));
+        stack.add(left(patternRow));
         stack.add(Box.createVerticalStrut(10));
         stack.add(left(colorCorrection()));
         stack.add(Box.createVerticalStrut(10));
@@ -2685,6 +2715,9 @@ final class DevicePage extends Ui.Card {
         final Map<String, String> appRules = new LinkedHashMap<>();
         /** Создана ли задача Планировщика, которая запускает OpenRGB от администратора. */
         boolean openRgbTask;
+        /** Узор: в обратную сторону и масштаб. */
+        boolean glowReverse;
+        double glowScale = 1;
         /** Основной цвет берётся из цвета оформления Windows. */
         boolean followAccent;
         /** Ночь: с какого по какой час приглушать и до скольких процентов. */
@@ -2746,6 +2779,8 @@ final class DevicePage extends Ui.Card {
 
                     settings.nightOn = Boolean.TRUE.equals(json.get("nightOn"));
                     settings.followAccent = Boolean.TRUE.equals(json.get("followAccent"));
+                    settings.glowReverse = Boolean.TRUE.equals(json.get("glowReverse"));
+                    settings.glowScale = json.get("glowScale") instanceof Number n ? n.doubleValue() : 1;
                     settings.openRgbTask = Boolean.TRUE.equals(json.get("openRgbTask"));
                     settings.nightFrom = json.get("nightFrom") instanceof Number n ? n.intValue() : 0;
                     settings.nightTo = json.get("nightTo") instanceof Number n ? n.intValue() : 8;
@@ -2833,6 +2868,8 @@ final class DevicePage extends Ui.Card {
             json.put("canvasOrder", canvasOrder);
             json.put("nightOn", nightOn);
             json.put("followAccent", followAccent);
+            json.put("glowReverse", glowReverse);
+            json.put("glowScale", glowScale);
             json.put("openRgbTask", openRgbTask);
             json.put("nightFrom", nightFrom);
             json.put("nightTo", nightTo);

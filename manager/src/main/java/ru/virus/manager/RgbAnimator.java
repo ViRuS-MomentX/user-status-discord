@@ -144,7 +144,7 @@ final class RgbAnimator {
 
     /** Что видно глазу: режим, цвета, вкл/выкл. Поменялось — пора плавного перехода. */
     private String look() {
-        return settings.mode + "|" + modes + "|" + settings.color.getRGB() + "|" + settings.color2.getRGB() + "|" + settings.on
+        return settings.mode + "|" + settings.reverse + "|" + settings.scale + "|" + modes + "|" + settings.color.getRGB() + "|" + settings.color2.getRGB() + "|" + settings.on
                 + "|" + settings.dim;
     }
 
@@ -263,7 +263,10 @@ final class RgbAnimator {
 
             for (var d = 0; d < animated.size(); d++) {
                 var device = animated.get(d);
-                var frame = Glow.frame(modes.getOrDefault(device.name(), settings.mode), time, places.get(d),
+                var deviceMode = modes.getOrDefault(device.name(), settings.mode);
+                var shaped = Glow.positional(deviceMode) ? places.get(d)
+                        : Glow.shape(places.get(d), settings.reverse, settings.scale);
+                var frame = Glow.frame(deviceMode, time, shaped,
                         settings.color, settings.color2, cpu,
                         settings.effective() * level(device) / 100, settings.on, d);
 

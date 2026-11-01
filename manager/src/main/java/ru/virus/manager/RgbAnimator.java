@@ -23,6 +23,16 @@ final class RgbAnimator {
     private volatile String host = "127.0.0.1";
     /** Размеры разъёмов ARGB, заданные хозяином: «устройство|зона» → светодиодов. */
     volatile java.util.Map<String, Integer> zoneSizes = java.util.Map.of();
+    /**
+     * Яркость по устройствам, как в SignalRGB: имя → 0..100. 0 — устройство
+     * не трогаем вовсе (им управляет родная программа). Нет в списке — 100.
+     */
+    volatile java.util.Map<String, Integer> levels = java.util.Map.of();
+    /** Память (RAM) ходит по медленной шине SMBus: чаще 10 раз в секунду писать в неё — тормозить игры. */
+    static final long SLOW_BUS_MS = 100;
+    /** Даже без изменений кадр повторяется раз в столько: некоторые контроллеры сами возвращаются в свой режим. */
+    static final long KEEPALIVE_MS = 5000;
+
     /** Порт OpenRGB; в тестах — поддельного. */
     volatile int port = OpenRgb.PORT;
     private volatile Thread thread;
@@ -67,8 +77,9 @@ final class RgbAnimator {
                     devices = rgb.devices();
                 }
 
-                var animated = devices.stream().filter(device -> device.leds() > 0).toList();
-                var still = devices.stream().filter(device -> device.leds() == 0 && device.solid() != null).toList();
+                var wanted = devices.stream().filter(device -> level(device) > 0).toList();
+                var animated = wanted.stream().filter(device -> device.leds() > 0).toList();
+                var still = wanted.stream().filter(device -> device.leds() == 0 && device.solid() != null).toList();
 
                 for (var device : animated) {
                     rgb.customMode(device);
@@ -89,34 +100,68 @@ final class RgbAnimator {
         }
     }
 
+    private int level(OpenRgb.Device device) {
+        return Math.max(0, Math.min(100, levels.getOrDefault(device.name(), 100)));
+    }
+
+    static boolean slow(OpenRgb.Device device) {
+        return device.kind().equals("память");
+    }
+
+    /**
+     * Слать ли кадр: только если он поменялся (статичный режим — один раз, а
+     * не 30 раз в секунду), не чаще шины устройства и раз в несколько секунд
+     * для надёжности.
+     */
+    static boolean due(Color[] frame, Color[] last, long since, boolean slowBus) {
+        if (last == null || since >= KEEPALIVE_MS) {
+            return true;
+        }
+
+        if (slowBus && since < SLOW_BUS_MS) {
+            return false;
+        }
+
+        return !java.util.Arrays.equals(frame, last);
+    }
+
     private void loop(OpenRgb rgb, List<OpenRgb.Device> animated, List<OpenRgb.Device> still, Thread me)
             throws IOException {
         var start = System.nanoTime();
         var time = 0.0;
         var last = start;
-        Color stillColor = null;
+        var sent = new Color[animated.size()][];
+        var sentAt = new long[animated.size()];
+        var stillSent = new Color[still.size()];
 
         while (thread == me) {
             var now = System.nanoTime();
             time += (now - last) / 1e9 * Math.max(1, Math.min(100, settings.speed)) / 50.0;
             last = now;
             var cpu = settings.cpu();
+            var millis = now / 1_000_000;
 
             for (var d = 0; d < animated.size(); d++) {
                 var device = animated.get(d);
-                rgb.leds(device, Glow.frame(settings.mode, time, device.leds(), settings.color, settings.color2, cpu,
-                        settings.brightness, settings.on, d));
+                var frame = Glow.frame(settings.mode, time, device.leds(), settings.color, settings.color2, cpu,
+                        settings.brightness * level(device) / 100, settings.on, d);
+
+                if (due(frame, sent[d], millis - sentAt[d], slow(device))) {
+                    rgb.leds(device, frame);
+                    sent[d] = frame;
+                    sentAt[d] = millis;
+                }
             }
 
             // Устройства без своих светодиодов анимировать нельзя — держим основной цвет
-            var wanted = Glow.scale(settings.color, settings.on ? settings.brightness / 100.0 : 0);
+            for (var s = 0; s < still.size(); s++) {
+                var device = still.get(s);
+                var color = Glow.scale(settings.color, settings.on ? settings.brightness * level(device) / 10_000.0 : 0);
 
-            if (!wanted.equals(stillColor)) {
-                for (var device : still) {
-                    rgb.paint(device, wanted);
+                if (!color.equals(stillSent[s])) {
+                    rgb.paint(device, color);
+                    stillSent[s] = color;
                 }
-
-                stillColor = wanted;
             }
 
             try {

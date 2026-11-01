@@ -163,6 +163,7 @@ final class DevicePage extends Ui.Card {
         urlFallback.setRepeats(false);
         animator = new RgbAnimator(glow, text -> SwingUtilities.invokeLater(() -> animatorStatus.setText(text)));
         animator.zoneSizes = Map.copyOf(settings.zoneSizes);
+        animator.levels = Map.copyOf(settings.deviceLevels);
         setBorder(BorderFactory.createEmptyBorder(20, 22, 20, 22));
         Ui.rippleThrough(this, background);
 
@@ -1592,6 +1593,52 @@ final class DevicePage extends Ui.Card {
         return row;
     }
 
+    /**
+     * Яркость устройства, как в SignalRGB: память может быть ярче вентиляторов.
+     * 0 — «не трогать»: им управляет родная программа, режимы его обходят.
+     */
+    private JComponent levelControl(OpenRgb.Device device) {
+        var level = settings.deviceLevels.getOrDefault(device.name(), 100);
+        var slider = new JSlider(0, 100, level);
+        slider.setOpaque(false);
+        slider.setPreferredSize(new Dimension(110, 26));
+        var value = Ui.label(level == 0 ? "не трогать" : level + "%", Theme.mono.deriveFont(12f),
+                level == 0 ? Theme.DIM : Theme.MUTED);
+        value.setPreferredSize(new Dimension(80, 18));
+        slider.setToolTipText("Яркость этого устройства. В ноль — V.I.R.U.S. его не трогает, им правит родная программа");
+        slider.addChangeListener(e -> {
+            var now = slider.getValue();
+            value.setText(now == 0 ? "не трогать" : now + "%");
+            value.setForeground(now == 0 ? Theme.DIM : Theme.MUTED);
+
+            if (slider.getValueIsAdjusting()) {
+                return;
+            }
+
+            var before = settings.deviceLevels.getOrDefault(device.name(), 100);
+
+            if (now == 100) {
+                settings.deviceLevels.remove(device.name());
+            } else {
+                settings.deviceLevels.put(device.name(), now);
+            }
+
+            settings.save();
+            animator.levels = Map.copyOf(settings.deviceLevels);
+
+            // Вкл/выкл устройства меняет состав — режим подключится заново
+            if ((before == 0) != (now == 0) && animator.running()) {
+                animator.stop();
+                animator.start(settings.host);
+            }
+        });
+
+        var box = Ui.transparent(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+        box.add(slider);
+        box.add(value);
+        return box;
+    }
+
     private void resizeZone(OpenRgb.Device device, OpenRgb.Zone zone, int size) {
         settings.zoneSizes.put(OpenRgb.key(device, zone), size);
         settings.save();
@@ -1705,7 +1752,10 @@ final class DevicePage extends Ui.Card {
             var paint = Ui.button("Покрасить");
             paint.setEnabled(device.paintable());
             paint.addActionListener(e -> paint(List.of(device), lit()));
-            row.add(paint, BorderLayout.EAST);
+            var controls = Ui.transparent(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+            controls.add(levelControl(device));
+            controls.add(paint);
+            row.add(controls, BorderLayout.EAST);
             rgbDevices.add(row);
 
             for (var zone : device.resizable()) {
@@ -1740,7 +1790,7 @@ final class DevicePage extends Ui.Card {
                 try (var rgb = new OpenRgb(settings.host, OpenRgb.PORT)) {
                     var found = rgb.devices();
 
-                    var painted = paintEach(rgb, found, color);
+                    var painted = paintEach(rgb, found, color, settings.deviceLevels);
 
                     SwingUtilities.invokeLater(() -> {
                         showDevices(found);
@@ -1763,7 +1813,7 @@ final class DevicePage extends Ui.Card {
         stopAnimation();
         worker.submit(() -> {
             try (var rgb = new OpenRgb(settings.host, OpenRgb.PORT)) {
-                var painted = paintEach(rgb, which, color);
+                var painted = paintEach(rgb, which, color, settings.deviceLevels);
                 SwingUtilities.invokeLater(() -> toast.accept("Покрашено устройств: " + painted + " из " + which.size()));
             } catch (IOException | RuntimeException e) {
                 SwingUtilities.invokeLater(() -> toast.accept("Не покрасилось: " + e.getMessage()));
@@ -1772,12 +1822,16 @@ final class DevicePage extends Ui.Card {
     }
 
     /** Красит, что красится; одно упрямое устройство не мешает остальным. */
-    static int paintEach(OpenRgb rgb, List<OpenRgb.Device> which, Color color) throws IOException {
+    static int paintEach(OpenRgb rgb, List<OpenRgb.Device> which, Color color, Map<String, Integer> levels)
+            throws IOException {
         var painted = 0;
 
         for (var device : which) {
-            if (device.paintable()) {
-                rgb.paint(device, color);
+            var level = levels.getOrDefault(device.name(), 100);
+
+            // 0 — «не трогать»: устройство остаётся родной программе
+            if (device.paintable() && level > 0) {
+                rgb.paint(device, Glow.scale(color, level / 100.0));
                 painted++;
             }
         }
@@ -1900,7 +1954,7 @@ final class DevicePage extends Ui.Card {
                 try (var rgb = new OpenRgb(saved.host, OpenRgb.PORT)) {
                     var color = dim(saved.color, saved.brightness);
 
-                    paintEach(rgb, rgb.devices(), color);
+                    paintEach(rgb, rgb.devices(), color, saved.deviceLevels);
                     return;
                 } catch (IOException | RuntimeException e) {
                     try {
@@ -1960,6 +2014,8 @@ final class DevicePage extends Ui.Card {
         int balanceRed = 100;
         int balanceGreen = 100;
         int balanceBlue = 100;
+        /** Яркость по устройствам, %: 0 — не трогать устройство вовсе. */
+        final Map<String, Integer> deviceLevels = new LinkedHashMap<>();
         /** Сколько светодиодов на разъёмах ARGB: «устройство|зона» → число. */
         final Map<String, Integer> zoneSizes = new LinkedHashMap<>();
         /** Чем играть режимы: «openrgb» или «signalrgb». */
@@ -1988,6 +2044,14 @@ final class DevicePage extends Ui.Card {
                     settings.balanceRed = json.get("balanceRed") instanceof Number n ? n.intValue() : 100;
                     settings.balanceGreen = json.get("balanceGreen") instanceof Number n ? n.intValue() : 100;
                     settings.balanceBlue = json.get("balanceBlue") instanceof Number n ? n.intValue() : 100;
+
+                    if (json.get("deviceLevels") instanceof Map<?, ?> levels) {
+                        levels.forEach((key, value) -> {
+                            if (value instanceof Number n) {
+                                settings.deviceLevels.put(String.valueOf(key), n.intValue());
+                            }
+                        });
+                    }
 
                     if (json.get("zoneSizes") instanceof Map<?, ?> sizes) {
                         sizes.forEach((key, value) -> {
@@ -2036,6 +2100,7 @@ final class DevicePage extends Ui.Card {
             json.put("balanceGreen", balanceGreen);
             json.put("balanceBlue", balanceBlue);
             json.put("zoneSizes", zoneSizes);
+            json.put("deviceLevels", deviceLevels);
             json.put("engine", engine);
             json.put("glowBrightness", glowBrightness);
             json.put("glowOn", glowOn);

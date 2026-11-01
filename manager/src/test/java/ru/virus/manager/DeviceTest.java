@@ -401,4 +401,45 @@ class DeviceTest {
         assertEquals(0, body.getInt(), "номер зоны");
         assertEquals(120, body.getInt(), "больше, чем умеет разъём, не задаём");
     }
+
+    @Test
+    void framesAreSentOnlyWhenNeeded() {
+        var red = new Color[] {Color.RED, Color.RED};
+        var same = new Color[] {Color.RED, Color.RED};
+        var blue = new Color[] {Color.BLUE, Color.RED};
+
+        assertTrue(RgbAnimator.due(red, null, 0, false), "первый кадр — всегда");
+        assertFalse(RgbAnimator.due(same, red, 33, false), "статичный режим не шлёт одно и то же 30 раз в секунду");
+        assertTrue(RgbAnimator.due(blue, red, 33, false));
+        assertFalse(RgbAnimator.due(blue, red, 33, true), "память — не чаще 10 раз в секунду");
+        assertTrue(RgbAnimator.due(blue, red, RgbAnimator.SLOW_BUS_MS, true));
+        assertTrue(RgbAnimator.due(same, red, RgbAnimator.KEEPALIVE_MS, false), "раз в 5 с — для надёжности");
+    }
+
+    @Test
+    void untouchedDeviceIsLeftToItsOwnApp() throws Exception {
+        var got = fakeOpenRgb();
+        var settings = new SignalRgb.Live(() -> 0);
+        settings.mode = 3;
+        var animator = new RgbAnimator(settings, text -> { });
+        animator.port = rgbServer.getLocalPort();
+        animator.levels = java.util.Map.of("Attack Shark X98", 0, "JONSBO CR-1000", 50);
+        animator.start("127.0.0.1");
+
+        try {
+            var deadline = System.currentTimeMillis() + 5000;
+
+            while (got.stream().filter(p -> p.id() == OpenRgb.UPDATE_LEDS && p.device() == 0).count() < 5
+                    && System.currentTimeMillis() < deadline) {
+                Thread.sleep(50);
+            }
+        } finally {
+            animator.stop();
+        }
+
+        assertTrue(got.stream().anyMatch(p -> p.id() == OpenRgb.UPDATE_LEDS && p.device() == 0), "JONSBO играет");
+        assertTrue(got.stream().noneMatch(p -> p.device() == 1
+                        && (p.id() == OpenRgb.UPDATE_LEDS || p.id() == OpenRgb.SET_CUSTOM_MODE)),
+                "клавиатура с «не трогать» осталась родной программе");
+    }
 }

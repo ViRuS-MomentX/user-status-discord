@@ -19,7 +19,38 @@ final class LightingCheck {
     record Finding(String text, String action) {
     }
 
+    /**
+     * Программы производителей, которые сами держат шину подсветки, — тот же
+     * список, что OpenRGB и SignalRGB приводят в разделе про конфликты.
+     * Название → признаки процесса (начало имени файла в нижнем регистре).
+     */
+    static final Map<String, List<String>> RIVALS = rivalsTable();
+
     private LightingCheck() {
+    }
+
+    private static Map<String, List<String>> rivalsTable() {
+        var table = new java.util.LinkedHashMap<String, List<String>>();
+        table.put("MSI Center (Mystic Light)", List.of("mysticlight", "msi center.exe", "msi.centralserver",
+                "ledkeeper"));
+        table.put("Armoury Crate / Aura", List.of("armourycrate", "lightingservice.exe", "aurawallpaperservice",
+                "asus_framework.exe"));
+        table.put("iCUE", List.of("icue.exe", "corsair.service", "icue"));
+        table.put("GIGABYTE RGB Fusion", List.of("rgbfusion", "gcc.exe", "gigabytecontrolcenter"));
+        table.put("NZXT CAM", List.of("nzxt cam.exe", "cam.exe"));
+        table.put("Razer Synapse", List.of("razer synapse", "razercentralservice", "razerappengine"));
+        table.put("ASRock Polychrome", List.of("polychrome", "asrpolychrome"));
+        table.put("Logitech G HUB", List.of("lghub"));
+        table.put("Thermaltake TT RGB Plus", List.of("tt rgb plus", "ttrgbplus"));
+        table.put("Lian Li L-Connect", List.of("l-connect", "lconnect"));
+        return java.util.Collections.unmodifiableMap(table);
+    }
+
+    /** Какие из конфликтующих программ запущены — по названию, без повторов. */
+    static List<String> rivals(Set<String> running) {
+        return RIVALS.entrySet().stream()
+                .filter(entry -> running.stream().anyMatch(name -> entry.getValue().stream().anyMatch(name::startsWith)))
+                .map(Map.Entry::getKey).toList();
     }
 
     static List<Finding> analyze(List<OpenRgb.Device> devices, Map<String, Integer> sizes, Set<String> running,
@@ -61,10 +92,14 @@ final class LightingCheck {
                     "close-signal"));
         }
 
-        if (openRgbEngine && running.stream().anyMatch(name -> name.contains("mystic") || name.equals("msi center.exe")
-                || name.startsWith("msi.centralserver"))) {
-            findings.add(new Finding("Работает MSI Center (Mystic Light) — он тоже управляет платой и может перебивать "
-                    + "цвета. Выключи в нём Mystic Light или закрой его.", ""));
+        if (openRgbEngine) {
+            var rivals = rivals(running);
+
+            if (!rivals.isEmpty()) {
+                findings.add(new Finding("Работает " + String.join(", ", rivals) + " — программа производителя тоже "
+                        + "управляет подсветкой и перебивает цвета, отсюда мигание и «чужие» цвета. Выключи в ней "
+                        + "подсветку или закрой её (и убери из автозагрузки).", ""));
+            }
         }
 
         return findings;

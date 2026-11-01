@@ -30,4 +30,18 @@ class LightingCheckTest {
         assertTrue(LightingCheck.analyze(List.of(gpu, board), Map.of("MSI|JRAINBOW1", 40), Set.of(), true).stream()
                 .noneMatch(f -> f.text().contains("JRAINBOW1")));
     }
+
+    @Test
+    void namesVendorAppsThatFightForTheLights() {
+        assertEquals(List.of("Armoury Crate / Aura", "iCUE"),
+                LightingCheck.rivals(Set.of("icue.exe", "lightingservice.exe", "explorer.exe")));
+        assertTrue(LightingCheck.rivals(Set.of("javaw.exe", "openrgb.exe")).isEmpty());
+
+        // Под SignalRGB это не наша забота — он сам разбирается с конфликтами
+        var gpu = new OpenRgb.Device(0, "GPU", "видеокарта", 20);
+        var board = new OpenRgb.Device(1, "MSI", "материнская плата", 10);
+        assertTrue(LightingCheck.analyze(List.of(gpu, board), Map.of(), Set.of("icue.exe"), true).stream()
+                .anyMatch(f -> f.text().contains("iCUE")));
+        assertTrue(LightingCheck.analyze(List.of(gpu, board), Map.of(), Set.of("icue.exe"), false).isEmpty());
+    }
 }

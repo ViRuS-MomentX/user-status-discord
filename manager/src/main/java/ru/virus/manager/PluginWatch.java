@@ -206,6 +206,15 @@ final class PluginWatch {
                 }
             }
 
+            // Плагин с ошибкой может испортить мир — раз в полчаса снимаем его перед заменой
+            if (!WorldSnapshots.recent(server.workdir(), 30 * 60_000L)) {
+                var snapshot = WorldSnapshots.take(server.workdir(), "plugin");
+
+                if (snapshot != null) {
+                    say("Снимок мира перед заменой: " + snapshot.getFileName() + ".");
+                }
+            }
+
             var removed = ServerTools.replacePlugin(server.workdir(), jar);
             Files.writeString(server.workdir().resolve(DEPLOYED), signature, StandardCharsets.UTF_8);
             say("Плагин заменён на " + jar.getFileName()

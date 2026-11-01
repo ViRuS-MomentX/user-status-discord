@@ -163,7 +163,7 @@ final class MainWindow extends JFrame {
         update.setIcon(Icons.of(Icons.Kind.UP, Theme.ACCENT));
         update.setIconTextGap(8);
         update.setToolTipText("Выбрать присланный архив V.I.R.U.S.zip — V.I.R.U.S. обновится и перезапустится сам");
-        update.addActionListener(e -> chooseUpdate());
+        update.addActionListener(e -> updateNow());
 
         actions.add(update);
         actions.add(discord);
@@ -349,6 +349,8 @@ final class MainWindow extends JFrame {
     private final AutoUpdate autoUpdate = new AutoUpdate();
     /** Обновление уже скачано и ждёт, пока можно будет перезапуститься. */
     private volatile int pendingBuild = -1;
+    /** О какой отложенной сборке уже сказали — чтобы не повторять каждые 5 минут. */
+    private int updateHeld = -1;
 
     /**
      * Есть ли на GitHub сборка новее. Есть — скачать, разложить и
@@ -396,9 +398,32 @@ final class MainWindow extends JFrame {
             return;
         }
 
+        applyUpdate(false);
+    }
+
+    /** @param now хозяин сам нажал «Обновить» — не ждать, пока остановится сервер */
+    private void applyUpdate(boolean now) {
+        if (pendingBuild < 0) {
+            return;
+        }
+
         // Несохранённый конфиг и заливка плагина важнее: обновимся на следующей проверке
         if (configPage.isDirty() || watches.values().stream().anyMatch(PluginWatch::deploying)) {
             toast("Скачано обновление V.I.R.U.S. (сборка " + pendingBuild + ") — поставлю, как только сохранишь конфиг.");
+            return;
+        }
+
+        // Сервер Minecraft перезапуск оборвал бы посреди игры: ждём, пока его остановят
+        var serverRunning = supervisor.all().stream().anyMatch(process -> ServerTools.isServer(process.spec())
+                && process.state() == ManagedProcess.State.RUNNING);
+
+        if (serverRunning && !now) {
+            if (updateHeld != pendingBuild) {
+                updateHeld = pendingBuild;
+                toast("Есть обновление V.I.R.U.S. (сборка " + pendingBuild + ") — поставлю, когда остановишь сервер. "
+                        + "Или нажми «Обновить».");
+            }
+
             return;
         }
 
@@ -419,6 +444,41 @@ final class MainWindow extends JFrame {
                 toast("Обновление не запустилось: " + ex.getMessage());
             }
         }) {{ setRepeats(false); }}.start();
+    }
+
+    /** «Обновить»: сперва GitHub, а если там новее нет — выбрать архив вручную. */
+    private void updateNow() {
+        if (pendingBuild > 0) {
+            applyUpdate(true);
+            return;
+        }
+
+        toast("Смотрю, что есть на GitHub…");
+        worker.submit(() -> {
+            try {
+                var release = autoUpdate.latest();
+
+                if (AutoUpdate.newer(release, AutoUpdate.current())) {
+                    var zip = autoUpdate.download(release, supervisor.home());
+                    Updater.stage(supervisor.home(), List.of(zip));
+                    java.nio.file.Files.deleteIfExists(zip);
+                    pendingBuild = release.build();
+                    SwingUtilities.invokeLater(() -> applyUpdate(true));
+                    return;
+                }
+
+                SwingUtilities.invokeLater(() -> {
+                    toast("Стоит последняя сборка" + (AutoUpdate.current() > 0 ? " (" + AutoUpdate.current() + ")" : "")
+                            + ". Можно выбрать архив вручную.");
+                    chooseUpdate();
+                });
+            } catch (Exception e) {
+                SwingUtilities.invokeLater(() -> {
+                    toast("GitHub не ответил — выбери архив вручную.");
+                    chooseUpdate();
+                });
+            }
+        });
     }
 
     /** Обновление из присланного архива: разложить, закрыться, перенести, запуститься. */

@@ -43,6 +43,7 @@ final class ProcessPage extends Ui.Card {
     private final JButton files = Ui.button("Файлы");
     private final JButton newWorld = Ui.button("Пересоздать мир");
     private final JButton plugin = Ui.button("Заменить плагин");
+    private final JButton rollback = Ui.button("Откатить мир");
     /** Автообновление: собрал плагин — он сам встаёт на сервер. */
     private final Ui.Switch autoDeploy = new Ui.Switch(false);
     private final JLabel autoLabel = Ui.muted("автообновление из сборки", 12.5f);
@@ -114,7 +115,11 @@ final class ProcessPage extends Ui.Card {
         serverCaption.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 6));
         serverButtons.add(serverCaption);
         serverButtons.add(newWorld);
+        serverButtons.add(rollback);
         serverButtons.add(plugin);
+        rollback.setIcon(Icons.of(Icons.Kind.UP, Theme.TEXT));
+        rollback.setToolTipText("Вернуть мир из снимка — их V.I.R.U.S. делает перед новым миром и заменой плагина");
+        rollback.addActionListener(e -> rollbackWorld());
         serverButtons.add(Box.createHorizontalStrut(14));
         serverButtons.add(autoDeploy);
         serverButtons.add(autoLabel);
@@ -388,13 +393,48 @@ final class ProcessPage extends Ui.Card {
 
         if (JOptionPane.showConfirmDialog(this, "<html>Удалить мир <b>" + ConfigPage.escape(level)
                         + "</b> со всеми измерениями — обычным, адом и краем?<br>Сервер остановится и создаст новые."
-                        + "<br><br>Вернуть старый мир будет нельзя.</html>",
+                        + "<br><br>Перед удалением сохраню снимок — вернуть его можно кнопкой «Откатить мир».</html>",
                 Virus.NAME, JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.OK_OPTION) {
             return;
         }
 
-        withServerStopped("пересоздание мира", true,
-                folder -> "Удалено измерений: " + ServerTools.deleteWorlds(folder) + " — сервер создаёт новый мир.");
+        withServerStopped("пересоздание мира", true, folder -> {
+            var snapshot = WorldSnapshots.take(folder, "new-world");
+            return "Удалено измерений: " + ServerTools.deleteWorlds(folder) + " — сервер создаёт новый мир."
+                    + (snapshot == null ? "" : " Снимок старого: " + snapshot.getFileName() + ".");
+        });
+    }
+
+    /** Выбрать снимок и вернуть мир из него. */
+    private void rollbackWorld() {
+        if (process == null) {
+            return;
+        }
+
+        var snapshots = WorldSnapshots.list(process.workdir());
+
+        if (snapshots.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "<html>Снимков пока нет.<br>V.I.R.U.S. делает их сам перед "
+                    + "«Пересоздать мир» и перед заменой плагина.</html>", Virus.NAME, JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        var titles = snapshots.stream().map(WorldSnapshots::title).toArray(String[]::new);
+        var chosen = (String) JOptionPane.showInputDialog(this,
+                "Какой мир вернуть? Нынешний будет заменён (перед этим снимется и он).", Virus.NAME,
+                JOptionPane.QUESTION_MESSAGE, null, titles, titles[0]);
+
+        if (chosen == null) {
+            return;
+        }
+
+        var zip = snapshots.get(java.util.Arrays.asList(titles).indexOf(chosen));
+        withServerStopped("откат мира", true, folder -> {
+            var current = WorldSnapshots.take(folder, "rollback");
+            WorldSnapshots.restore(folder, zip);
+            return "Мир возвращён из снимка " + WorldSnapshots.title(zip) + "."
+                    + (current == null ? "" : " Тот, что был, тоже сохранён.");
+        });
     }
 
     private void replacePlugin() {
@@ -411,6 +451,11 @@ final class ProcessPage extends Ui.Card {
         var chosen = picked.getFirst();
 
         withServerStopped("замена плагина", false, folder -> {
+            // Плагин с ошибкой может испортить мир — раз в полчаса снимаем его перед заменой
+            if (!WorldSnapshots.recent(folder, 30 * 60_000L)) {
+                WorldSnapshots.take(folder, "plugin");
+            }
+
             var removed = ServerTools.replacePlugin(folder, chosen);
             return "Плагин заменён на " + chosen.getFileName()
                     + (removed.isEmpty() ? "" : " (убран " + String.join(", ", removed) + ")") + ".";

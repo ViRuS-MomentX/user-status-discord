@@ -24,6 +24,9 @@
 	var lastLive = 0;
 	var flashEnd = 0;
 	var flashColor = [255, 255, 255];
+	// Показанная яркость плывёт к заданной: 100% за 2 секунды, как в V.I.R.U.S. через OpenRGB
+	var levelShown = -1;
+	var levelAt = Date.now();
 	var t = 0;
 	var last = Date.now();
 	var drops = [];
@@ -107,7 +110,13 @@
 				ctx.fillStyle = "rgba(" + flashColor[0] + "," + flashColor[1] + "," + flashColor[2] + "," + k + ")";
 				ctx.fillRect(0, 0, W, H);
 			}
-			var level = s.on === false ? 0 : (s.brightness === undefined ? 100 : Number(s.brightness));
+			var target = s.on === false ? 0 : (s.brightness === undefined ? 100 : Number(s.brightness));
+			var nowMs = Date.now();
+			var step = (nowMs - levelAt) / 2000 * 100;
+			levelAt = nowMs;
+			levelShown = levelShown < 0 ? target
+				: (levelShown < target ? Math.min(target, levelShown + step) : Math.max(target, levelShown - step));
+			var level = levelShown;
 			if (level < 100) {
 				ctx.fillStyle = "rgba(0,0,0," + (1 - Math.max(0, level) / 100) + ")";
 				ctx.fillRect(0, 0, W, H);

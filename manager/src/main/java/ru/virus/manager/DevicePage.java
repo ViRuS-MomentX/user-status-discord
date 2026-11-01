@@ -1896,6 +1896,62 @@ final class DevicePage extends Ui.Card {
         return box;
     }
 
+    private JComponent findingRow(LightingCheck.Finding finding) {
+        var text = new javax.swing.JTextArea(finding.text());
+        text.setLineWrap(true);
+        text.setWrapStyleWord(true);
+        text.setEditable(false);
+        text.setOpaque(false);
+        text.setBorder(null);
+        text.setFont(Theme.ui.deriveFont(13f));
+        text.setForeground(Theme.WARN);
+
+        var row = Ui.transparent(new BorderLayout(10, 0));
+        row.setOpaque(true);
+        row.setBackground(new Color(0x26, 0x1D, 0x0E));
+        row.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createEmptyBorder(4, 0, 4, 0),
+                BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(Theme.alpha(Theme.WARN, 100)),
+                        BorderFactory.createEmptyBorder(8, 12, 8, 12))));
+        row.setAlignmentX(LEFT_ALIGNMENT);
+        row.add(text, BorderLayout.CENTER);
+
+        if (!finding.action().isEmpty()) {
+            var fix = Ui.button(finding.action().equals("admin") ? "Перезапустить от администратора" : "Закрыть SignalRGB");
+            fix.addActionListener(e -> {
+                if (finding.action().equals("admin")) {
+                    worker.submit(() -> {
+                        try {
+                            // Закрыть обычный OpenRGB, чтобы поднять его же с правами администратора
+                            new ProcessBuilder("taskkill", "/IM", "OpenRGB.exe", "/F").start().waitFor();
+                        } catch (Exception ignored) {
+                            // не было запущен — тоже хорошо
+                        }
+
+                        SwingUtilities.invokeLater(this::launchOpenRgb);
+                    });
+                } else {
+                    worker.submit(() -> {
+                        try {
+                            new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                                    "Get-Process | Where-Object { $_.ProcessName -like 'SignalRgb*' } | Stop-Process -Force")
+                                    .start().waitFor(15, java.util.concurrent.TimeUnit.SECONDS);
+                        } catch (Exception ignored) {
+                            // не закрылся — пусть закроет сам
+                        }
+
+                        SwingUtilities.invokeLater(this::connectRgb);
+                    });
+                }
+            });
+            var box = Ui.transparent(new BorderLayout());
+            box.add(fix, BorderLayout.NORTH);
+            row.add(box, BorderLayout.EAST);
+        }
+
+        return row;
+    }
+
     /** Подвинуть устройство на холсте левее или правее. */
     private JComponent moveButton(OpenRgb.Device device, List<OpenRgb.Device> found, int step) {
         var button = Ui.ghost(step < 0 ? "Левее" : "Правее");
@@ -2110,6 +2166,11 @@ final class DevicePage extends Ui.Card {
         rgbStatus.setText(found.isEmpty() ? "OpenRGB подключён, но устройств не нашёл."
                 : "OpenRGB подключён. Устройств: " + found.size() + ".");
         rgbDevices.removeAll();
+
+        // Что не так — сверху, до списка: как предупреждения у устройств в iCUE
+        for (var finding : LightingCheck.analyze(found, settings.zoneSizes, LightProfiles.running(), openRgbEngine())) {
+            rgbDevices.add(findingRow(finding));
+        }
 
         for (var device : found) {
             var row = Ui.transparent(new BorderLayout(10, 0));

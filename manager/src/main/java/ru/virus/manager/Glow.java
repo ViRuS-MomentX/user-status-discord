@@ -208,6 +208,8 @@ final class Glow {
                 var color = GpuSensor.color(degrees);
                 yield degrees >= 85 ? scale(color, 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(t * 6))) : color;
             }
+            // Градиент: неподвижный переход a → b вдоль устройства, как Gradient в Aura и SignalRGB
+            case 19 -> mix(a, b, x);
             default -> a;
         };
     }

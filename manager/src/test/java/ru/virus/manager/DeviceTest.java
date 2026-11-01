@@ -867,4 +867,13 @@ class DeviceTest {
         preview.peek(-1);
         assertEquals(0, preview.shown());
     }
+
+    @Test
+    void gradientRunsFromFirstColorToSecond() {
+        var a = new java.awt.Color(255, 0, 0);
+        var b = new java.awt.Color(0, 0, 255);
+        assertEquals(a, Glow.pixel(19, 0, 0.0, 0, a, b, 0));
+        assertEquals(b, Glow.pixel(19, 5, 1.0, 0, a, b, 0));
+        assertEquals(Glow.pixel(19, 0, 0.5, 0, a, b, 0), Glow.pixel(19, 9, 0.5, 0, a, b, 0), "градиент неподвижен");
+    }
 }

@@ -158,7 +158,17 @@ final class PluginWatch {
     }
 
     /** Один обход: есть ли новая сборка и дописана ли она. */
+    /** Свой замок: следящий поток и ручная проверка не должны вдвоём поставить одну сборку. */
+    private final Object checking = new Object();
+
     void check() throws IOException, InterruptedException {
+        // Не общий с start/stop: замена плагина идёт минутами, окно не должно ждать
+        synchronized (checking) {
+            checkLocked();
+        }
+    }
+
+    private void checkLocked() throws IOException, InterruptedException {
         var jar = chosen();
 
         if (jar == null) {

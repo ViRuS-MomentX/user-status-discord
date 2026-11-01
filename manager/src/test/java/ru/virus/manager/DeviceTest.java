@@ -696,4 +696,20 @@ class DeviceTest {
         assertEquals(0.5, swapped.get(0).getFirst().x(), 1e-9, "порядок хозяина: вентилятор правее");
         assertEquals(0.0, swapped.get(1).getFirst().x(), 1e-9);
     }
+
+    @Test
+    void newEffectsMove() {
+        var line = new java.util.ArrayList<OpenRgb.Place>();
+        for (var i = 0; i < 40; i++) {
+            line.add(new OpenRgb.Place(i / 40.0, 0.5, false));
+        }
+
+        for (var mode : List.of(14, 15, 16, 17)) {
+            var a = Glow.frame(mode, 1.0, line, new Color(0x39FF8A), Color.BLUE, 0, 100, true, 0);
+            var b = Glow.frame(mode, 1.9, line, new Color(0x39FF8A), Color.BLUE, 0, 100, true, 0);
+            assertFalse(java.util.Arrays.equals(a, b), "режим " + mode + " движется");
+        }
+
+        assertEquals(new Color(0, 255, 0), Glow.shiftHue(Color.RED, 120));
+    }
 }

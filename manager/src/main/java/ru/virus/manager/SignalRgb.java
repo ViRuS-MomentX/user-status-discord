@@ -59,7 +59,11 @@ final class SignalRgb {
             new Mode(10, "Нагрузка ЦП", false, false),
             new Mode(11, "Звёзды", true, true),
             new Mode(12, "Экран", false, false),
-            new Mode(13, "Звук", true, true));
+            new Mode(13, "Звук", true, true),
+            new Mode(14, "Комета", true, false),
+            new Mode(15, "Сканер", true, false),
+            new Mode(16, "Театр", true, true),
+            new Mode(17, "Конфетти", true, false));
 
     private final HttpClient http = HttpClient.newBuilder()
             .proxy(HttpClient.Builder.NO_PROXY)

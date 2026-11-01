@@ -2,7 +2,7 @@
 	<title>VIRUS</title>
 	<meta description="Режимы подсветки V.I.R.U.S.: режим, цвета и скорость меняются из приложения V.I.R.U.S. без открытия SignalRGB." />
 	<meta publisher="V.I.R.U.S." />
-	<meta property="mode" label="Режим (0-13)" type="number" min="0" max="13" default="3">
+	<meta property="mode" label="Режим (0-17)" type="number" min="0" max="17" default="3">
 	<meta property="speed" label="Скорость" type="number" min="1" max="100" default="50">
 	<meta property="color" label="Цвет" type="color" default="#39ff8a" min="0" max="360" />
 	<meta property="color2" label="Второй цвет" type="color" default="#8a2be2" min="0" max="360" />
@@ -180,6 +180,40 @@
 				var rw = half * Math.max(0, Math.min(1, Number(s.right) || 0));
 				for (var px = 0; px < lw; px += 4) { ctx.fillStyle = css(mix(a, b, px / half)); ctx.fillRect(px, 0, 4, H); }
 				for (var qx = 0; qx < rw; qx += 4) { ctx.fillStyle = css(mix(a, b, qx / half)); ctx.fillRect(W - qx - 4, 0, 4, H); }
+				break;
+			case 14:
+				// Комета
+				for (var cx = 0; cx < W; cx += 4) {
+					var behind = ((t * 0.5 - cx / W) % 1 + 1) % 1;
+					ctx.fillStyle = behind < 0.02 ? css(mix(a, [255, 255, 255], 0.4)) : css(a, Math.pow(Math.max(0, 1 - behind * 3), 2));
+					ctx.fillRect(cx, 0, 4, H);
+				}
+				break;
+			case 15:
+				// Сканер
+				var headX = 0.5 - 0.5 * Math.cos(t * 1.6);
+				for (var sx = 0; sx < W; sx += 4) {
+					ctx.fillStyle = css(a, Math.max(0, 1 - Math.abs(sx / W - headX) * 8));
+					ctx.fillRect(sx, 0, 4, H);
+				}
+				break;
+			case 16:
+				// Театр
+				var stepT = Math.floor(t * 6);
+				for (var tx = 0; tx < W; tx += 8) {
+					ctx.fillStyle = ((tx / 8 + stepT) % 3 == 0) ? css(a) : css(b, 0.15);
+					ctx.fillRect(tx, 0, 8, H);
+				}
+				break;
+			case 17:
+				// Конфетти
+				fill("#000");
+				for (var k = 0; k < 40; k++) {
+					var ph = ((t * 0.7 + k * 0.173) % 1);
+					var fl = Math.pow(Math.max(0, 1 - ph * 4), 2);
+					ctx.fillStyle = css(a, fl);
+					ctx.fillRect((k * 97) % W, (k * 53) % H, 14, 14);
+				}
 				break;
 			default:
 				fill(css(a));

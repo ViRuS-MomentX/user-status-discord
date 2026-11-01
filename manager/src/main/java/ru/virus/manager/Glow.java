@@ -154,8 +154,38 @@ final class Glow {
                 var k = Math.pow(Math.max(0, Math.sin(hash(i) * 6.28 + t * (1.5 + hash(i + 9)))), 4);
                 yield mix(scale(b, 0.12), a, k);
             }
+            case 14 -> {
+                // Комета: голова бежит по кругу, хвост затухает
+                var behind = fract(t * 0.5 - x);
+                yield behind < 0.02 ? mix(a, Color.WHITE, 0.4) : scale(a, Math.pow(Math.max(0, 1 - behind * 3), 2));
+            }
+            case 15 -> {
+                // Сканер (Larson): огонёк ходит туда-обратно, с мягким шлейфом
+                var head = 0.5 - 0.5 * Math.cos(t * 1.6);
+                var distance = Math.abs(x - head);
+                yield scale(a, Math.max(0, 1 - distance * 8));
+            }
+            case 16 -> {
+                // Театр: каждый третий горит, огни бегут
+                var step = (int) Math.floor(t * 6);
+                yield (i + step) % 3 == 0 ? a : scale(b, 0.15);
+            }
+            case 17 -> {
+                // Конфетти: вспышки оттенков вокруг выбранного цвета, гаснут сами
+                var phase = fract(t * 0.7 + hash(i) * 7);
+                var flash = Math.pow(Math.max(0, 1 - phase * 4), 2);
+                var shifted = shiftHue(a, (hash(i * 31 + (int) Math.floor(t * 0.7 + hash(i) * 7)) - 0.5) * 120);
+                yield scale(shifted, flash);
+            }
             default -> a;
         };
+    }
+
+    /** Тот же цвет с оттенком, сдвинутым на {@code degrees}. */
+    static Color shiftHue(Color color, double degrees) {
+        var hsb = Color.RGBtoHSB(color.getRed(), color.getGreen(), color.getBlue(), null);
+        var hue = (float) ((hsb[0] + degrees / 360 + 1) % 1);
+        return Color.getHSBColor(hue, hsb[1], hsb[2]);
     }
 
     static Color hue(double degrees) {

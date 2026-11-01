@@ -46,6 +46,15 @@ final class RgbAnimator {
     /** Смена режима или цвета — плавным переходом, как в iCUE и SignalRGB, а не скачком. */
     static final long FADE_MS = 400;
 
+    /**
+     * Единый холст, как у SignalRGB: устройства стоят на общей полосе по
+     * порядку, и эффект перетекает с одного на другое, а не повторяется в
+     * каждом заново.
+     */
+    volatile boolean canvas;
+    /** Порядок устройств на холсте: имена; кого нет — в конце, как их отдал OpenRGB. */
+    volatile List<String> order = List.of();
+
     /** Свой режим у устройства: имя → номер режима. Нет в списке — общий. */
     volatile java.util.Map<String, Integer> modes = java.util.Map.of();
 
@@ -156,6 +165,40 @@ final class RgbAnimator {
         return result;
     }
 
+    /**
+     * Места светодиодов: на едином холсте каждое устройство занимает свой
+     * отрезок по ширине (по порядку), иначе — весь холст целиком.
+     */
+    static List<List<OpenRgb.Place>> canvas(List<OpenRgb.Device> devices, boolean shared, List<String> order) {
+        var result = new java.util.ArrayList<List<OpenRgb.Place>>();
+
+        if (!shared || devices.size() < 2) {
+            devices.forEach(device -> result.add(device.places()));
+            return result;
+        }
+
+        var sorted = new java.util.ArrayList<>(devices);
+        sorted.sort(java.util.Comparator.comparingInt(device -> {
+            var at = order.indexOf(device.name());
+            return at < 0 ? order.size() + devices.indexOf(device) : at;
+        }));
+
+        for (var device : devices) {
+            var slot = sorted.indexOf(device);
+            var start = (double) slot / devices.size();
+            var width = 1.0 / devices.size();
+            var moved = new java.util.ArrayList<OpenRgb.Place>();
+
+            for (var place : device.places()) {
+                moved.add(new OpenRgb.Place(start + place.x() * width, place.y(), place.grid()));
+            }
+
+            result.add(moved);
+        }
+
+        return result;
+    }
+
     private int level(OpenRgb.Device device) {
         return Math.max(0, Math.min(100, levels.getOrDefault(device.name(), 100)));
     }
@@ -188,7 +231,7 @@ final class RgbAnimator {
         var start = System.nanoTime();
         var time = 0.0;
         var last = start;
-        var places = animated.stream().map(OpenRgb.Device::places).toList();
+        var places = canvas(animated, canvas, order);
         var sent = new Color[animated.size()][];
         var sentAt = new long[animated.size()];
         var stillSent = new Color[still.size()];

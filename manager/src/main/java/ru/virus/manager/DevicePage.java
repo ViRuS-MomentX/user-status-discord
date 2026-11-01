@@ -170,6 +170,8 @@ final class DevicePage extends Ui.Card {
         animator.zoneSizes = Map.copyOf(settings.zoneSizes);
         animator.levels = Map.copyOf(settings.deviceLevels);
         animator.modes = Map.copyOf(settings.deviceModes);
+        animator.canvas = settings.canvas;
+        animator.order = List.copyOf(settings.canvasOrder);
         // OpenRGB закрыли или он ещё не стартовал после перезагрузки — поднимаем его задачей, без окна UAC
         animator.whenMissing = () -> {
             if (settings.openRgbTask) {
@@ -699,6 +701,23 @@ final class DevicePage extends Ui.Card {
         stack.add(left(colorCorrection()));
         stack.add(Box.createVerticalStrut(10));
         stack.add(left(scheduleRow()));
+        stack.add(Box.createVerticalStrut(10));
+        var canvasSwitch = new Ui.Switch(settings.canvas);
+        canvasSwitch.onChange(on -> {
+            settings.canvas = on;
+            settings.save();
+            animator.canvas = on;
+            restartAnimator();
+
+            if (!devices.isEmpty()) {
+                showDevices(devices);
+            }
+        });
+        var canvasRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        canvasRow.add(canvasSwitch);
+        canvasRow.add(Ui.muted("единый холст: эффект перетекает с устройства на устройство (порядок — «Левее/Правее» "
+                + "в списке устройств)", 13f));
+        stack.add(left(canvasRow));
         signalOnly.add(Box.createVerticalStrut(16));
         signalOnly.add(left(effectsHead));
         signalOnly.add(Box.createVerticalStrut(6));
@@ -1877,6 +1896,39 @@ final class DevicePage extends Ui.Card {
         return box;
     }
 
+    /** Подвинуть устройство на холсте левее или правее. */
+    private JComponent moveButton(OpenRgb.Device device, List<OpenRgb.Device> found, int step) {
+        var button = Ui.ghost(step < 0 ? "Левее" : "Правее");
+        button.addActionListener(e -> {
+            // Порядок — по сохранённому, недостающие устройства в конец, как их отдал OpenRGB
+            var order = new ArrayList<>(settings.canvasOrder);
+            found.forEach(other -> {
+                if (!order.contains(other.name())) {
+                    order.add(other.name());
+                }
+            });
+            var at = order.indexOf(device.name());
+            var to = Math.max(0, Math.min(order.size() - 1, at + step));
+            order.remove(at);
+            order.add(to, device.name());
+            settings.canvasOrder.clear();
+            settings.canvasOrder.addAll(order);
+            settings.save();
+            animator.order = List.copyOf(order);
+            restartAnimator();
+            toast.accept("«" + device.name() + "» — " + (to + 1) + "-е на холсте.");
+        });
+        return button;
+    }
+
+    /** Места светодиодов считаются при подключении — новое расположение вступит после переподключения. */
+    private void restartAnimator() {
+        if (animator.running()) {
+            animator.stop();
+            animator.start(settings.host);
+        }
+    }
+
     /** Свой режим у устройства, как в iCUE и SignalRGB: клавиатура — «Экран», вентиляторы — «Радуга». */
     private JComponent modeControl(OpenRgb.Device device) {
         var names = new java.util.ArrayList<String>();
@@ -2086,6 +2138,13 @@ final class DevicePage extends Ui.Card {
             tune.add(Ui.muted("порядок цветов", 12.5f));
             tune.add(orderControl(device));
             tune.add(testButton(device));
+
+            if (settings.canvas) {
+                tune.add(Box.createHorizontalStrut(8));
+                tune.add(Ui.muted("на холсте", 12.5f));
+                tune.add(moveButton(device, found, -1));
+                tune.add(moveButton(device, found, 1));
+            }
             rgbDevices.add(tune);
 
             for (var zone : device.resizable()) {
@@ -2431,6 +2490,9 @@ final class DevicePage extends Ui.Card {
         int nightLevel = 20;
         /** Простой: через сколько минут без движения мыши гасить; 0 — не гасить. */
         int idleMinutes = 0;
+        /** Единый холст и порядок устройств на нём. */
+        boolean canvas;
+        final List<String> canvasOrder = new ArrayList<>();
         /** Свой режим у устройства: имя → номер режима; нет в списке — общий. */
         final Map<String, Integer> deviceModes = new LinkedHashMap<>();
         /** Порядок цветов по устройствам: «GRB» и т.п. — для лент и вентиляторов на WS2812. */
@@ -2484,6 +2546,12 @@ final class DevicePage extends Ui.Card {
                     settings.nightTo = json.get("nightTo") instanceof Number n ? n.intValue() : 8;
                     settings.nightLevel = json.get("nightLevel") instanceof Number n ? n.intValue() : 20;
                     settings.idleMinutes = json.get("idleMinutes") instanceof Number n ? n.intValue() : 0;
+
+                    settings.canvas = Boolean.TRUE.equals(json.get("canvas"));
+
+                    if (json.get("canvasOrder") instanceof List<?> order) {
+                        order.forEach(name -> settings.canvasOrder.add(String.valueOf(name)));
+                    }
 
                     if (json.get("deviceModes") instanceof Map<?, ?> modes) {
                         modes.forEach((key, value) -> {
@@ -2556,6 +2624,8 @@ final class DevicePage extends Ui.Card {
             json.put("deviceLevels", deviceLevels);
             json.put("colorOrders", colorOrders);
             json.put("deviceModes", deviceModes);
+            json.put("canvas", canvas);
+            json.put("canvasOrder", canvasOrder);
             json.put("nightOn", nightOn);
             json.put("openRgbTask", openRgbTask);
             json.put("nightFrom", nightFrom);

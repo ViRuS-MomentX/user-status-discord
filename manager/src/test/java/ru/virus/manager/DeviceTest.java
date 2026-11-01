@@ -679,4 +679,21 @@ class DeviceTest {
         assertTrue(modes.size() >= 3, "плата без светодиодов переливается вместе со всеми: " + modes.size());
         assertFalse(java.util.Arrays.equals(modes.getFirst().body(), modes.getLast().body()), "цвет меняется");
     }
+
+    @Test
+    void sharedCanvasLaysDevicesSideBySide() {
+        var fan = new OpenRgb.Device(0, "Fan", "охлаждение", 2);
+        var ram = new OpenRgb.Device(1, "RAM", "память", 2);
+
+        var apart = RgbAnimator.canvas(List.of(fan, ram), false, List.of());
+        assertEquals(0.0, apart.get(1).getFirst().x(), 1e-9, "без холста каждое устройство — с начала");
+
+        var shared = RgbAnimator.canvas(List.of(fan, ram), true, List.of());
+        assertEquals(0.0, shared.get(0).getFirst().x(), 1e-9, "вентилятор — первая половина");
+        assertEquals(0.5, shared.get(1).getFirst().x(), 1e-9, "память — вторая половина");
+
+        var swapped = RgbAnimator.canvas(List.of(fan, ram), true, List.of("RAM", "Fan"));
+        assertEquals(0.5, swapped.get(0).getFirst().x(), 1e-9, "порядок хозяина: вентилятор правее");
+        assertEquals(0.0, swapped.get(1).getFirst().x(), 1e-9);
+    }
 }

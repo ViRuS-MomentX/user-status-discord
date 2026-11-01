@@ -101,13 +101,41 @@ final class AudioMeter {
         try {
             var l = Double.parseDouble(parts[0]);
             var r = Double.parseDouble(parts[1]);
-            left = smooth(left, l);
-            right = smooth(right, r);
+            // Общий пик на оба канала: иначе тихий канал «дотягивался» бы до громкого
+            peak = track(peak, Math.max(l, r));
+            left = smooth(left, normalize(l, peak));
+            right = smooth(right, normalize(r, peak));
             return true;
         } catch (NumberFormatException ignored) {
             // строка не про уровни — например, сообщение об ошибке
             return false;
         }
+    }
+
+    /** Тише этого — тишина (шумовой порог, как squelch у WLED). */
+    static final double SQUELCH = 0.008;
+    /** Самая высокая чувствительность: тише этого пика громче не делаем, иначе шипение станет «музыкой». */
+    static final double MIN_PEAK = 0.06;
+
+    /** Недавний пик громкости — опора для подстройки чувствительности. */
+    private static volatile double peak = MIN_PEAK;
+
+    /**
+     * Пик за последние секунды: подскакивает сразу, забывается медленно
+     * (за ~10 секунд) — как AGC в звукореактивной WLED. Так подсветка
+     * одинаково живая и на тихой громкости Windows, и на громкой.
+     */
+    static double track(double peak, double level) {
+        return Math.max(MIN_PEAK, Math.max(level, peak * 0.995));
+    }
+
+    /** Уровень относительно недавнего пика, 0–1. */
+    static double normalize(double level, double peak) {
+        if (level < SQUELCH) {
+            return 0;
+        }
+
+        return Math.min(1, level / Math.max(MIN_PEAK, peak));
     }
 
     /** Атака мгновенная, спад плавный: удар барабана видно, а свет не дёргается. */

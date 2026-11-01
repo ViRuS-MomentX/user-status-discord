@@ -966,4 +966,22 @@ class DeviceTest {
 
         assertEquals(0.8, steady, 0.01);
     }
+
+    @Test
+    void soundAdaptsToVolume() {
+        // Тихо играющая музыка: пик 0.15 — удар всё равно доходит до верха
+        var peak = AudioMeter.MIN_PEAK;
+
+        for (var i = 0; i < 50; i++) {
+            peak = AudioMeter.track(peak, i % 10 == 0 ? 0.15 : 0.05);
+        }
+
+        assertEquals(1.0, AudioMeter.normalize(0.15, peak), 0.05, "удар на тихой громкости — во всю высоту");
+        assertTrue(AudioMeter.normalize(0.05, peak) < 0.5, "между ударами — пониже");
+        assertEquals(0, AudioMeter.normalize(0.004, peak), "шум в тишине — темно");
+        assertTrue(AudioMeter.normalize(0.03, AudioMeter.MIN_PEAK) < 0.6, "тихий шорох не раздувается до максимума");
+
+        // Пик забывается медленно, а не сразу
+        assertTrue(AudioMeter.track(0.8, 0) > 0.79);
+    }
 }

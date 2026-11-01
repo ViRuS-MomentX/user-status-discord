@@ -563,6 +563,7 @@ final class DevicePage extends Ui.Card {
         powerRow.add(arrows);
 
         // Режимы V.I.R.U.S.
+        preview = new GlowPreview(glow);
         var group = new ButtonGroup();
         modeTiles.setLayout(new BoxLayout(modeTiles, BoxLayout.Y_AXIS));
 
@@ -583,6 +584,17 @@ final class DevicePage extends Ui.Card {
                         + SignalRgb.describe(id) + "</body></html>");
                 tile.setSelected(mode.id() == glow.mode);
                 tile.addActionListener(e -> chooseMode(mode));
+                tile.addMouseListener(new MouseAdapter() {
+                    @Override
+                    public void mouseEntered(MouseEvent e) {
+                        preview.peek(mode.id());
+                    }
+
+                    @Override
+                    public void mouseExited(MouseEvent e) {
+                        preview.peek(-1);
+                    }
+                });
                 group.add(tile);
                 tileById.put(id, tile);
                 grid.add(tile);
@@ -780,7 +792,7 @@ final class DevicePage extends Ui.Card {
         stack.add(Box.createVerticalStrut(6));
         stack.add(left(modeTiles));
         stack.add(Box.createVerticalStrut(10));
-        stack.add(left(new GlowPreview(glow)));
+        stack.add(left(preview));
         stack.add(Box.createVerticalStrut(10));
         stack.add(left(profileRow));
         showProfiles();
@@ -1055,6 +1067,9 @@ final class DevicePage extends Ui.Card {
 
         glow.dim = dim;
     }
+
+    /** Живой предпросмотр режима; при наведении на плитку показывает её режим. */
+    private GlowPreview preview;
 
     /** Кнопка таймера сна на странице; подпись — когда погаснет. */
     private final JButton sleepButton = Ui.button("Таймер сна");

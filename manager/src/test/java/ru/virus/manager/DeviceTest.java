@@ -854,4 +854,17 @@ class DeviceTest {
         assertTrue(live.json().contains("\"flash\":\"#ff0000\""), live.json());
         assertTrue(live.json().contains("\"flashLeft\":"), live.json());
     }
+
+    @Test
+    void previewPeeksAtHoveredMode() {
+        var live = new SignalRgb.Live(() -> 0);
+        live.mode = 0;
+        var preview = new GlowPreview(live);
+        assertEquals(0, preview.shown());
+        preview.peek(6);
+        assertEquals(6, preview.shown(), "навели на «Огонь» — видно огонь");
+        assertEquals(0, live.mode, "но на железо ничего не ушло");
+        preview.peek(-1);
+        assertEquals(0, preview.shown());
+    }
 }

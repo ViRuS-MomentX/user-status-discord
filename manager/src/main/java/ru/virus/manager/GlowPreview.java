@@ -29,6 +29,8 @@ final class GlowPreview extends JComponent {
     private final List<OpenRgb.Place> keys = new ArrayList<>();
     private final Timer timer;
     private double time;
+    /** Режим под мышью — показываем его, пока наведена плитка; −1 — выбранный. */
+    private volatile int peek = -1;
     private long last = System.nanoTime();
 
     GlowPreview(SignalRgb.Live settings) {
@@ -58,6 +60,20 @@ final class GlowPreview extends JComponent {
         });
     }
 
+    /**
+     * Показать режим, не включая его на железе, — как предпросмотр эффекта при
+     * наведении в библиотеке SignalRGB; −1 — вернуть выбранный.
+     */
+    void peek(int mode) {
+        peek = mode;
+        repaint();
+    }
+
+    /** Какой режим сейчас нарисован. */
+    int shown() {
+        return peek >= 0 ? peek : settings.mode;
+    }
+
     @Override
     public void addNotify() {
         super.addNotify();
@@ -71,8 +87,9 @@ final class GlowPreview extends JComponent {
     }
 
     private Color[] frame(List<OpenRgb.Place> places, int seed) {
-        var shaped = Glow.positional(settings.mode) ? places : Glow.shape(places, settings.reverse, settings.scale);
-        return RgbAnimator.overlay(Glow.frame(settings.mode, time, shaped, settings.color, settings.color2, settings.cpu(),
+        var mode = shown();
+        var shaped = Glow.positional(mode) ? places : Glow.shape(places, settings.reverse, settings.scale);
+        return RgbAnimator.overlay(Glow.frame(mode, time, shaped, settings.color, settings.color2, settings.cpu(),
                 Math.max(25, settings.brightness), settings.on, seed), settings.flashColor,
                 settings.flashLevel(System.currentTimeMillis()));
     }

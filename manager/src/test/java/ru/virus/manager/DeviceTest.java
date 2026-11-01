@@ -631,6 +631,12 @@ class DeviceTest {
         assertEquals(0, DevicePage.dimFor(settings, 12, 11 * 60_000L), "хозяина нет 11 минут — темно");
         assertEquals(100, DevicePage.dimFor(settings, 12, 60_000L));
 
+        // Таймер сна: от полной до нуля ровно за отведённое время
+        assertEquals(100, DevicePage.sleepLevel(0, 60_000, 0));
+        assertEquals(50, DevicePage.sleepLevel(0, 60_000, 30_000));
+        assertEquals(1, DevicePage.sleepLevel(0, 60_000, 59_999), "до конца ещё не гаснет");
+        assertEquals(0, DevicePage.sleepLevel(0, 60_000, 60_000));
+
         var live = new SignalRgb.Live(() -> 0);
         live.brightness = 80;
         live.dim = 50;

@@ -1008,7 +1008,55 @@ final class DevicePage extends Ui.Card {
             }
         }
 
-        glow.dim = dimFor(settings, java.time.LocalTime.now().getHour(), idle);
+        var dim = dimFor(settings, java.time.LocalTime.now().getHour(), idle);
+
+        if (sleepUntil > 0) {
+            var left = sleepLevel(sleepFrom, sleepUntil, System.currentTimeMillis());
+
+            if (left == 0) {
+                // Таймер вышел — гасим совсем, как ночник WLED; утром включишь из трея
+                sleepFrom = sleepUntil = 0;
+                setLighting(false);
+                fillTrayMenu();
+            } else {
+                dim = dim * left / 100;
+            }
+        }
+
+        glow.dim = dim;
+    }
+
+    /** Таймер сна: когда запущен и когда подсветка погаснет; 0 — не запущен. */
+    private long sleepFrom;
+    private long sleepUntil;
+
+    /**
+     * Яркость таймера сна, %: от 100 в начале ровно до 0 к концу — как
+     * Nightlight у WLED, который гасит ленту плавно, а не щелчком.
+     */
+    static int sleepLevel(long from, long until, long now) {
+        if (until <= from || now >= until) {
+            return 0;
+        }
+
+        return (int) Math.ceil(100.0 * (until - Math.max(now, from)) / (until - from));
+    }
+
+    /** Запустить таймер сна на столько минут; 0 — отменить. */
+    void sleepIn(int minutes) {
+        if (minutes <= 0) {
+            sleepFrom = sleepUntil = 0;
+        } else {
+            if (!glow.on) {
+                setLighting(true);
+            }
+
+            sleepFrom = System.currentTimeMillis();
+            sleepUntil = sleepFrom + minutes * 60_000L;
+        }
+
+        updateDim();
+        fillTrayMenu();
     }
 
     /** Множитель яркости, %: ночью — ночная яркость, в простое — 0. */
@@ -1086,6 +1134,24 @@ final class DevicePage extends Ui.Card {
         var power = new java.awt.MenuItem(glow.on ? "Выключить" : "Включить");
         power.addActionListener(e -> SwingUtilities.invokeLater(() -> setLighting(!glow.on)));
         trayMenu.add(power);
+
+        var sleep = new java.awt.Menu(sleepUntil > 0 ? "Таймер сна: погаснет в "
+                + java.time.LocalTime.ofInstant(java.time.Instant.ofEpochMilli(sleepUntil), java.time.ZoneId.systemDefault())
+                .withSecond(0).withNano(0) : "Таймер сна");
+
+        for (var minutes : List.of(15, 30, 60, 90)) {
+            var item = new java.awt.MenuItem("Погасить плавно за " + minutes + " мин");
+            item.addActionListener(e -> SwingUtilities.invokeLater(() -> sleepIn(minutes)));
+            sleep.add(item);
+        }
+
+        if (sleepUntil > 0) {
+            var cancel = new java.awt.MenuItem("Отменить");
+            cancel.addActionListener(e -> SwingUtilities.invokeLater(() -> sleepIn(0)));
+            sleep.add(cancel);
+        }
+
+        trayMenu.add(sleep);
 
         if (!settings.profiles.isEmpty()) {
             trayMenu.addSeparator();

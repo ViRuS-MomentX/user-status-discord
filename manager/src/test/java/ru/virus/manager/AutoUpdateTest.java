@@ -61,7 +61,8 @@ class AutoUpdateTest {
         assertNull(AutoUpdate.parse(java.util.Map.of("tag_name", "build-3", "draft", true)));
         assertNull(AutoUpdate.parse(java.util.Map.of("tag_name", "v1.0", "assets", List.of())));
         assertNull(AutoUpdate.parse(java.util.Map.of("tag_name", "build-3", "assets", List.of())), "без архива");
-        assertEquals(-1, AutoUpdate.current(), "собрано не на GitHub — номера нет");
+        // Локально номера нет (−1), на GitHub — номер запуска сборки
+        assertTrue(AutoUpdate.current() == -1 || AutoUpdate.current() > 0);
     }
 
     @Test

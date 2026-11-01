@@ -785,6 +785,28 @@ final class DevicePage extends Ui.Card {
         patternRow.add(Ui.muted("масштаб", 13f));
         patternRow.add(scale);
 
+        // Для «Экрана» — какой монитор повторять; выбор виден, только когда мониторов больше одного
+        var monitors = ScreenSampler.monitorNames();
+        ScreenSampler.monitor = settings.screenMonitor;
+
+        if (monitors.size() > 1) {
+            var choices = new java.util.ArrayList<String>();
+            choices.add("основной монитор");
+            choices.addAll(monitors);
+            var monitor = new javax.swing.JComboBox<>(choices.toArray(String[]::new));
+            monitor.setSelectedIndex(settings.screenMonitor >= 0 && settings.screenMonitor < monitors.size()
+                    ? settings.screenMonitor + 1 : 0);
+            monitor.setToolTipText("Какой монитор повторяет режим «Экран»");
+            monitor.addActionListener(e -> {
+                settings.screenMonitor = monitor.getSelectedIndex() - 1;
+                ScreenSampler.monitor = settings.screenMonitor;
+                settings.save();
+            });
+            patternRow.add(Box.createHorizontalStrut(12));
+            patternRow.add(Ui.muted("«Экран»:", 13f));
+            patternRow.add(monitor);
+        }
+
         // Все эффекты SignalRGB
         effectTiles.setLayout(new GridLayout(0, 4, 8, 8));
         effectTiles.add(Ui.muted("Нажми «Подключиться»", 12.5f));
@@ -3096,6 +3118,7 @@ final class DevicePage extends Ui.Card {
         int idleMinutes = 0;
         boolean offWhenLocked = true;
         String exitLight = "ровный цвет";
+        int screenMonitor = -1;
         /** Единый холст и порядок устройств на нём. */
         boolean canvas;
         final List<String> canvasOrder = new ArrayList<>();
@@ -3157,6 +3180,7 @@ final class DevicePage extends Ui.Card {
                     settings.nightLevel = json.get("nightLevel") instanceof Number n ? n.intValue() : 20;
                     settings.idleMinutes = json.get("idleMinutes") instanceof Number n ? n.intValue() : 0;
                     settings.offWhenLocked = !Boolean.FALSE.equals(json.get("offWhenLocked"));
+                    settings.screenMonitor = json.get("screenMonitor") instanceof Number n ? n.intValue() : -1;
                     settings.exitLight = json.get("exitLight") instanceof String exit && EXIT_CHOICES.contains(exit)
                             ? exit : "ровный цвет";
 
@@ -3251,6 +3275,7 @@ final class DevicePage extends Ui.Card {
             json.put("idleMinutes", idleMinutes);
             json.put("offWhenLocked", offWhenLocked);
             json.put("exitLight", exitLight);
+            json.put("screenMonitor", screenMonitor);
             json.put("profiles", profiles.stream().map(LightProfiles.Profile::toJson).toList());
             json.put("appRules", appRules);
             json.put("engine", engine);

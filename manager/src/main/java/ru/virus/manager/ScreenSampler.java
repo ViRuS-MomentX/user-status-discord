@@ -32,6 +32,8 @@ final class ScreenSampler {
     private static volatile Color[] previousColumns;
     private static volatile long takenAt;
     private static Thread thread;
+    /** Какой монитор повторять: −1 — основной, иначе номер в списке Windows. */
+    static volatile int monitor = -1;
 
     private ScreenSampler() {
     }
@@ -102,10 +104,10 @@ final class ScreenSampler {
             return;
         }
 
-        var screen = new Rectangle(java.awt.Toolkit.getDefaultToolkit().getScreenSize());
-
         while (System.currentTimeMillis() - wanted < IDLE_MS) {
             var started = System.currentTimeMillis();
+            // Перечитываем каждый раз: монитор могли выбрать другой или отключить
+            var screen = bounds(monitor);
 
             try {
                 take(robot.createScreenCapture(screen));
@@ -119,6 +121,40 @@ final class ScreenSampler {
                 return;
             }
         }
+    }
+
+    /** Подписи мониторов для выбора: «Монитор 2 — 2560×1440». */
+    static java.util.List<String> monitorNames() {
+        var names = new java.util.ArrayList<String>();
+
+        try {
+            var devices = GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices();
+
+            for (var i = 0; i < devices.length; i++) {
+                var mode = devices[i].getDisplayMode();
+                names.add("Монитор " + (i + 1) + " — " + mode.getWidth() + "×" + mode.getHeight());
+            }
+        } catch (java.awt.HeadlessException e) {
+            // без экрана — выбирать нечего
+        }
+
+        return names;
+    }
+
+    /**
+     * Где на рабочем столе выбранный монитор. Как выбор дисплея в Hyperion и
+     * Screen Ambience у SignalRGB: игра на втором мониторе — повторяем его.
+     * Номера нет (монитор отключили) — основной.
+     */
+    static Rectangle bounds(int index) {
+        var environment = GraphicsEnvironment.getLocalGraphicsEnvironment();
+        var devices = environment.getScreenDevices();
+
+        if (index >= 0 && index < devices.length) {
+            return devices[index].getDefaultConfiguration().getBounds();
+        }
+
+        return environment.getDefaultScreenDevice().getDefaultConfiguration().getBounds();
     }
 
     /** Разложить снимок на сетку средних цветов. */

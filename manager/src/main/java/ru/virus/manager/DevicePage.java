@@ -906,6 +906,13 @@ final class DevicePage extends Ui.Card {
         stack.add(left(preview));
         stack.add(Box.createVerticalStrut(10));
         stack.add(left(profileRow));
+        // Автосмена — своей строкой: с несколькими профилями в одну не помещается
+        var rotateRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        rotateRow.add(Ui.muted("Менять режим сам каждые", 13f));
+        rotateRow.add(rotateSpinner);
+        rotateRow.add(Ui.muted("мин (0 — нет), по кругу спокойные и динамичные", 13f));
+        stack.add(Box.createVerticalStrut(6));
+        stack.add(left(rotateRow));
         showProfiles();
         stack.add(Box.createVerticalStrut(10));
         stack.add(left(colorRow));
@@ -1440,7 +1447,13 @@ final class DevicePage extends Ui.Card {
 
         for (var profile : settings.profiles) {
             var chip = Ui.button(profile.name() + (profile.name().equals(autoProfile) ? " ●" : ""));
-            chip.setToolTipText("Включить. Правой кнопкой — удалить");
+            // Миниатюра, как у профилей iCUE: цвета профиля видны, не включая его
+            var mode = SignalRgb.mode(profile.mode());
+            chip.setIcon(mode.usesColor() ? new PaletteIcon(profile.color(), mode.usesSecond() ? profile.color2()
+                    : profile.color()) : new PaletteIcon(Glow.hue(0), Glow.hue(240)));
+            chip.setToolTipText("<html><b>" + ConfigPage.escape(profile.name()) + "</b>: " + mode.name()
+                    + (profile.brightness() >= 0 ? ", яркость " + profile.brightness() + "%" : "")
+                    + "<br>Нажми — включить. Правой кнопкой — удалить</html>");
             chip.addActionListener(e -> {
                 autoProfile = null;
                 beforeAuto = null;
@@ -1482,10 +1495,6 @@ final class DevicePage extends Ui.Card {
         rules.setToolTipText("Запустил игру — подсветка переключилась сама");
         rules.addActionListener(e -> editRules());
         profileRow.add(rules);
-        profileRow.add(Box.createHorizontalStrut(12));
-        profileRow.add(Ui.muted("менять режим каждые", 13f));
-        profileRow.add(rotateSpinner);
-        profileRow.add(Ui.muted("мин (0 — нет)", 13f));
         profileRow.revalidate();
         profileRow.repaint();
     }

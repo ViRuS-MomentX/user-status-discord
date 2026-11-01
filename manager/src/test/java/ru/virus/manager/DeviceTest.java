@@ -98,11 +98,35 @@ class DeviceTest {
     }
 
     /** Поддельный OpenRGB: два устройства, запоминает, что ему прислали. */
+    /** Сколько устройств «видит» поддельный OpenRGB — в проверке растёт, как при поиске устройств. */
+    final java.util.concurrent.atomic.AtomicInteger fakeCount = new java.util.concurrent.atomic.AtomicInteger(3);
+    /** Сколько раз к нему подключались. */
+    final java.util.concurrent.atomic.AtomicInteger connections = new java.util.concurrent.atomic.AtomicInteger();
+
     List<Packet> fakeOpenRgb() throws IOException {
         var got = new CopyOnWriteArrayList<Packet>();
         rgbServer = new ServerSocket(0);
-        var thread = new Thread(() -> {
-            try (var socket = rgbServer.accept()) {
+        var acceptor = new Thread(() -> {
+            while (!rgbServer.isClosed()) {
+                try {
+                    var client = rgbServer.accept();
+                    connections.incrementAndGet();
+                    var serve = new Thread(() -> serve(client, got));
+                    serve.setDaemon(true);
+                    serve.start();
+                } catch (IOException e) {
+                    return;
+                }
+            }
+        });
+        acceptor.setDaemon(true);
+        acceptor.start();
+        return got;
+    }
+
+    private void serve(java.net.Socket client, List<Packet> got) {
+        {
+            try (var socket = client) {
                 var in = new DataInputStream(socket.getInputStream());
                 var out = socket.getOutputStream();
 
@@ -117,7 +141,8 @@ class DeviceTest {
                     got.add(new Packet(device, id, body));
 
                     byte[] reply = switch (id) {
-                        case OpenRgb.CONTROLLER_COUNT -> ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(3).array();
+                        case OpenRgb.CONTROLLER_COUNT -> ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN)
+                                .putInt(fakeCount.get()).array();
                         case OpenRgb.CONTROLLER_DATA -> device == 0 ? controller("JONSBO CR-1000", 3, 12)
                                 : device == 1 ? controller("Attack Shark X98", 5, 98)
                                 : controller("MSI MYSTIC LIGHT", 0, 0);
@@ -137,10 +162,7 @@ class DeviceTest {
             } catch (IOException ignored) {
                 // клиент ушёл
             }
-        });
-        thread.setDaemon(true);
-        thread.start();
-        return got;
+        }
     }
 
     static byte[] header(int device, int id, int size) {
@@ -469,5 +491,33 @@ class DeviceTest {
         var a = Glow.frame(5, 1.0, places, new Color(0x39FF8A), Color.BLUE, 0, 100, true, 0);
         var b = Glow.frame(5, 1.7, places, new Color(0x39FF8A), Color.BLUE, 0, 100, true, 0);
         assertFalse(java.util.Arrays.equals(a, b));
+    }
+
+    @Test
+    void lateDevicesArePicked() throws Exception {
+        fakeCount.set(2);
+        fakeOpenRgb();
+        var settings = new SignalRgb.Live(() -> 0);
+        var animator = new RgbAnimator(settings, text -> { });
+        animator.port = rgbServer.getLocalPort();
+        animator.recheckMs = 200;
+        animator.start("127.0.0.1");
+
+        try {
+            Thread.sleep(600);
+            assertEquals(1, connections.get(), "пока устройств столько же — одно подключение");
+
+            // OpenRGB нашёл плату позже остальных
+            fakeCount.set(3);
+            var deadline = System.currentTimeMillis() + 3000;
+
+            while (connections.get() < 2 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(50);
+            }
+
+            assertEquals(2, connections.get(), "режим переподключился и взял новое устройство");
+        } finally {
+            animator.stop();
+        }
     }
 }

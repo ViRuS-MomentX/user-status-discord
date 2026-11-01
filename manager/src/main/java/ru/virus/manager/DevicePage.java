@@ -1854,8 +1854,22 @@ final class DevicePage extends Ui.Card {
             settings.save();
         }
 
-        start(Path.of(path), "--server", "--startminimized");
-        rgbStatus.setText("Запускаю OpenRGB… через несколько секунд нажми «Подключиться».");
+        // От администратора: иначе OpenRGB не видит память и часть платы (шина SMBus закрыта)
+        if (SystemInfo.isWindows()) {
+            try {
+                var script = "Start-Process -FilePath '" + path.replace("'", "''") + "' -ArgumentList "
+                        + "'--server','--startminimized' -Verb RunAs";
+                new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+                        "-Command", script).start();
+            } catch (IOException e) {
+                start(Path.of(path), "--server", "--startminimized");
+            }
+        } else {
+            start(Path.of(path), "--server", "--startminimized");
+        }
+
+        rgbStatus.setText("Запускаю OpenRGB от администратора — Windows спросит разрешение. Через несколько секунд "
+                + "нажми «Подключиться».");
         rgbStatus.setForeground(Theme.MUTED);
     }
 

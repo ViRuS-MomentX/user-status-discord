@@ -177,9 +177,14 @@ final class OpenRgb implements AutoCloseable {
         send(0, SET_CLIENT_NAME, (Virus.NAME + "\0").getBytes(StandardCharsets.UTF_8));
     }
 
-    List<Device> devices() throws IOException {
+    /** Сколько устройств видит OpenRGB сейчас: он находит их постепенно, а иные подключают на ходу. */
+    int count() throws IOException {
         send(0, CONTROLLER_COUNT, new byte[0]);
-        var count = le(ByteBuffer.wrap(receive(CONTROLLER_COUNT))).getInt();
+        return le(ByteBuffer.wrap(receive(CONTROLLER_COUNT))).getInt();
+    }
+
+    List<Device> devices() throws IOException {
+        var count = count();
         var devices = new ArrayList<Device>();
 
         for (var i = 0; i < count; i++) {

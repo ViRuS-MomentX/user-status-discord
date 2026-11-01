@@ -32,6 +32,14 @@ final class RgbAnimator {
     static final long SLOW_BUS_MS = 100;
     /** Даже без изменений кадр повторяется раз в столько: некоторые контроллеры сами возвращаются в свой режим. */
     static final long KEEPALIVE_MS = 5000;
+    /**
+     * Как часто спрашивать OpenRGB, не прибавилось ли устройств. Он находит их
+     * не сразу после запуска (память и плату — последними), а режим, подключённый
+     * раньше, так и играл бы на половине.
+     */
+    static final long RECHECK_MS = 10_000;
+    /** То же, но меняется в проверках. */
+    volatile long recheckMs = RECHECK_MS;
 
     /** Порт OpenRGB; в тестах — поддельного. */
     volatile int port = OpenRgb.PORT;
@@ -87,7 +95,12 @@ final class RgbAnimator {
 
                 status.accept("Режим играет на устройствах: " + animated.size()
                         + (still.isEmpty() ? "" : " (ещё " + still.size() + " — только одним цветом)"));
-                loop(rgb, animated, still, me);
+                loop(rgb, animated, still, devices.size(), me);
+
+                // Список устройств поменялся — переподключаемся сразу, без паузы
+                if (thread == me) {
+                    continue;
+                }
             } catch (IOException | RuntimeException e) {
                 status.accept("Жду OpenRGB — запусти его кнопкой справа (с сервером SDK).");
             }
@@ -125,8 +138,10 @@ final class RgbAnimator {
         return !java.util.Arrays.equals(frame, last);
     }
 
-    private void loop(OpenRgb rgb, List<OpenRgb.Device> animated, List<OpenRgb.Device> still, Thread me)
+    /** Играет, пока список устройств у OpenRGB тот же; поменялся — возвращается, чтобы перечитать. */
+    private void loop(OpenRgb rgb, List<OpenRgb.Device> animated, List<OpenRgb.Device> still, int known, Thread me)
             throws IOException {
+        var checked = System.nanoTime() / 1_000_000;
         var start = System.nanoTime();
         var time = 0.0;
         var last = start;
@@ -162,6 +177,15 @@ final class RgbAnimator {
                 if (!color.equals(stillSent[s])) {
                     rgb.paint(device, color);
                     stillSent[s] = color;
+                }
+            }
+
+            if (millis - checked >= recheckMs) {
+                checked = millis;
+
+                if (rgb.count() != known) {
+                    status.accept("OpenRGB нашёл новые устройства — подключаю.");
+                    return;
                 }
             }
 

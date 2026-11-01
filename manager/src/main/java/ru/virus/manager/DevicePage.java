@@ -1224,9 +1224,16 @@ final class DevicePage extends Ui.Card {
 
     /** Множитель яркости, %: ночью — ночная яркость, в простое — 0. */
     static int dimFor(Settings settings, int hour, long idleMillis) {
-        if (idleMillis == Long.MAX_VALUE
-                || settings.idleMinutes > 0 && idleMillis >= settings.idleMinutes * 60_000L) {
+        // Экран заблокирован — гасим совсем; простой — до выбранной яркости
+        if (idleMillis == Long.MAX_VALUE) {
             return 0;
+        }
+
+        if (settings.idleMinutes > 0 && idleMillis >= settings.idleMinutes * 60_000L) {
+            var idle = Math.max(0, Math.min(90, settings.idleLevel));
+            // Ночью в простое — не ярче ночного
+            return settings.nightOn && inHours(hour, settings.nightFrom, settings.nightTo)
+                    ? Math.min(idle, settings.nightLevel) : idle;
         }
 
         if (settings.nightOn && inHours(hour, settings.nightFrom, settings.nightTo)) {
@@ -1248,6 +1255,7 @@ final class DevicePage extends Ui.Card {
         var to = new javax.swing.JSpinner(new javax.swing.SpinnerNumberModel(settings.nightTo, 0, 23, 1));
         var level = new javax.swing.JSpinner(new javax.swing.SpinnerNumberModel(settings.nightLevel, 0, 100, 5));
         var idle = new javax.swing.JSpinner(new javax.swing.SpinnerNumberModel(settings.idleMinutes, 0, 240, 5));
+        var idleLevel = new javax.swing.JSpinner(new javax.swing.SpinnerNumberModel(settings.idleLevel, 0, 90, 5));
 
         Runnable save = () -> {
             settings.nightOn = night.isOn();
@@ -1255,12 +1263,13 @@ final class DevicePage extends Ui.Card {
             settings.nightTo = (Integer) to.getValue();
             settings.nightLevel = (Integer) level.getValue();
             settings.idleMinutes = (Integer) idle.getValue();
+            settings.idleLevel = (Integer) idleLevel.getValue();
             settings.save();
             updateDim();
         };
         night.onChange(on -> save.run());
 
-        for (var spinner : List.of(from, to, level, idle)) {
+        for (var spinner : List.of(from, to, level, idle, idleLevel)) {
             spinner.setPreferredSize(new Dimension(58, spinner.getPreferredSize().height));
             spinner.addChangeListener(e -> save.run());
         }
@@ -1274,10 +1283,13 @@ final class DevicePage extends Ui.Card {
         row.add(Ui.muted("ч — яркость", 13f));
         row.add(level);
         row.add(Ui.muted("%", 13f));
-        row.add(Box.createHorizontalStrut(16));
-        row.add(Ui.muted("гасить, если не трогали компьютер", 13f));
-        row.add(idle);
-        row.add(Ui.muted("мин (0 — не гасить)", 13f));
+        // Простой — своей строкой: как «притушить при бездействии» в iCUE, не обязательно в ноль
+        var idleRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        idleRow.add(Ui.muted("если не трогали компьютер", 13f));
+        idleRow.add(idle);
+        idleRow.add(Ui.muted("мин (0 — никогда), приглушать до", 13f));
+        idleRow.add(idleLevel);
+        idleRow.add(Ui.muted("% (0 — погасить)", 13f));
         var lockedRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 6, 0));
         var lockedSwitch = new Ui.Switch(settings.offWhenLocked);
         lockedSwitch.onChange(on -> {
@@ -1301,8 +1313,11 @@ final class DevicePage extends Ui.Card {
         var rows = Ui.transparent(null);
         rows.setLayout(new BoxLayout(rows, BoxLayout.Y_AXIS));
         row.setAlignmentX(LEFT_ALIGNMENT);
+        idleRow.setAlignmentX(LEFT_ALIGNMENT);
         lockedRow.setAlignmentX(LEFT_ALIGNMENT);
         rows.add(row);
+        rows.add(Box.createVerticalStrut(6));
+        rows.add(idleRow);
         rows.add(Box.createVerticalStrut(6));
         rows.add(lockedRow);
         return rows;
@@ -3116,6 +3131,7 @@ final class DevicePage extends Ui.Card {
         int nightLevel = 20;
         /** Простой: через сколько минут без движения мыши гасить; 0 — не гасить. */
         int idleMinutes = 0;
+        int idleLevel = 0;
         boolean offWhenLocked = true;
         String exitLight = "ровный цвет";
         int screenMonitor = -1;
@@ -3179,6 +3195,7 @@ final class DevicePage extends Ui.Card {
                     settings.nightTo = json.get("nightTo") instanceof Number n ? n.intValue() : 8;
                     settings.nightLevel = json.get("nightLevel") instanceof Number n ? n.intValue() : 20;
                     settings.idleMinutes = json.get("idleMinutes") instanceof Number n ? n.intValue() : 0;
+                    settings.idleLevel = json.get("idleLevel") instanceof Number n ? n.intValue() : 0;
                     settings.offWhenLocked = !Boolean.FALSE.equals(json.get("offWhenLocked"));
                     settings.screenMonitor = json.get("screenMonitor") instanceof Number n ? n.intValue() : -1;
                     settings.exitLight = json.get("exitLight") instanceof String exit && EXIT_CHOICES.contains(exit)
@@ -3273,6 +3290,7 @@ final class DevicePage extends Ui.Card {
             json.put("nightTo", nightTo);
             json.put("nightLevel", nightLevel);
             json.put("idleMinutes", idleMinutes);
+            json.put("idleLevel", idleLevel);
             json.put("offWhenLocked", offWhenLocked);
             json.put("exitLight", exitLight);
             json.put("screenMonitor", screenMonitor);

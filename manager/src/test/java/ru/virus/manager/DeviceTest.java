@@ -991,4 +991,19 @@ class DeviceTest {
         assertFalse(RgbAnimator.woke(2_000_000_000L), "подтормозило — не сон");
         assertTrue(RgbAnimator.woke(60_000_000_000L), "минута без кадров — компьютер спал");
     }
+
+    @Test
+    void idleCanDimInsteadOfOff() {
+        var settings = new DevicePage.Settings();
+        settings.idleMinutes = 10;
+        settings.idleLevel = 30;
+        assertEquals(30, DevicePage.dimFor(settings, 12, 11 * 60_000L), "в простое — притушено, а не темно");
+        assertEquals(0, DevicePage.dimFor(settings, 12, Long.MAX_VALUE), "экран заблокирован — темно");
+
+        settings.nightOn = true;
+        settings.nightFrom = 23;
+        settings.nightTo = 8;
+        settings.nightLevel = 20;
+        assertEquals(20, DevicePage.dimFor(settings, 2, 11 * 60_000L), "ночью в простое — не ярче ночного");
+    }
 }

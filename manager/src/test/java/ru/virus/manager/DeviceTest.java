@@ -897,4 +897,15 @@ class DeviceTest {
             assertFalse(palette.a().equals(palette.b()), palette.name() + " — два разных цвета");
         }
     }
+
+    @Test
+    void screenColorsFlowBetweenSnapshots() {
+        var before = java.awt.Color.BLACK;
+        var now = java.awt.Color.WHITE;
+        assertEquals(before, ScreenSampler.smooth(now, before, 0), "только пришёл снимок — ещё прошлый цвет");
+        var half = ScreenSampler.smooth(now, before, 0.5);
+        assertTrue(half.getRed() > 0 && half.getRed() < 255, half.toString());
+        assertEquals(now, ScreenSampler.smooth(now, before, 1));
+        assertEquals(now, ScreenSampler.smooth(now, null, 0), "первый снимок — сразу");
+    }
 }

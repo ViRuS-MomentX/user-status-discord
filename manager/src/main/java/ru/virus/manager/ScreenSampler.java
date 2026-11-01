@@ -27,6 +27,10 @@ final class ScreenSampler {
     /** Среднее по столбцу — для лент и вентиляторов. */
     private static volatile Color[] columns;
     private static volatile long wanted;
+    /** Предыдущий снимок и когда пришёл новый — между ними цвет перетекает плавно. */
+    private static volatile Color[][] previousGrid;
+    private static volatile Color[] previousColumns;
+    private static volatile long takenAt;
     private static Thread thread;
 
     private ScreenSampler() {
@@ -35,21 +39,45 @@ final class ScreenSampler {
     /** Цвет экрана в точке (x, y от 0 до 1); заодно просит снимать дальше. */
     static Color at(double x, double y, boolean byColumn) {
         demand();
-        var snapshot = byColumn ? null : grid;
-        var line = columns;
+        var now = sample(x, y, byColumn, grid, columns);
 
-        if (line == null) {
+        if (now == null) {
             return Color.BLACK;
+        }
+
+        return smooth(now, sample(x, y, byColumn, previousGrid, previousColumns),
+                (System.currentTimeMillis() - takenAt) / (double) PERIOD_MS);
+    }
+
+    /**
+     * Сглаживание, как Smoothing у Hyperion: экран снимается 8 раз в секунду,
+     * а подсветка рисует 30 кадров — без него цвет менялся бы ступеньками.
+     * За время между снимками цвет перетекает от прошлого к новому.
+     *
+     * @param progress сколько прошло от нового снимка, в долях периода
+     */
+    static Color smooth(Color now, Color before, double progress) {
+        if (before == null || progress >= 1) {
+            return now;
+        }
+
+        return Glow.mix(before, now, Math.max(0, progress));
+    }
+
+    private static Color sample(double x, double y, boolean byColumn, Color[][] cells, Color[] line) {
+        // Снимка ещё нет
+        if (line == null) {
+            return null;
         }
 
         var column = Math.max(0, Math.min(COLUMNS - 1, (int) (x * COLUMNS)));
 
-        if (snapshot == null) {
+        if (byColumn || cells == null) {
             return line[column];
         }
 
         var row = Math.max(0, Math.min(ROWS - 1, (int) (y * ROWS)));
-        return snapshot[row][column];
+        return cells[row][column];
     }
 
     private static synchronized void demand() {
@@ -141,8 +169,11 @@ final class ScreenSampler {
                     (int) (sums[column][2] / n)));
         }
 
+        previousGrid = grid;
+        previousColumns = columns;
         grid = cells;
         columns = line;
+        takenAt = System.currentTimeMillis();
     }
 
     /**

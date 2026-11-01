@@ -585,4 +585,27 @@ class DeviceTest {
         assertEquals(new Color(30, 10, 20), LedColor.reorder(new Color(10, 20, 30), "BRG"));
         assertEquals(6, LedColor.ORDERS.size());
     }
+
+    @Test
+    void nightAndIdleDimTheLights() {
+        var settings = new DevicePage.Settings();
+        assertEquals(100, DevicePage.dimFor(settings, 3, 0), "ничего не включено — как есть");
+
+        settings.nightOn = true;
+        settings.nightFrom = 23;
+        settings.nightTo = 8;
+        settings.nightLevel = 20;
+        assertEquals(20, DevicePage.dimFor(settings, 3, 0), "3 часа ночи — тусклее");
+        assertEquals(20, DevicePage.dimFor(settings, 23, 0));
+        assertEquals(100, DevicePage.dimFor(settings, 12, 0), "днём — полная");
+
+        settings.idleMinutes = 10;
+        assertEquals(0, DevicePage.dimFor(settings, 12, 11 * 60_000L), "хозяина нет 11 минут — темно");
+        assertEquals(100, DevicePage.dimFor(settings, 12, 60_000L));
+
+        var live = new SignalRgb.Live(() -> 0);
+        live.brightness = 80;
+        live.dim = 50;
+        assertEquals(40, live.effective());
+    }
 }

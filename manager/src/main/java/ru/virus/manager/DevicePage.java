@@ -182,7 +182,10 @@ final class DevicePage extends Ui.Card {
         add(body, BorderLayout.CENTER);
 
         if (LIGHTING) {
-            new Timer(5000, e -> watchPrograms()).start();
+            new Timer(5000, e -> {
+                watchPrograms();
+                updateDim();
+            }).start();
         }
 
         if (LIGHTING && openRgbEngine()) {
@@ -682,6 +685,8 @@ final class DevicePage extends Ui.Card {
         stack.add(left(colorRow));
         stack.add(Box.createVerticalStrut(10));
         stack.add(left(colorCorrection()));
+        stack.add(Box.createVerticalStrut(10));
+        stack.add(left(scheduleRow()));
         signalOnly.add(Box.createVerticalStrut(16));
         signalOnly.add(left(effectsHead));
         signalOnly.add(Box.createVerticalStrut(6));
@@ -833,6 +838,84 @@ final class DevicePage extends Ui.Card {
                 SwingUtilities.invokeLater(() -> toast.accept("SignalRGB: " + e.getMessage()));
             }
         });
+    }
+
+    private java.awt.Point lastPointer;
+    private long lastActivity = System.currentTimeMillis();
+
+    /** Ночь и простой — во множитель яркости; режим плавно перетечёт сам. */
+    private void updateDim() {
+        try {
+            var pointer = java.awt.MouseInfo.getPointerInfo().getLocation();
+
+            if (!pointer.equals(lastPointer)) {
+                lastPointer = pointer;
+                lastActivity = System.currentTimeMillis();
+            }
+        } catch (RuntimeException e) {
+            // нет мыши или экран заблокирован — считаем, что хозяин здесь
+            lastActivity = System.currentTimeMillis();
+        }
+
+        glow.dim = dimFor(settings, java.time.LocalTime.now().getHour(), System.currentTimeMillis() - lastActivity);
+    }
+
+    /** Множитель яркости, %: ночью — ночная яркость, в простое — 0. */
+    static int dimFor(Settings settings, int hour, long idleMillis) {
+        if (settings.idleMinutes > 0 && idleMillis >= settings.idleMinutes * 60_000L) {
+            return 0;
+        }
+
+        if (settings.nightOn && inHours(hour, settings.nightFrom, settings.nightTo)) {
+            return settings.nightLevel;
+        }
+
+        return 100;
+    }
+
+    /** Попадает ли час в промежуток; «с 23 до 8» — через полночь. */
+    static boolean inHours(int hour, int from, int to) {
+        return from <= to ? hour >= from && hour < to : hour >= from || hour < to;
+    }
+
+    /** Строка «Ночью приглушать» и «гасить в простое». */
+    private JComponent scheduleRow() {
+        var night = new Ui.Switch(settings.nightOn);
+        var from = new javax.swing.JSpinner(new javax.swing.SpinnerNumberModel(settings.nightFrom, 0, 23, 1));
+        var to = new javax.swing.JSpinner(new javax.swing.SpinnerNumberModel(settings.nightTo, 0, 23, 1));
+        var level = new javax.swing.JSpinner(new javax.swing.SpinnerNumberModel(settings.nightLevel, 0, 100, 5));
+        var idle = new javax.swing.JSpinner(new javax.swing.SpinnerNumberModel(settings.idleMinutes, 0, 240, 5));
+
+        Runnable save = () -> {
+            settings.nightOn = night.isOn();
+            settings.nightFrom = (Integer) from.getValue();
+            settings.nightTo = (Integer) to.getValue();
+            settings.nightLevel = (Integer) level.getValue();
+            settings.idleMinutes = (Integer) idle.getValue();
+            settings.save();
+            updateDim();
+        };
+        night.onChange(on -> save.run());
+
+        for (var spinner : List.of(from, to, level, idle)) {
+            spinner.setPreferredSize(new Dimension(58, spinner.getPreferredSize().height));
+            spinner.addChangeListener(e -> save.run());
+        }
+
+        var row = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        row.add(night);
+        row.add(Ui.muted("ночью с", 13f));
+        row.add(from);
+        row.add(Ui.muted("до", 13f));
+        row.add(to);
+        row.add(Ui.muted("ч — яркость", 13f));
+        row.add(level);
+        row.add(Ui.muted("%", 13f));
+        row.add(Box.createHorizontalStrut(16));
+        row.add(Ui.muted("гасить, если мышь не двигалась", 13f));
+        row.add(idle);
+        row.add(Ui.muted("мин (0 — не гасить)", 13f));
+        return row;
     }
 
     /** Профили: кнопки, «сохранить как», правила для программ. */
@@ -2235,6 +2318,13 @@ final class DevicePage extends Ui.Card {
         /** Сохранённые профили подсветки и правила «программа → профиль». */
         final List<LightProfiles.Profile> profiles = new ArrayList<>();
         final Map<String, String> appRules = new LinkedHashMap<>();
+        /** Ночь: с какого по какой час приглушать и до скольких процентов. */
+        boolean nightOn;
+        int nightFrom = 0;
+        int nightTo = 8;
+        int nightLevel = 20;
+        /** Простой: через сколько минут без движения мыши гасить; 0 — не гасить. */
+        int idleMinutes = 0;
         /** Порядок цветов по устройствам: «GRB» и т.п. — для лент и вентиляторов на WS2812. */
         final Map<String, String> colorOrders = new LinkedHashMap<>();
         /** Яркость по устройствам, %: 0 — не трогать устройство вовсе. */
@@ -2279,6 +2369,12 @@ final class DevicePage extends Ui.Card {
                     if (json.get("appRules") instanceof Map<?, ?> rules) {
                         rules.forEach((key, value) -> settings.appRules.put(String.valueOf(key), String.valueOf(value)));
                     }
+
+                    settings.nightOn = Boolean.TRUE.equals(json.get("nightOn"));
+                    settings.nightFrom = json.get("nightFrom") instanceof Number n ? n.intValue() : 0;
+                    settings.nightTo = json.get("nightTo") instanceof Number n ? n.intValue() : 8;
+                    settings.nightLevel = json.get("nightLevel") instanceof Number n ? n.intValue() : 20;
+                    settings.idleMinutes = json.get("idleMinutes") instanceof Number n ? n.intValue() : 0;
 
                     if (json.get("colorOrders") instanceof Map<?, ?> orders) {
                         orders.forEach((key, value) -> settings.colorOrders.put(String.valueOf(key), String.valueOf(value)));
@@ -2342,6 +2438,11 @@ final class DevicePage extends Ui.Card {
             json.put("zoneSizes", zoneSizes);
             json.put("deviceLevels", deviceLevels);
             json.put("colorOrders", colorOrders);
+            json.put("nightOn", nightOn);
+            json.put("nightFrom", nightFrom);
+            json.put("nightTo", nightTo);
+            json.put("nightLevel", nightLevel);
+            json.put("idleMinutes", idleMinutes);
             json.put("profiles", profiles.stream().map(LightProfiles.Profile::toJson).toList());
             json.put("appRules", appRules);
             json.put("engine", engine);

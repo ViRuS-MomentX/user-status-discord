@@ -118,7 +118,8 @@ final class RgbAnimator {
 
     /** Что видно глазу: режим, цвета, вкл/выкл. Поменялось — пора плавного перехода. */
     private String look() {
-        return settings.mode + "|" + settings.color.getRGB() + "|" + settings.color2.getRGB() + "|" + settings.on;
+        return settings.mode + "|" + settings.color.getRGB() + "|" + settings.color2.getRGB() + "|" + settings.on
+                + "|" + settings.dim;
     }
 
     /** Кадр посередине перехода: от старого к новому, сглаженно (быстро в начале, мягко в конце). */
@@ -202,7 +203,7 @@ final class RgbAnimator {
             for (var d = 0; d < animated.size(); d++) {
                 var device = animated.get(d);
                 var frame = Glow.frame(settings.mode, time, places.get(d), settings.color, settings.color2, cpu,
-                        settings.brightness * level(device) / 100, settings.on, d);
+                        settings.effective() * level(device) / 100, settings.on, d);
 
                 if (fade < 1 && from[d] != null) {
                     frame = blend(from[d], frame, fade);
@@ -220,7 +221,7 @@ final class RgbAnimator {
             // Устройства без своих светодиодов анимировать нельзя — держим основной цвет
             for (var s = 0; s < still.size(); s++) {
                 var device = still.get(s);
-                var color = Glow.scale(settings.color, settings.on ? settings.brightness * level(device) / 10_000.0 : 0);
+                var color = Glow.scale(settings.color, settings.on ? settings.effective() * level(device) / 10_000.0 : 0);
 
                 if (!color.equals(stillSent[s])) {
                     rgb.paint(device, color);

@@ -362,6 +362,8 @@ final class SignalRgb {
         volatile Color color2 = new Color(0x8A2BE2);
         /** Яркость и вкл/выкл самого эффекта — работают и без API SignalRGB. */
         volatile int brightness = 100;
+        /** Приглушение по расписанию и простою, %: ночью и без хозяина — тусклее или темно. */
+        volatile int dim = 100;
         volatile boolean on = true;
         volatile long lastAsked;
         private final java.util.function.DoubleSupplier cpu;
@@ -388,6 +390,11 @@ final class SignalRgb {
             server.start();
         }
 
+        /** Яркость с учётом расписания и простоя. */
+        int effective() {
+            return brightness * Math.max(0, Math.min(100, dim)) / 100;
+        }
+
         double cpu() {
             return Math.max(0, cpu.getAsDouble());
         }
@@ -395,7 +402,7 @@ final class SignalRgb {
         String json() {
             var load = cpu.getAsDouble();
             return "{\"mode\":" + mode + ",\"speed\":" + speed + ",\"color\":\"" + hex(color) + "\",\"color2\":\""
-                    + hex(color2) + "\",\"brightness\":" + brightness + ",\"on\":" + on + ",\"cpu\":"
+                    + hex(color2) + "\",\"brightness\":" + effective() + ",\"on\":" + on + ",\"cpu\":"
                     + String.format(java.util.Locale.ROOT, "%.3f", Math.max(0, load)) + screen() + "}";
         }
 

@@ -193,6 +193,7 @@ final class DevicePage extends Ui.Card {
         this.toast = toast;
         this.bridgeApi = bridgeApi;
         this.settings = Settings.load(home.resolve("device.json"));
+        rotateSpinner.setValue(settings.rotateMinutes);
         this.glow = new SignalRgb.Live(DevicePage::cpuLoad);
         glow.mode = settings.glowMode;
         glow.speed = settings.glowSpeed;
@@ -245,6 +246,7 @@ final class DevicePage extends Ui.Card {
             new Timer(5000, e -> {
                 watchPrograms();
                 updateDim();
+                rotate();
             }).start();
             new Timer(10_000, e -> followAccent()).start();
         }
@@ -1475,8 +1477,61 @@ final class DevicePage extends Ui.Card {
         rules.setToolTipText("Запустил игру — подсветка переключилась сама");
         rules.addActionListener(e -> editRules());
         profileRow.add(rules);
+        profileRow.add(Box.createHorizontalStrut(12));
+        profileRow.add(Ui.muted("менять режим каждые", 13f));
+        profileRow.add(rotateSpinner);
+        profileRow.add(Ui.muted("мин (0 — нет)", 13f));
         profileRow.revalidate();
         profileRow.repaint();
+    }
+
+    /** «Менять режим каждые N минут» — как Effect Rotation у SignalRGB и плейлисты WLED. */
+    private final javax.swing.JSpinner rotateSpinner = rotateSpinner();
+    private long rotatedAt = System.currentTimeMillis();
+
+    private javax.swing.JSpinner rotateSpinner() {
+        var spinner = new javax.swing.JSpinner(new javax.swing.SpinnerNumberModel(0, 0, 240, 1));
+        spinner.setPreferredSize(new Dimension(58, spinner.getPreferredSize().height));
+        spinner.setToolTipText("Подсветка сама переходит к следующему спокойному или динамичному режиму");
+        spinner.addChangeListener(e -> {
+            settings.rotateMinutes = (Integer) spinner.getValue();
+            rotatedAt = System.currentTimeMillis();
+            settings.save();
+        });
+        return spinner;
+    }
+
+    /** Режимы для автосмены: спокойные и динамичные; реагирующим нужен свой повод. */
+    static List<Integer> rotation() {
+        var list = new ArrayList<Integer>();
+        list.addAll(MODE_GROUPS.get("Спокойные"));
+        list.addAll(MODE_GROUPS.get("Динамичные"));
+        return list;
+    }
+
+    /** Следующий режим по кругу; текущего в круге нет — первый. */
+    static int nextInRotation(int current) {
+        var list = rotation();
+        var index = list.indexOf(current);
+        return list.get((index + 1) % list.size());
+    }
+
+    /** Пора ли сменить режим — проверяется раз в 5 секунд. */
+    private void rotate() {
+        if (settings.rotateMinutes <= 0 || autoProfile != null
+                || System.currentTimeMillis() - rotatedAt < settings.rotateMinutes * 60_000L) {
+            return;
+        }
+
+        rotatedAt = System.currentTimeMillis();
+        var mode = SignalRgb.mode(nextInRotation(glow.mode));
+        var tile = tileById.get(mode.id());
+
+        if (tile != null) {
+            tile.setSelected(true);
+        }
+
+        chooseMode(mode);
     }
 
     private LightProfiles.Profile current(String name) {
@@ -3132,6 +3187,7 @@ final class DevicePage extends Ui.Card {
         /** Простой: через сколько минут без движения мыши гасить; 0 — не гасить. */
         int idleMinutes = 0;
         int idleLevel = 0;
+        int rotateMinutes = 0;
         boolean offWhenLocked = true;
         String exitLight = "ровный цвет";
         int screenMonitor = -1;
@@ -3196,6 +3252,7 @@ final class DevicePage extends Ui.Card {
                     settings.nightLevel = json.get("nightLevel") instanceof Number n ? n.intValue() : 20;
                     settings.idleMinutes = json.get("idleMinutes") instanceof Number n ? n.intValue() : 0;
                     settings.idleLevel = json.get("idleLevel") instanceof Number n ? n.intValue() : 0;
+                    settings.rotateMinutes = json.get("rotateMinutes") instanceof Number n ? n.intValue() : 0;
                     settings.offWhenLocked = !Boolean.FALSE.equals(json.get("offWhenLocked"));
                     settings.screenMonitor = json.get("screenMonitor") instanceof Number n ? n.intValue() : -1;
                     settings.exitLight = json.get("exitLight") instanceof String exit && EXIT_CHOICES.contains(exit)
@@ -3291,6 +3348,7 @@ final class DevicePage extends Ui.Card {
             json.put("nightLevel", nightLevel);
             json.put("idleMinutes", idleMinutes);
             json.put("idleLevel", idleLevel);
+            json.put("rotateMinutes", rotateMinutes);
             json.put("offWhenLocked", offWhenLocked);
             json.put("exitLight", exitLight);
             json.put("screenMonitor", screenMonitor);

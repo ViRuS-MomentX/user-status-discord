@@ -1038,4 +1038,14 @@ class DeviceTest {
         assertEquals(0, InputPulse.wave(presses, 0.5, press + 2000), "погасла");
         assertTrue(InputPulse.script().contains("GetLastInputInfo"));
     }
+
+    @Test
+    void rotationWalksCalmAndDynamicModes() {
+        var rotation = DevicePage.rotation();
+        assertFalse(rotation.contains(12), "«Экран» не входит — ему нужен свой повод");
+        assertFalse(rotation.contains(21));
+        assertEquals(rotation.get(1), DevicePage.nextInRotation(rotation.get(0)));
+        assertEquals(rotation.getFirst(), DevicePage.nextInRotation(rotation.getLast()), "по кругу");
+        assertEquals(rotation.getFirst(), DevicePage.nextInRotation(13), "был реагирующий — с начала");
+    }
 }

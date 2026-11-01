@@ -103,6 +103,8 @@ public final class Parody {
     private Clock clock = Clock.systemDefaultZone();
 
     private final Deque<Line> recent = new ArrayDeque<>();
+    /** Журнал реплик и оценки хозяина; null — без журнала (в проверках). */
+    private volatile ParodyJournal journal;
 
     /**
      * Строка переписки и когда она прозвучала. Кто писал и кому отвечал —
@@ -885,6 +887,46 @@ public final class Parody {
         return null;
     }
 
+    void setJournal(ParodyJournal journal) {
+        this.journal = journal;
+    }
+
+    /**
+     * Что хозяин оценил в V.I.R.U.S.: понравившиеся — как пример уровня,
+     * не понравившиеся — как «так не говори».
+     */
+    private String ratedBlock() {
+        var book = journal;
+
+        if (book == null) {
+            return "";
+        }
+
+        var good = book.rated(1, 6);
+        var bad = book.rated(-1, 8);
+        var block = new StringBuilder();
+
+        if (!good.isEmpty()) {
+            block.append("Хозяину понравились такие твои реплики — держи этот уровень остроумия, но не повторяй их:\n");
+            good.forEach(line -> block.append("- ").append(line.replace('\n', ' ')).append('\n'));
+            block.append('\n');
+        }
+
+        if (!bad.isEmpty()) {
+            block.append("Хозяину НЕ понравились такие твои реплики — так не говори, ни по смыслу, ни по построению:\n");
+            bad.forEach(line -> block.append("- ").append(line.replace('\n', ' ')).append('\n'));
+            block.append('\n');
+        }
+
+        return block.toString();
+    }
+
+    /** Похоже на реплику, которую хозяин отметил 👎. */
+    String dislikedLike(String text) {
+        var book = journal;
+        return book == null ? null : samey(text, book.rated(-1, 30));
+    }
+
     void setPeople(PeopleBook people) {
         this.people = people;
     }
@@ -1051,6 +1093,8 @@ public final class Parody {
             why = text.isBlank() ? "пусто — ИИ промолчал или сработал фильтр"
                     : repeats(text) ? "повтор недавней реплики"
                     : samey(text) != null ? samey(text)
+                    : dislikedLike(text) != null ? "похоже на реплику, которая хозяину не понравилась ("
+                        + dislikedLike(text) + ")"
                     : copies(text, samples.all()) ? "это слово в слово его старое сообщение, а нужна новая "
                         + "фраза в его манере по теме разговора"
                     : addressesAbsent(text) != null ? "обращение к «" + addressesAbsent(text) + "», а он в "
@@ -1081,7 +1125,7 @@ public final class Parody {
             return;
         }
 
-        post(text, replyTo);
+        post(text, replyTo, context);
     }
 
     /**
@@ -1090,8 +1134,22 @@ public final class Parody {
      * @param replyTo на что отвечаем; 0 — просто в группу
      */
     void post(String text, long replyTo) {
+        post(text, replyTo, "");
+    }
+
+    /** @param context на что отвечал — в журнал, чтобы хозяину было видно, к чему реплика */
+    void post(String text, long replyTo, String context) {
         try {
             var id = telegram.sendText(chatId, settings.mark() + text, replyTo);
+            var book = journal;
+
+            if (book != null) {
+                // Последние строки разговора — чтобы в V.I.R.U.S. было видно, на что это ответ
+                var lines = context.isBlank() ? new String[0] : context.split("\n");
+                var tail = String.join("\n", java.util.Arrays.copyOfRange(lines, Math.max(0, lines.length - 4),
+                        lines.length));
+                book.add(id, clock.millis(), lastAuthor(context.isBlank() ? " " : context), tail, text);
+            }
             state.countSent(LocalDate.now(clock));
             // Хозяин должен видеть, что бот говорит от лица участника
             log.info("Пародия сказала: {}", text);
@@ -1344,6 +1402,7 @@ public final class Parody {
         // подписаны так, как их надо называть, — сопоставлять ИИ нечего и путать тоже
         return (style.isEmpty() ? "" : "Его манера в цифрах — держись её:\n" + style + "\n\n")
                 + peopleBlock()
+                + ratedBlock()
                 + "Образцы его настоящих сообщений — для манеры, не для копирования:\n" + examples
                 + (recentOwn.isEmpty() ? ""
                     : "\nТвои недавние реплики-пародии:\n" + recentOwn + NOT_AGAIN)
@@ -1379,6 +1438,7 @@ public final class Parody {
         var style = settings.target() == 0 ? "" : ParodyStyle.describe(samples.all());
         return (style.isEmpty() ? "" : "Форма сообщений в цифрах — держись её:\n" + style + "\n\n")
                 + peopleBlock()
+                + ratedBlock()
                 + (examples.isEmpty() ? ""
                     : "Образцы формы сообщений (чужие — только для манеры письма, не копировать):\n" + examples)
                 + (recentOwn.isEmpty() ? ""

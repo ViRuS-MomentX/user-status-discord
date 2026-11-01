@@ -92,13 +92,24 @@ final class Reporter {
             var parodyState = config.resolveSibling("parody-state.json");
 
             if (Files.isRegularFile(parodyState)) {
-                put(out, "parody-state.json", Files.readString(parodyState, StandardCharsets.UTF_8));
+                put(out, "parody-state.json", withoutSaid(Files.readString(parodyState, StandardCharsets.UTF_8)));
             }
 
             put(out, "файлы-бота.txt", listing(config.getParent()));
         }
 
         return zip;
+    }
+
+    /** Свои последние реплики бот хранит в состоянии — в отчёт их не кладём: там бывают имена людей. */
+    static String withoutSaid(String json) {
+        try {
+            var state = new java.util.LinkedHashMap<>(Json.object(json));
+            state.remove("said");
+            return Json.write(state);
+        } catch (RuntimeException e) {
+            return "{}";
+        }
     }
 
     private static void put(ZipOutputStream out, String name, String text) throws IOException {

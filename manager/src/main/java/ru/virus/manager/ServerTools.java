@@ -174,6 +174,8 @@ final class ServerTools {
 
         Files.copy(chosen, plugins.resolve(chosen.getFileName().toString()), StandardCopyOption.REPLACE_EXISTING);
         Files.writeString(memo, chosen.getFileName().toString(), StandardCharsets.UTF_8);
+        // Поставили руками — автообновление не должно ставить ту же сборку ещё раз
+        Files.writeString(folder.resolve(PluginWatch.DEPLOYED), PluginWatch.signature(chosen), StandardCharsets.UTF_8);
         return removed;
     }
 

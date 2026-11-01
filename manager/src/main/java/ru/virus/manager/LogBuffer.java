@@ -78,6 +78,11 @@ final class LogBuffer {
         return result;
     }
 
+    /** Номер последней строки: читать «после этого места» — только новое. */
+    synchronized long last() {
+        return seq;
+    }
+
     synchronized void clear() {
         lines.clear();
     }

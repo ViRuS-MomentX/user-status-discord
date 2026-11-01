@@ -908,4 +908,35 @@ class ParodyTest {
 
         assertEquals("Санёк", names.callName(7));
     }
+
+    @Test
+    void ownerRatingsTeachTheBot() throws Exception {
+        var memory = dir.resolve("memory");
+        var journal = new ParodyJournal(memory);
+        var replies = new java.util.concurrent.atomic.AtomicInteger();
+        var answers = List.of("ты че как вайбкодер завис", "кто последний тот и лох", "го катку пацаны");
+        start(settings(100, 0, 1), llm(p -> answers.get(Math.min(replies.getAndIncrement(), answers.size() - 1))),
+                "образец");
+        parody.setJournal(journal);
+
+        telegram.say(7, "Петя", "всем ку");
+        assertNotNull(telegram.awaitSent(1, 3000));
+        var first = journal.entries();
+        assertEquals(1, first.size());
+        assertEquals("ты че как вайбкодер завис", first.getFirst().reply());
+        assertEquals("Петя", first.getFirst().to());
+        assertTrue(first.getFirst().context().contains("Петя: всем ку"), first.getFirst().context());
+
+        // Хозяин поставил 👎 — в подсказке «так не говори», а похожее бот переписывает
+        Files.writeString(memory.resolve("ratings.json"), "{\"" + first.getFirst().id() + "\": -1}");
+        assertEquals(List.of("ты че как вайбкодер завис"), journal.rated(-1, 5));
+        assertNotNull(parody.dislikedLike("Рома, ты че как вайбкодер опять"));
+        assertNull(parody.dislikedLike("кто идёт в кино"));
+
+        Thread.sleep(300);
+        telegram.say(7, "Петя", "а ты чего");
+        assertNotNull(telegram.awaitSent(2, 3000));
+        assertTrue(prompts.getLast().contains("Хозяину НЕ понравились"), prompts.getLast());
+        assertTrue(prompts.getLast().contains("ты че как вайбкодер завис"), prompts.getLast());
+    }
 }

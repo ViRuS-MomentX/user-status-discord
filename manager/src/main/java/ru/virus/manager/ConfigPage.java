@@ -175,6 +175,12 @@ final class ConfigPage extends Ui.Card {
     /** Ширина текста в меню разделов: меню 236 точек минус отступы кнопки. */
     private static final int NAV_TEXT = 170;
 
+    /** Показать одну настройку — по подсказке доктора. */
+    void focus(String key) {
+        search.setText(key);
+        search.requestFocusInWindow();
+    }
+
     /** Перечитать файл и показать заново, без несохранённого. */
     void reload() {
         people.reload();

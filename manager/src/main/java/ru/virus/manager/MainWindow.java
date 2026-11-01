@@ -60,6 +60,12 @@ final class MainWindow extends JFrame {
     private final ConfigPage configPage;
     private final TasksPage tasksPage;
     private final NavRow tasksRow;
+    private final RepliesPage repliesPage;
+    private final NavRow repliesRow;
+    /** Автообновление плагина — у каждого сервера Minecraft своё. */
+    private final Map<String, PluginWatch> watches = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Доктор у каждого процесса: узнаёт поломки по консоли. */
+    private final Map<String, Doctor> doctors = new java.util.concurrent.ConcurrentHashMap<>();
     private final DevicePage devicePage;
     private final Ui.Card side;
     private final java.util.prefs.Preferences prefs = java.util.prefs.Preferences.userNodeForPackage(MainWindow.class);
@@ -93,9 +99,12 @@ final class MainWindow extends JFrame {
         setLocationRelativeTo(null);
 
         processPage = new ProcessPage(background, worker, this::editProcess);
+        processPage.watches(this::watch);
+        processPage.doctors(this::doctor, this::cure);
         configPage = new ConfigPage(background, config, this::toast, this::configSaved);
         devicePage = new DevicePage(background, supervisor.home(), this::toast, this::bridgeApi);
         tasksPage = new TasksPage(background, tasks, this::toast, this::projectNames);
+        repliesPage = new RepliesPage(background, supervisor::botFolder, this::toast);
 
         // Фон — всё окно; поверх него карточки с отступами, чтобы между ними
         // оставалось место для кода и волн
@@ -200,6 +209,7 @@ final class MainWindow extends JFrame {
         configRow = new NavRow(Icons.of(Icons.Kind.GEAR, Theme.ACCENT), "Конфиг ботов", () -> show("config"));
         tasksRow = new NavRow(Icons.of(Icons.Kind.TASKS, Theme.ACCENT), "Задачи", () -> show("tasks"));
         deviceRow = new NavRow(Icons.of(Icons.Kind.DEVICE, Theme.ACCENT), "Устройство", () -> show("device"));
+        repliesRow = new NavRow(Icons.of(Icons.Kind.REPORT, Theme.ACCENT), "Реплики бота", () -> show("replies"));
 
         side.add(indent(Ui.caption("Процессы")));
         side.add(Box.createVerticalStrut(8));
@@ -211,6 +221,8 @@ final class MainWindow extends JFrame {
         side.add(indent(Ui.caption("Работа")));
         side.add(Box.createVerticalStrut(8));
         side.add(tasksRow);
+        side.add(Box.createVerticalStrut(4));
+        side.add(repliesRow);
         side.add(Box.createVerticalStrut(4));
         side.add(deviceRow);
         side.add(Box.createVerticalStrut(20));
@@ -236,6 +248,7 @@ final class MainWindow extends JFrame {
         center.add(processPage, "process");
         center.add(configPage, "config");
         center.add(tasksPage, "tasks");
+        center.add(repliesPage, "replies");
         center.add(devicePage, "device");
 
         var body = Ui.transparent(new BorderLayout(16, 0));
@@ -559,6 +572,9 @@ final class MainWindow extends JFrame {
         } else if (next.equals("device")) {
             devicePage.opened();
             pages.show(center, "device");
+        } else if (next.equals("replies")) {
+            repliesPage.reload();
+            pages.show(center, "replies");
         } else if (next.equals("tasks")) {
             tasksPage.reload();
             pages.show(center, "tasks");
@@ -569,6 +585,7 @@ final class MainWindow extends JFrame {
         rows.forEach((id, row) -> row.setSelected(view.equals("process:" + id)));
         configRow.setSelected(view.equals("config"));
         tasksRow.setSelected(view.equals("tasks"));
+        repliesRow.setSelected(view.equals("replies"));
         deviceRow.setSelected(view.equals("device"));
     }
 
@@ -594,7 +611,8 @@ final class MainWindow extends JFrame {
         }
 
         for (var process : all) {
-            rows.get(process.spec().id()).update(process);
+            rows.get(process.spec().id()).update(process, doctor(process).active(System.currentTimeMillis()));
+            watch(process);
         }
 
         rows.forEach((id, row) -> row.setSelected(view.equals("process:" + id)));
@@ -604,6 +622,83 @@ final class MainWindow extends JFrame {
         }
 
         autostartSwitch.setOn(autostart.isEnabled());
+    }
+
+    /** Доктор процесса — слушает его консоль с первой строки. */
+    private Doctor doctor(ManagedProcess process) {
+        return doctors.computeIfAbsent(process.spec().id(), id -> {
+            var doctor = new Doctor();
+            process.log().listen(line -> {
+                var issue = doctor.feed(line.text(), line.time());
+
+                if (issue != null) {
+                    SwingUtilities.invokeLater(() -> {
+                        toast(process.spec().name() + ": " + issue.title());
+                        Virus.notifyTray(process.spec().name() + ": " + issue.title(), issue.advice());
+                    });
+                }
+            });
+            return doctor;
+        });
+    }
+
+    /** Кнопка на плашке доктора. */
+    private void cure(String action) {
+        if (action.startsWith("config:")) {
+            show("config");
+
+            if (view.equals("config")) {
+                configPage.focus(action.substring("config:".length()));
+            }
+        } else if (action.equals("duplicates")) {
+            findDuplicates(false);
+        } else if (action.equals("ollama")) {
+            worker.submit(() -> {
+                var started = startOllama();
+                SwingUtilities.invokeLater(() -> toast(started ? "Запускаю Ollama — через несколько секунд бот снова "
+                        + "сможет говорить." : "Ollama не нашлась — запусти её из меню «Пуск»."));
+            });
+        }
+    }
+
+    /** Приложение Ollama: обычно %LOCALAPPDATA%\Programs\Ollama. */
+    private static boolean startOllama() {
+        var local = System.getenv("LOCALAPPDATA");
+
+        try {
+            if (local != null) {
+                var app = java.nio.file.Path.of(local, "Programs", "Ollama", "ollama app.exe");
+
+                if (java.nio.file.Files.isRegularFile(app)) {
+                    new ProcessBuilder(app.toString()).start();
+                    return true;
+                }
+            }
+
+            new ProcessBuilder("ollama", "serve").redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+            return true;
+        } catch (java.io.IOException e) {
+            return false;
+        }
+    }
+
+    /** Автообновление плагина у сервера; null — процесс не сервер. Включённое — запускается само. */
+    private PluginWatch watch(ManagedProcess process) {
+        if (!ServerTools.isServer(process.spec())) {
+            return null;
+        }
+
+        return watches.computeIfAbsent(process.spec().id(), id -> {
+            var watch = new PluginWatch(process, (text, good) -> SwingUtilities.invokeLater(() -> {
+                toast(text);
+                Virus.notifyTray(good ? "Плагин обновлён" : "Плагин: что-то не так", text);
+                process.log().add(java.time.LocalTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"))
+                        + " [V.I.R.U.S.] " + (good ? "✓ " : "✗ ") + text);
+            }));
+            watch.start();
+            return watch;
+        });
     }
 
     /** Значок «сколько настроек не хватает» у пункта конфига. */
@@ -770,7 +865,7 @@ final class MainWindow extends JFrame {
             });
         }
 
-        void update(ManagedProcess process) {
+        void update(ManagedProcess process, List<Doctor.Issue> issues) {
             var json = process.toJson();
             var state = process.state();
             dot.setState(state);
@@ -786,6 +881,12 @@ final class MainWindow extends JFrame {
                 text = ProcessPage.STATE_NAMES.get(state);
             }
 
+            // Поломка, которую узнал доктор, важнее «работает 2 ч»
+            if (!issues.isEmpty()) {
+                text = issues.getFirst().title();
+            }
+
+            sub.setForeground(issues.isEmpty() ? Theme.MUTED : Theme.WARN);
             sub.setText(text);
             setToolTipText(text);
         }

@@ -43,6 +43,19 @@ final class ProcessPage extends Ui.Card {
     private final JButton files = Ui.button("Файлы");
     private final JButton newWorld = Ui.button("Пересоздать мир");
     private final JButton plugin = Ui.button("Заменить плагин");
+    /** Автообновление: собрал плагин — он сам встаёт на сервер. */
+    private final Ui.Switch autoDeploy = new Ui.Switch(false);
+    private final JLabel autoLabel = Ui.muted("автообновление из сборки", 12.5f);
+    private java.util.function.Function<ManagedProcess, PluginWatch> watches = process -> null;
+    /** Плашка доктора: что сломалось и что нажать. */
+    private final javax.swing.JPanel doctorBanner = Ui.transparent(new BorderLayout(14, 4));
+    private final JLabel doctorTitle = Ui.label("", Theme.ui.deriveFont(Font.BOLD, 14f), Theme.WARN);
+    private final javax.swing.JTextArea doctorAdvice = new javax.swing.JTextArea();
+    private final JButton doctorAction = Ui.button("");
+    private final JButton doctorDismiss = Ui.ghost("Понятно");
+    private java.util.function.Function<ManagedProcess, Doctor> doctors = process -> null;
+    private Consumer<String> cure = action -> { };
+    private String doctorActionId = "";
     /** Кнопки сервера Minecraft — отдельным рядом: в одну строку с остальными не влезают. */
     private final javax.swing.JPanel serverButtons = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
     private final JTextField commandLine = new JTextField();
@@ -102,6 +115,11 @@ final class ProcessPage extends Ui.Card {
         serverButtons.add(serverCaption);
         serverButtons.add(newWorld);
         serverButtons.add(plugin);
+        serverButtons.add(Box.createHorizontalStrut(14));
+        serverButtons.add(autoDeploy);
+        serverButtons.add(autoLabel);
+        autoDeploy.setToolTipText("Следить за папкой сборки: новый jar плагина — сервер сам перезапустится с ним");
+        autoDeploy.onChange(this::toggleAutoDeploy);
         var mainRow = Ui.transparent(new BorderLayout(12, 0));
         mainRow.add(buttons, BorderLayout.WEST);
         mainRow.add(secondary, BorderLayout.EAST);
@@ -133,6 +151,7 @@ final class ProcessPage extends Ui.Card {
         top.add(head);
         top.add(Box.createVerticalStrut(10));
         top.add(note);
+        top.add(doctorBanner());
 
         // Панель консоли: фильтр, уровни, очистка
         filter.putClientProperty("JTextField.placeholderText", "Фильтр по тексту…");
@@ -398,6 +417,128 @@ final class ProcessPage extends Ui.Card {
         });
     }
 
+    private javax.swing.JComponent doctorBanner() {
+        doctorAdvice.setLineWrap(true);
+        doctorAdvice.setWrapStyleWord(true);
+        doctorAdvice.setEditable(false);
+        doctorAdvice.setFocusable(false);
+        doctorAdvice.setOpaque(false);
+        doctorAdvice.setBorder(null);
+        doctorAdvice.setFont(Theme.ui.deriveFont(13f));
+        doctorAdvice.setForeground(Theme.TEXT);
+
+        doctorAction.addActionListener(e -> cure.accept(doctorActionId));
+        doctorDismiss.setToolTipText("Скрыть, пока поломка не повторится");
+        doctorDismiss.addActionListener(e -> {
+            var doctor = process == null ? null : doctors.apply(process);
+
+            if (doctor != null) {
+                doctor.clear();
+            }
+
+            showDoctor();
+        });
+
+        var texts = Ui.transparent(new BorderLayout(0, 4));
+        texts.add(doctorTitle, BorderLayout.NORTH);
+        texts.add(doctorAdvice, BorderLayout.CENTER);
+        var buttons = Ui.transparent(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        buttons.add(doctorAction);
+        buttons.add(doctorDismiss);
+
+        doctorBanner.setOpaque(true);
+        doctorBanner.setBackground(new java.awt.Color(0x26, 0x1D, 0x0E));
+        doctorBanner.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.alpha(Theme.WARN, 110)),
+                BorderFactory.createEmptyBorder(10, 14, 10, 14)));
+        doctorBanner.add(texts, BorderLayout.CENTER);
+        doctorBanner.add(buttons, BorderLayout.EAST);
+        doctorBanner.setAlignmentX(LEFT_ALIGNMENT);
+        doctorBanner.setVisible(false);
+
+        var wrap = Ui.transparent(new BorderLayout());
+        wrap.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
+        wrap.add(doctorBanner, BorderLayout.CENTER);
+        wrap.setAlignmentX(LEFT_ALIGNMENT);
+        return wrap;
+    }
+
+    void doctors(java.util.function.Function<ManagedProcess, Doctor> doctors, Consumer<String> cure) {
+        this.doctors = doctors;
+        this.cure = cure;
+    }
+
+    private void showDoctor() {
+        var doctor = process == null ? null : doctors.apply(process);
+        var issues = doctor == null ? java.util.List.<Doctor.Issue>of() : doctor.active(System.currentTimeMillis());
+
+        if (issues.isEmpty()) {
+            doctorBanner.setVisible(false);
+            return;
+        }
+
+        var issue = issues.getFirst();
+        doctorTitle.setText(issue.title() + (issues.size() > 1 ? "  (и ещё " + (issues.size() - 1) + ")" : ""));
+        doctorAdvice.setText(issue.advice());
+        doctorActionId = issue.action();
+        doctorAction.setText(issue.action().startsWith("config:") ? "Открыть настройку"
+                : issue.action().equals("duplicates") ? "Убрать дубли"
+                : issue.action().equals("ollama") ? "Запустить Ollama" : "");
+        doctorAction.setVisible(!issue.action().isEmpty());
+        doctorBanner.setVisible(true);
+    }
+
+    void watches(java.util.function.Function<ManagedProcess, PluginWatch> watches) {
+        this.watches = watches;
+    }
+
+    private void showAutoDeploy() {
+        var watch = process == null ? null : watches.apply(process);
+
+        if (watch == null) {
+            return;
+        }
+
+        var jar = watch.chosen();
+        autoDeploy.setOn(jar != null);
+        autoLabel.setText(jar == null ? "автообновление из сборки"
+                : watch.deploying() ? "ставлю новую сборку…"
+                : "слежу: " + jar.getParent().getFileName() + "/" + PluginWatch.base(jar) + "-*.jar");
+        autoLabel.setToolTipText(jar == null ? null : jar.getParent().toString());
+    }
+
+    private void toggleAutoDeploy(boolean on) {
+        var watch = process == null ? null : watches.apply(process);
+
+        if (watch == null) {
+            return;
+        }
+
+        try {
+            if (!on) {
+                watch.off();
+                notice("Автообновление плагина выключено.");
+            } else {
+                var picked = NativeFiles.open(this, "Любая сборка плагина в папке сборки (build/libs)",
+                        "plugin-jar", false, "jar");
+
+                if (picked.isEmpty()) {
+                    autoDeploy.setOn(false);
+                    return;
+                }
+
+                watch.watch(picked.getFirst());
+                notice("Слежу за " + picked.getFirst().getParent() + ": новая сборка "
+                        + PluginWatch.base(picked.getFirst()) + " — сервер перезапустится с ней сам.");
+            }
+        } catch (java.io.IOException e) {
+            autoDeploy.setOn(!on);
+            notice("Автообновление не переключилось: " + e.getMessage());
+        }
+
+        showAutoDeploy();
+    }
+
     private void act(Consumer<ManagedProcess> action) {
         var target = process;
 
@@ -456,6 +597,8 @@ final class ProcessPage extends Ui.Card {
         showInputHint();
         var server = ServerTools.isServer(process.spec());
         serverButtons.setVisible(server);
+        showAutoDeploy();
+        showDoctor();
         badge.set(STATE_NAMES.get(state), Ui.Dot.color(state));
 
         var parts = new java.util.ArrayList<String>();

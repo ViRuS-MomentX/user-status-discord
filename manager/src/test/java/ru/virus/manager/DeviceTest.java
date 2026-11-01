@@ -1080,4 +1080,26 @@ class DeviceTest {
         assertFalse(DevicePage.sameDevices(List.of(gpu), List.of(gpu, new OpenRgb.Device(1, "RAM", "память", 8))),
                 "OpenRGB нашёл ещё — список обновляется");
     }
+
+    @Test
+    void ultronIsSteelWithRedEnergy() {
+        var reds = 0;
+        var greys = 0;
+
+        for (var t = 0.0; t < 6; t += 0.25) {
+            for (var x = 0.0; x <= 1; x += 0.05) {
+                var c = Glow.ultron(t, x);
+                assertTrue(c.getGreen() <= 90 && c.getBlue() <= 100, "без посторонних оттенков: " + c);
+
+                if (c.getRed() > 200 && c.getGreen() < 40) {
+                    reds++;
+                } else if (Math.abs(c.getRed() - c.getGreen()) < 20 && c.getBlue() >= c.getRed()) {
+                    greys++;
+                }
+            }
+        }
+
+        assertTrue(reds > 10, "есть красная энергия: " + reds);
+        assertTrue(greys > 100, "основа — серая сталь: " + greys);
+    }
 }

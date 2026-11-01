@@ -213,6 +213,30 @@ final class Glow {
             // Естественный свет: цветовая температура по часам, как Natural Light у Hue и f.lux
             case 20 -> kelvin(daylight(java.time.LocalTime.now()));
             // Отклик на ввод: волна от каждого нажатия, в покое — тление вторым цветом
+            case 22 -> ultron(t, x);
+            case 23 -> {
+                // Дыхание двух цветов: в самой темноте цвет меняется на другой
+                var color = ((long) Math.floor(t / Math.PI)) % 2 == 0 ? a : b;
+                yield scale(color, 0.04 + 0.96 * (0.5 - 0.5 * Math.cos(t * 2)));
+            }
+            case 24 -> {
+                // Плазма: сумма трёх волн → оттенок
+                var v = Math.sin(x * 10 + t) + Math.sin(x * 6 - t * 1.3) + Math.sin(x * 14 + t * 0.7);
+                yield hue((v / 3 + 1) * 180 + t * 20);
+            }
+            case 25 -> {
+                // Метеор: яркая голова и искрящийся хвост, потом темно до следующего
+                var head = fract(t * 0.35) * 1.5 - 0.2;
+                var behind = head - x;
+
+                if (behind < 0 || behind > 0.4) {
+                    yield scale(a, 0.02);
+                }
+
+                var tail = Math.pow(1 - behind / 0.4, 2);
+                var sparkle = 0.55 + 0.45 * hash(i * 13 + (int) Math.floor(t * 12));
+                yield scale(a, behind < 0.03 ? 1 : tail * sparkle);
+            }
             case 21 -> mix(scale(b, 0.18), a, InputPulse.wave(InputPulse.presses(), x, System.currentTimeMillis()));
             default -> a;
         };
@@ -259,6 +283,21 @@ final class Glow {
 
     private static int clamp(double value) {
         return (int) Math.round(Math.max(0, Math.min(255, value)));
+    }
+
+    /** Сталь Альтрона — холодный серый с синевой. */
+    static final Color STEEL = new Color(70, 76, 88);
+
+    /**
+     * «Альтрон»: стальной серый с медленным металлическим отливом, по нему
+     * бегут красные прожилки энергии, а в середине бьётся красное ядро.
+     */
+    static Color ultron(double t, double x) {
+        var sheen = 0.5 + 0.5 * Math.sin(x * Math.PI * 3 - t * 0.8);
+        var base = scale(STEEL, 0.45 + 0.55 * sheen);
+        var vein = Math.pow(Math.max(0, Math.sin(x * Math.PI * 6 + t * 2.2 + 2 * Math.sin(t * 0.7))), 14);
+        var core = Math.pow(0.5 + 0.5 * Math.sin(t * 3), 4) * Math.max(0, 1 - Math.abs(x - 0.5) * 3);
+        return mix(base, Color.RED, Math.min(1, vein + core * 0.8));
     }
 
     /** Тот же цвет с оттенком, сдвинутым на {@code degrees}. */

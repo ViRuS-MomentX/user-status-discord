@@ -784,6 +784,15 @@ final class DevicePage extends Ui.Card {
         canvasRow.add(Ui.muted("единый холст: эффект перетекает с устройства на устройство (порядок — «Левее/Правее» "
                 + "в списке устройств)", 13f));
         stack.add(left(canvasRow));
+        stack.add(Box.createVerticalStrut(10));
+        var hardware = Ui.button("Записать цвет в устройства");
+        hardware.setToolTipText("Основной цвет — в память самих устройств: будет гореть и при загрузке, и без V.I.R.U.S. "
+                + "с OpenRGB (если устройство умеет)");
+        hardware.addActionListener(e -> saveToHardware());
+        var hardwareRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        hardwareRow.add(hardware);
+        hardwareRow.add(Ui.muted("как Hardware Lighting в iCUE: цвет остаётся, даже когда программы выключены", 12.5f));
+        stack.add(left(hardwareRow));
         signalOnly.add(Box.createVerticalStrut(16));
         signalOnly.add(left(effectsHead));
         signalOnly.add(Box.createVerticalStrut(6));
@@ -2121,6 +2130,35 @@ final class DevicePage extends Ui.Card {
         }
 
         return row;
+    }
+
+    /** Основной цвет — в память устройств, которые это умеют. */
+    private void saveToHardware() {
+        var color = glow.color;
+        worker.submit(() -> {
+            try (var rgb = new OpenRgb(settings.host, OpenRgb.PORT)) {
+                var all = rgb.devices();
+                var saved = 0;
+
+                for (var device : all) {
+                    var level = settings.deviceLevels.getOrDefault(device.name(), 100);
+
+                    if (level > 0 && rgb.save(device, Glow.scale(color, level / 100.0))) {
+                        saved++;
+                    }
+                }
+
+                var count = saved;
+                var protocol = rgb.protocol();
+                SwingUtilities.invokeLater(() -> toast.accept(protocol < 3
+                        ? "OpenRGB слишком старый для записи в устройства — обнови его до 0.9 или новее."
+                        : "Записано в устройства: " + count + " из " + all.size()
+                        + (count < all.size() ? " (остальные не умеют хранить цвет)." : ".")));
+                restartAnimator();
+            } catch (IOException | RuntimeException e) {
+                SwingUtilities.invokeLater(() -> toast.accept("Не записалось: " + e.getMessage()));
+            }
+        });
     }
 
     /** Подвинуть устройство на холсте левее или правее. */

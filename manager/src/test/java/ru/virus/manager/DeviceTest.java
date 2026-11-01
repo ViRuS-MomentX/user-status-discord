@@ -39,17 +39,36 @@ class DeviceTest {
 
     /** Описание устройства в протоколе 0 — так, как его шлёт OpenRGB. */
     static byte[] controller(String name, int type, int leds) {
+        return controller(name, type, leds, 0);
+    }
+
+    /** Описание устройства в формате нужной версии протокола: с 1-й — производитель, с 3-й — яркость режимов. */
+    static byte[] controller(String name, int type, int leds, int protocol) {
         var out = new Out();
         out.i32(type);
-        out.str(name).str("описание").str("1.0").str("SN").str("USB");
+        out.str(name);
+        if (protocol >= 1) {
+            out.str("Vendor");
+        }
+        out.str("описание").str("1.0").str("SN").str("USB");
         out.u16(2).i32(0);                              // два режима, активный 0
         out.str("Direct");
-        for (var i = 0; i < 9; i++) {
+        for (var i = 0; i < (protocol >= 3 ? 12 : 9); i++) {
             out.i32(i);
         }
         out.u16(2).i32(0xFF).i32(0xFF00);               // у режима два цвета
         out.str("Static");
-        out.i32(7).i32(0).i32(0).i32(0).i32(1).i32(1).i32(0).i32(0).i32(OpenRgb.COLORS_MODE_SPECIFIC);
+        // значение 7, флаги: ручное сохранение; скорость мин/макс; [яркость мин/макс]; цветов 1/1; скорость;
+        // [яркость]; направление; цвет режима
+        out.i32(7).i32(OpenRgb.FLAG_MANUAL_SAVE).i32(0).i32(0);
+        if (protocol >= 3) {
+            out.i32(0).i32(100);
+        }
+        out.i32(1).i32(1).i32(0);
+        if (protocol >= 3) {
+            out.i32(100);
+        }
+        out.i32(0).i32(OpenRgb.COLORS_MODE_SPECIFIC);
         out.u16(1).i32(0);
         out.u16(1);                                     // одна зона
         out.str("Keys").i32(1).i32(leds).i32(leds).i32(leds);
@@ -102,6 +121,8 @@ class DeviceTest {
     final java.util.concurrent.atomic.AtomicInteger fakeCount = new java.util.concurrent.atomic.AtomicInteger(3);
     /** Сколько раз к нему подключались. */
     final java.util.concurrent.atomic.AtomicInteger connections = new java.util.concurrent.atomic.AtomicInteger();
+    /** Версия протокола поддельного OpenRGB; 0 — старый, на вопрос о версии молчит. */
+    volatile int fakeProtocol = 3;
 
     List<Packet> fakeOpenRgb() throws IOException {
         var got = new CopyOnWriteArrayList<Packet>();
@@ -143,9 +164,11 @@ class DeviceTest {
                     byte[] reply = switch (id) {
                         case OpenRgb.CONTROLLER_COUNT -> ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN)
                                 .putInt(fakeCount.get()).array();
-                        case OpenRgb.CONTROLLER_DATA -> device == 0 ? controller("JONSBO CR-1000", 3, 12)
-                                : device == 1 ? controller("Attack Shark X98", 5, 98)
-                                : controller("MSI MYSTIC LIGHT", 0, 0);
+                        case OpenRgb.PROTOCOL_VERSION -> fakeProtocol == 0 ? null
+                                : ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(fakeProtocol).array();
+                        case OpenRgb.CONTROLLER_DATA -> device == 0 ? controller("JONSBO CR-1000", 3, 12, protocolOf(body))
+                                : device == 1 ? controller("Attack Shark X98", 5, 98, protocolOf(body))
+                                : controller("MSI MYSTIC LIGHT", 0, 0, protocolOf(body));
                         default -> null;
                     };
 
@@ -163,6 +186,11 @@ class DeviceTest {
                 // клиент ушёл
             }
         }
+    }
+
+    /** Клиент просит описание в той версии, о которой договорились: 4 байта с номером, пусто — версия 0. */
+    static int protocolOf(byte[] body) {
+        return body.length >= 4 ? ByteBuffer.wrap(body).order(ByteOrder.LITTLE_ENDIAN).getInt() : 0;
     }
 
     static byte[] header(int device, int id, int size) {
@@ -224,7 +252,7 @@ class DeviceTest {
         var nameLength = m.getShort();
         m.position(m.position() + nameLength);
         assertEquals(7, m.getInt(), "значение режима — как прислал OpenRGB");
-        m.position(m.position() + 8 * 4);
+        m.position(m.position() + 11 * 4);           // флаги … цвет режима — 11 полей в версии 3
         assertEquals(1, m.getShort());
         assertEquals((byte) LedColor.correct(new Color(200, 0, 100)).getRed(), m.get());
     }
@@ -756,5 +784,39 @@ class DeviceTest {
         assertEquals(0.5, Glow.shape(places, false, 2).getFirst().x(), 1e-9, "масштаб 2 — узор вдвое чаще");
         assertTrue(Glow.positional(12) && Glow.positional(13), "экран и звук не трогаем");
         assertFalse(Glow.positional(3));
+    }
+
+    @Test
+    void colorIsWrittenIntoDeviceMemory() throws Exception {
+        var got = fakeOpenRgb();
+
+        try (var rgb = new OpenRgb("127.0.0.1", rgbServer.getLocalPort())) {
+            assertEquals(3, rgb.protocol(), "договорились о версии 3");
+            var board = rgb.devices().get(2);
+            assertTrue(board.solid().saveable());
+            assertEquals(100, board.solid().brightnessMax(), "яркость режима прочитана");
+            assertTrue(rgb.save(board, Color.RED));
+        }
+
+        var deadline = System.currentTimeMillis() + 3000;
+        while (got.stream().noneMatch(p -> p.id() == OpenRgb.SAVE_MODE) && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+
+        var save = got.stream().filter(p -> p.id() == OpenRgb.SAVE_MODE).findFirst().orElseThrow();
+        assertEquals(2, save.device());
+    }
+
+    @Test
+    void oldOpenRgbStillWorks() throws Exception {
+        fakeProtocol = 0;
+        fakeOpenRgb();
+
+        try (var rgb = new OpenRgb("127.0.0.1", rgbServer.getLocalPort())) {
+            assertEquals(0, rgb.protocol(), "старый OpenRGB молчит — версия 0");
+            var devices = rgb.devices();
+            assertEquals(98, devices.get(1).leds());
+            assertFalse(rgb.save(devices.get(2), Color.RED), "в версии 0 записи в память нет");
+        }
     }
 }

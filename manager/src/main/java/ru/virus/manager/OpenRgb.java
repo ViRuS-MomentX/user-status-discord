@@ -34,6 +34,13 @@ final class OpenRgb implements AutoCloseable {
     static final int SET_CUSTOM_MODE = 1100;
     static final int RESIZE_ZONE = 1000;
     static final int UPDATE_MODE = 1101;
+    static final int SAVE_MODE = 1102;
+    static final int PROTOCOL_VERSION = 40;
+    /** Версия протокола, которую знает V.I.R.U.S.: с третьей есть запись в память устройства и яркость режимов. */
+    static final int PROTOCOL = 3;
+    /** Режим можно записать в память устройства — вручную или он сам туда пишется. */
+    static final int FLAG_MANUAL_SAVE = 1 << 8;
+    static final int FLAG_AUTOMATIC_SAVE = 1 << 9;
 
     /** У режима цвета свои — задаются вместе с режимом, а не по светодиодам. */
     static final int COLORS_MODE_SPECIFIC = 2;
@@ -153,12 +160,25 @@ final class OpenRgb implements AutoCloseable {
 
     /** Режим подсветки — все поля, потому что OpenRGB ждёт его обратно целиком. */
     record Mode(int index, String name, int value, int flags, int speedMin, int speedMax,
-                int colorsMin, int colorsMax, int speed, int direction, int colorMode) {
+                int colorsMin, int colorsMax, int speed, int direction, int colorMode,
+                int brightnessMin, int brightnessMax, int brightness) {
+
+        Mode(int index, String name, int value, int flags, int speedMin, int speedMax,
+             int colorsMin, int colorsMax, int speed, int direction, int colorMode) {
+            this(index, name, value, flags, speedMin, speedMax, colorsMin, colorsMax, speed, direction, colorMode, 0, 0, 0);
+        }
+
+        /** Запоминается ли в устройстве: тогда цвет горит и без V.I.R.U.S. и OpenRGB. */
+        boolean saveable() {
+            return (flags & (FLAG_MANUAL_SAVE | FLAG_AUTOMATIC_SAVE)) != 0;
+        }
     }
 
     private final Socket socket;
     private final DataInputStream in;
     private final OutputStream out;
+    /** О какой версии протокола договорились: 0 — старый OpenRGB, который о версиях не знает. */
+    private int protocol;
 
     OpenRgb(String host, int port) throws IOException {
         socket = new Socket();
@@ -175,6 +195,29 @@ final class OpenRgb implements AutoCloseable {
         in = new DataInputStream(socket.getInputStream());
         out = socket.getOutputStream();
         send(0, SET_CLIENT_NAME, (Virus.NAME + "\0").getBytes(StandardCharsets.UTF_8));
+        protocol = negotiate();
+    }
+
+    /**
+     * Договориться о версии протокола: шлём свою, OpenRGB отвечает своей,
+     * берём меньшую. Старый OpenRGB (версия 0) не отвечает вовсе — ждём недолго.
+     */
+    private int negotiate() throws IOException {
+        send(0, PROTOCOL_VERSION, le(ByteBuffer.allocate(4)).putInt(PROTOCOL).array());
+        socket.setSoTimeout(1500);
+
+        try {
+            var server = le(ByteBuffer.wrap(receive(PROTOCOL_VERSION))).getInt();
+            return Math.max(0, Math.min(PROTOCOL, server));
+        } catch (java.net.SocketTimeoutException e) {
+            return 0;
+        } finally {
+            socket.setSoTimeout(5000);
+        }
+    }
+
+    int protocol() {
+        return protocol;
     }
 
     /** Сколько устройств видит OpenRGB сейчас: он находит их постепенно, а иные подключают на ходу. */
@@ -188,8 +231,8 @@ final class OpenRgb implements AutoCloseable {
         var devices = new ArrayList<Device>();
 
         for (var i = 0; i < count; i++) {
-            send(i, CONTROLLER_DATA, new byte[0]);
-            devices.add(parse(i, receive(CONTROLLER_DATA)));
+            send(i, CONTROLLER_DATA, protocol == 0 ? new byte[0] : le(ByteBuffer.allocate(4)).putInt(protocol).array());
+            devices.add(parse(i, receive(CONTROLLER_DATA), protocol));
         }
 
         return devices;
@@ -286,22 +329,62 @@ final class OpenRgb implements AutoCloseable {
                     + "проверь в самом OpenRGB, можно ли его покрасить там");
         }
 
+        send(device.index(), UPDATE_MODE, modeBody(mode, color, device));
+    }
+
+    /**
+     * Записать цвет в память устройства, как Hardware Lighting в iCUE: тогда
+     * он горит и при загрузке, и без V.I.R.U.S. с OpenRGB. Нужен протокол 3.
+     *
+     * @return записалось ли (устройство умеет и протокол позволяет)
+     */
+    boolean save(Device device, Color color) throws IOException {
+        var mode = device.solid();
+
+        if (protocol < 3 || mode == null || !mode.saveable()) {
+            return false;
+        }
+
+        var body = modeBody(mode, color, device);
+        send(device.index(), UPDATE_MODE, body);
+
+        // Сам пишется в память — второй раз незачем
+        if ((mode.flags() & FLAG_MANUAL_SAVE) != 0) {
+            send(device.index(), SAVE_MODE, body);
+        }
+
+        return true;
+    }
+
+    /** Режим целиком, как OpenRGB его прислал, но с нашим цветом. */
+    private byte[] modeBody(Mode mode, Color color, Device device) {
         var count = Math.max(1, mode.colorsMin());
         var name = (mode.name() + "\0").getBytes(StandardCharsets.UTF_8);
-        var body = le(ByteBuffer.allocate(4 + 4 + 2 + name.length + 9 * 4 + 2 + 4 * count));
+        var fields = protocol >= 3 ? 12 : 9;
+        var body = le(ByteBuffer.allocate(4 + 4 + 2 + name.length + fields * 4 + 2 + 4 * count));
         body.putInt(body.capacity());
         body.putInt(mode.index());
         body.putShort((short) name.length).put(name);
-        body.putInt(mode.value()).putInt(mode.flags()).putInt(mode.speedMin()).putInt(mode.speedMax())
-                .putInt(mode.colorsMin()).putInt(mode.colorsMax()).putInt(mode.speed()).putInt(mode.direction())
-                .putInt(mode.colorMode());
+        body.putInt(mode.value()).putInt(mode.flags()).putInt(mode.speedMin()).putInt(mode.speedMax());
+
+        if (protocol >= 3) {
+            body.putInt(mode.brightnessMin()).putInt(mode.brightnessMax());
+        }
+
+        body.putInt(mode.colorsMin()).putInt(mode.colorsMax()).putInt(mode.speed());
+
+        if (protocol >= 3) {
+            body.putInt(mode.brightness());
+        }
+
+        body.putInt(mode.direction()).putInt(mode.colorMode());
         body.putShort((short) count);
 
         for (var i = 0; i < count; i++) {
             put(body, color, device);
         }
 
-        send(device.index(), UPDATE_MODE, body.array());
+        return body.array();
     }
 
     /**
@@ -310,10 +393,20 @@ final class OpenRgb implements AutoCloseable {
      * целиком по порядку.
      */
     static Device parse(int index, byte[] data) {
+        return parse(index, data, 0);
+    }
+
+    /** То же для версии протокола: с первой есть производитель, с третьей — яркость у режимов. */
+    static Device parse(int index, byte[] data, int protocol) {
         var buffer = le(ByteBuffer.wrap(data));
         buffer.getInt(); // размер
         var type = buffer.getInt();
         var name = string(buffer);
+
+        if (protocol >= 1) {
+            string(buffer); // производитель
+        }
+
         string(buffer); // описание
         string(buffer); // версия
         string(buffer); // серийный номер
@@ -326,9 +419,20 @@ final class OpenRgb implements AutoCloseable {
 
         for (var i = 0; i < modes; i++) {
             var modeName = string(buffer);
-            // значение, флаги, скорость мин/макс, цветов мин/макс, скорость, направление, режим цвета
-            modeList.add(new Mode(i, modeName, buffer.getInt(), buffer.getInt(), buffer.getInt(), buffer.getInt(),
-                    buffer.getInt(), buffer.getInt(), buffer.getInt(), buffer.getInt(), buffer.getInt()));
+            var value = buffer.getInt();
+            var flags = buffer.getInt();
+            var speedMin = buffer.getInt();
+            var speedMax = buffer.getInt();
+            var brightnessMin = protocol >= 3 ? buffer.getInt() : 0;
+            var brightnessMax = protocol >= 3 ? buffer.getInt() : 0;
+            var colorsMin = buffer.getInt();
+            var colorsMax = buffer.getInt();
+            var speed = buffer.getInt();
+            var brightness = protocol >= 3 ? buffer.getInt() : 0;
+            var direction = buffer.getInt();
+            var colorMode = buffer.getInt();
+            modeList.add(new Mode(i, modeName, value, flags, speedMin, speedMax, colorsMin, colorsMax, speed, direction,
+                    colorMode, brightnessMin, brightnessMax, brightness));
             var colors = Short.toUnsignedInt(buffer.getShort());
             buffer.position(buffer.position() + colors * 4);
         }

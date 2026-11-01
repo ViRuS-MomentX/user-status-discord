@@ -647,9 +647,7 @@ final class DevicePage extends Ui.Card {
                 var chosen = JColorChooser.showDialog(DevicePage.this, "Цвет", glow.color);
 
                 if (chosen != null) {
-                    glow.color = chosen;
-                    glowColor.setColor(chosen);
-                    glowChanged();
+                    chooseColors(chosen, glow.color2);
                 }
             }
         });
@@ -676,9 +674,7 @@ final class DevicePage extends Ui.Card {
             small.addMouseListener(new MouseAdapter() {
                 @Override
                 public void mousePressed(MouseEvent e) {
-                    glow.color = preset;
-                    glowColor.setColor(preset);
-                    glowChanged();
+                    chooseColors(preset, glow.color2);
                 }
             });
             presets.add(small);
@@ -699,7 +695,8 @@ final class DevicePage extends Ui.Card {
         colorRow.add(Ui.muted("Цвет", 13f));
         colorRow.add(glowColor);
         colorRow.add(presets);
-        var accent = new Ui.Switch(settings.followAccent);
+        var accent = accentSwitch;
+        accent.setOn(settings.followAccent);
         accent.setToolTipText("Основной цвет — цвет оформления Windows, как в «Динамическом освещении»");
         accent.onChange(on -> {
             settings.followAccent = on;
@@ -719,19 +716,7 @@ final class DevicePage extends Ui.Card {
 
             for (var palette : PALETTES) {
                 var item = new javax.swing.JMenuItem(palette.name(), new PaletteIcon(palette.a(), palette.b()));
-                item.addActionListener(a -> {
-                    // Выбрал палитру — цвет Windows больше не перебивает её
-                    if (settings.followAccent) {
-                        settings.followAccent = false;
-                        accent.setOn(false);
-                    }
-
-                    glow.color = palette.a();
-                    glow.color2 = palette.b();
-                    glowColor.setColor(palette.a());
-                    glowColor2.setColor(palette.b());
-                    glowChanged();
-                });
+                item.addActionListener(a -> chooseColors(palette.a(), palette.b()));
                 menu.add(item);
             }
 
@@ -1292,6 +1277,16 @@ final class DevicePage extends Ui.Card {
 
         trayMenu.add(sleep);
 
+        var palettes = new java.awt.Menu("Палитры");
+
+        for (var palette : PALETTES) {
+            var item = new java.awt.MenuItem(palette.name());
+            item.addActionListener(e -> SwingUtilities.invokeLater(() -> chooseColors(palette.a(), palette.b())));
+            palettes.add(item);
+        }
+
+        trayMenu.add(palettes);
+
         if (!settings.profiles.isEmpty()) {
             trayMenu.addSeparator();
 
@@ -1522,6 +1517,27 @@ final class DevicePage extends Ui.Card {
                 SwingUtilities.invokeLater(() -> toast.accept("SignalRGB: " + e.getMessage()));
             }
         });
+    }
+
+    /** Переключатель «как в Windows». */
+    private final Ui.Switch accentSwitch = new Ui.Switch(false);
+
+    /**
+     * Цвета выбраны руками — кнопкой, палитрой или из трея. Если основной цвет
+     * брался из Windows, это выключается: иначе через 10 секунд цвет Windows
+     * перебил бы выбор, как бывает в «Динамическом освещении».
+     */
+    void chooseColors(Color first, Color second) {
+        if (settings.followAccent && !first.equals(glow.color)) {
+            settings.followAccent = false;
+            accentSwitch.setOn(false);
+        }
+
+        glow.color = first;
+        glow.color2 = second;
+        glowColor.setColor(first);
+        glowColor2.setColor(second);
+        glowChanged();
     }
 
     /** Режим, цвет или скорость поменялись: эффект подхватит сам, а если не спрашивает — передадим ссылкой. */

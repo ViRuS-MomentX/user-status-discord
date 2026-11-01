@@ -653,4 +653,30 @@ class DeviceTest {
         assertEquals((byte) 255, body.get(), "JONSBO красный");
         assertTrue(keyboard.size() >= 5, "клавиатура играет волну");
     }
+
+    @Test
+    void solidOnlyDevicesFollowTheEffect() throws Exception {
+        var got = fakeOpenRgb();
+        var settings = new SignalRgb.Live(() -> 0);
+        settings.mode = 2;                       // радуга: цвет меняется во времени
+        settings.speed = 100;
+        var animator = new RgbAnimator(settings, text -> { });
+        animator.port = rgbServer.getLocalPort();
+        animator.start("127.0.0.1");
+
+        try {
+            var deadline = System.currentTimeMillis() + 5000;
+
+            while (got.stream().filter(p -> p.id() == OpenRgb.UPDATE_MODE && p.device() == 2).count() < 3
+                    && System.currentTimeMillis() < deadline) {
+                Thread.sleep(50);
+            }
+        } finally {
+            animator.stop();
+        }
+
+        var modes = got.stream().filter(p -> p.id() == OpenRgb.UPDATE_MODE && p.device() == 2).toList();
+        assertTrue(modes.size() >= 3, "плата без светодиодов переливается вместе со всеми: " + modes.size());
+        assertFalse(java.util.Arrays.equals(modes.getFirst().body(), modes.getLast().body()), "цвет меняется");
+    }
 }

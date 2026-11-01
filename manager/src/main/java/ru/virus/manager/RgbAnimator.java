@@ -38,6 +38,11 @@ final class RgbAnimator {
      * раньше, так и играл бы на половине.
      */
     static final long RECHECK_MS = 10_000;
+    /** Устройство без светодиодов — одна точка посередине. */
+    private static final List<OpenRgb.Place> STILL_PLACE = List.of(new OpenRgb.Place(0.5, 0.5, false));
+    /** Как часто менять цвет устройству без светодиодов: смена режима у него медленная. */
+    static final long STILL_MS = 200;
+
     /** Смена режима или цвета — плавным переходом, как в iCUE и SignalRGB, а не скачком. */
     static final long FADE_MS = 400;
 
@@ -187,6 +192,7 @@ final class RgbAnimator {
         var sent = new Color[animated.size()][];
         var sentAt = new long[animated.size()];
         var stillSent = new Color[still.size()];
+        var stillAt = new long[still.size()];
         // Для плавного перехода: что горело в момент смены и когда она была
         var shown = new Color[animated.size()][];
         var from = new Color[animated.size()][];
@@ -231,14 +237,18 @@ final class RgbAnimator {
                 }
             }
 
-            // Устройства без своих светодиодов анимировать нельзя — держим основной цвет
+            // Устройства без своих светодиодов: целиком одним цветом — тем, что эффект даёт в их точке.
+            // Смена режима для них тяжелее кадра, поэтому реже: 5 раз в секунду (как плагин эффектов OpenRGB)
             for (var s = 0; s < still.size(); s++) {
                 var device = still.get(s);
-                var color = Glow.scale(settings.color, settings.on ? settings.effective() * level(device) / 10_000.0 : 0);
+                var color = Glow.frame(modes.getOrDefault(device.name(), settings.mode), time, STILL_PLACE,
+                        settings.color, settings.color2, cpu, settings.effective() * level(device) / 100, settings.on,
+                        100 + s)[0];
 
-                if (!color.equals(stillSent[s])) {
+                if (!color.equals(stillSent[s]) && millis - stillAt[s] >= STILL_MS) {
                     rgb.paint(device, color);
                     stillSent[s] = color;
+                    stillAt[s] = millis;
                 }
             }
 

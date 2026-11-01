@@ -535,6 +535,27 @@ final class DevicePage extends Ui.Card {
         powerRow.add(Ui.muted("Яркость", 13f));
         powerRow.add(signalBrightness);
         powerRow.add(Box.createHorizontalStrut(12));
+        sleepButton.setIcon(Icons.of(Icons.Kind.POWER, Theme.TEXT));
+        sleepButton.addActionListener(e -> {
+            var menu = new javax.swing.JPopupMenu();
+
+            for (var minutes : List.of(15, 30, 60, 90)) {
+                var item = new javax.swing.JMenuItem("Погасить плавно за " + minutes + " мин");
+                item.addActionListener(a -> sleepIn(minutes));
+                menu.add(item);
+            }
+
+            if (sleepUntil > 0) {
+                menu.addSeparator();
+                var cancel = new javax.swing.JMenuItem("Отменить таймер");
+                cancel.addActionListener(a -> sleepIn(0));
+                menu.add(cancel);
+            }
+
+            menu.show(sleepButton, 0, sleepButton.getHeight());
+        });
+        powerRow.add(sleepButton);
+        powerRow.add(Box.createHorizontalStrut(12));
         var arrows = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 6, 0));
         arrows.add(previous);
         arrows.add(next);
@@ -1022,13 +1043,27 @@ final class DevicePage extends Ui.Card {
                 // Таймер вышел — гасим совсем, как ночник WLED; утром включишь из трея
                 sleepFrom = sleepUntil = 0;
                 setLighting(false);
-                fillTrayMenu();
+                showSleep();
             } else {
                 dim = dim * left / 100;
             }
         }
 
         glow.dim = dim;
+    }
+
+    /** Кнопка таймера сна на странице; подпись — когда погаснет. */
+    private final JButton sleepButton = Ui.button("Таймер сна");
+
+    /** «23:40» — когда погаснет подсветка по таймеру. */
+    private String sleepTime() {
+        return java.time.LocalTime.ofInstant(java.time.Instant.ofEpochMilli(sleepUntil), java.time.ZoneId.systemDefault())
+                .withSecond(0).withNano(0).toString();
+    }
+
+    private void showSleep() {
+        sleepButton.setText(sleepUntil > 0 ? "Погаснет в " + sleepTime() : "Таймер сна");
+        fillTrayMenu();
     }
 
     /** Таймер сна: когда запущен и когда подсветка погаснет; 0 — не запущен. */
@@ -1061,7 +1096,7 @@ final class DevicePage extends Ui.Card {
         }
 
         updateDim();
-        fillTrayMenu();
+        showSleep();
     }
 
     /** Множитель яркости, %: ночью — ночная яркость, в простое — 0. */
@@ -1158,9 +1193,7 @@ final class DevicePage extends Ui.Card {
         power.addActionListener(e -> SwingUtilities.invokeLater(() -> setLighting(!glow.on)));
         trayMenu.add(power);
 
-        var sleep = new java.awt.Menu(sleepUntil > 0 ? "Таймер сна: погаснет в "
-                + java.time.LocalTime.ofInstant(java.time.Instant.ofEpochMilli(sleepUntil), java.time.ZoneId.systemDefault())
-                .withSecond(0).withNano(0) : "Таймер сна");
+        var sleep = new java.awt.Menu(sleepUntil > 0 ? "Таймер сна: погаснет в " + sleepTime() : "Таймер сна");
 
         for (var minutes : List.of(15, 30, 60, 90)) {
             var item = new java.awt.MenuItem("Погасить плавно за " + minutes + " мин");

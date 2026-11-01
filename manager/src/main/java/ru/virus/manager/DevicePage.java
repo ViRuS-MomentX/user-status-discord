@@ -577,6 +577,10 @@ final class DevicePage extends Ui.Card {
                 var tile = new JToggleButton(mode.name());
                 tile.setFont(Theme.ui.deriveFont(13f));
                 tile.setFocusable(false);
+                // Узкие поля, чтобы длинные названия («Северное сияние») не обрезались многоточием
+                tile.setMargin(new java.awt.Insets(3, 4, 3, 4));
+                tile.setToolTipText("<html><body style='width:240px'><b>" + mode.name() + "</b><br>"
+                        + SignalRgb.describe(id) + "</body></html>");
                 tile.setSelected(mode.id() == glow.mode);
                 tile.addActionListener(e -> chooseMode(mode));
                 group.add(tile);

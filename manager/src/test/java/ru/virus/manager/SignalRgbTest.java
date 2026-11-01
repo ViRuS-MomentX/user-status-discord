@@ -159,4 +159,11 @@ class SignalRgbTest {
         assertTrue(live.json().contains("\"brightness\":40,\"on\":false"), live.json());
         assertTrue(SignalRgb.effectHtml().contains("s.brightness"));
     }
+
+    @Test
+    void everyModeIsDescribed() {
+        for (var mode : SignalRgb.MODES) {
+            org.junit.jupiter.api.Assertions.assertFalse(SignalRgb.describe(mode.id()).isBlank(), mode.name());
+        }
+    }
 }

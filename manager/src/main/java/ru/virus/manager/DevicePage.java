@@ -228,6 +228,12 @@ final class DevicePage extends Ui.Card {
         }));
         animator.zoneSizes = Map.copyOf(settings.zoneSizes);
         animator.levels = Map.copyOf(settings.deviceLevels);
+        animator.onDevices = list -> SwingUtilities.invokeLater(() -> {
+            // Тот же состав — список не перестраиваем, чтобы не сбивать то, что сейчас крутишь
+            if (!sameDevices(list, devices)) {
+                showDevices(list);
+            }
+        });
         animator.modes = Map.copyOf(settings.deviceModes);
         animator.canvas = settings.canvas;
         animator.order = List.copyOf(settings.canvasOrder);
@@ -471,6 +477,7 @@ final class DevicePage extends Ui.Card {
         devicesScroll.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, Theme.LINE));
         devicesScroll.setOpaque(false);
         devicesScroll.getViewport().setOpaque(false);
+        Ui.passWheel(devicesScroll);
 
         var rgbTop = Ui.transparent(null);
         rgbTop.setLayout(new BoxLayout(rgbTop, BoxLayout.Y_AXIS));
@@ -848,6 +855,7 @@ final class DevicePage extends Ui.Card {
         effectsScroll.setOpaque(false);
         effectsScroll.getViewport().setOpaque(false);
         effectsScroll.setPreferredSize(new Dimension(10, 150));
+        Ui.passWheel(effectsScroll);
 
         var stack = Ui.transparent(null);
         stack.setLayout(new BoxLayout(stack, BoxLayout.Y_AXIS));
@@ -2017,6 +2025,7 @@ final class DevicePage extends Ui.Card {
         scroll.setOpaque(false);
         scroll.getViewport().setOpaque(false);
         scroll.setPreferredSize(new Dimension(10, 110));
+        Ui.passWheel(scroll);
 
         var body = Ui.transparent(new BorderLayout(0, 8));
         body.add(top, BorderLayout.NORTH);
@@ -2819,6 +2828,21 @@ final class DevicePage extends Ui.Card {
         return row;
     }
 
+    /** Те же устройства с тем же числом светодиодов. */
+    static boolean sameDevices(List<OpenRgb.Device> a, List<OpenRgb.Device> b) {
+        if (a.size() != b.size()) {
+            return false;
+        }
+
+        for (var i = 0; i < a.size(); i++) {
+            if (!a.get(i).name().equals(b.get(i).name()) || a.get(i).leds() != b.get(i).leds()) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private void showDevices(List<OpenRgb.Device> found) {
         devices = found;
         rgbStatus.setForeground(Theme.ACCENT);
@@ -2836,7 +2860,10 @@ final class DevicePage extends Ui.Card {
             row.setBorder(BorderFactory.createEmptyBorder(8, 2, 2, 2));
             row.setAlignmentX(LEFT_ALIGNMENT);
             row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 38));
-            var how = device.leds() > 0 ? "светодиодов: " + device.leds()
+            var how = device.leds() > 0 && !device.streams() && device.solid() != null
+                    ? "светодиодов: " + device.leds() + ", красится целиком (нет режима Direct)"
+                    : device.leds() > 0 && !device.streams() ? "OpenRGB не даёт задать цвет — см. подсказку ниже"
+                    : device.leds() > 0 ? "светодиодов: " + device.leds()
                     : device.solid() != null ? "цвет режимом «" + device.solid().name() + "»"
                     : "OpenRGB не даёт задать цвет — см. подсказку ниже";
             var name = Ui.label("<html><b>" + ConfigPage.escape(device.name()) + "</b> <font color='#7C8C84'>· "

@@ -1067,4 +1067,17 @@ class DeviceTest {
         var stubborn = new OpenRgb.Device(2, "Board", "материнская плата", 5, List.of(rainbow));
         assertFalse(stubborn.paintable());
     }
+
+    @Test
+    void wheelGoesToThePageWhenTheListCannotScroll() {
+        assertFalse(Ui.canScroll(false, 0, 200, 200, 1), "список весь виден — крутим страницу");
+        assertTrue(Ui.canScroll(true, 0, 200, 600, 1), "есть куда вниз — крутим список");
+        assertFalse(Ui.canScroll(true, 400, 200, 600, 1), "дошли до низа — дальше страница");
+        assertFalse(Ui.canScroll(true, 0, 200, 600, -1), "вверху и крутим вверх — страница");
+
+        var gpu = new OpenRgb.Device(0, "GPU", "видеокарта", 20);
+        assertTrue(DevicePage.sameDevices(List.of(gpu), List.of(gpu)));
+        assertFalse(DevicePage.sameDevices(List.of(gpu), List.of(gpu, new OpenRgb.Device(1, "RAM", "память", 8))),
+                "OpenRGB нашёл ещё — список обновляется");
+    }
 }

@@ -108,6 +108,40 @@ final class Ui {
      * Панель, которая в прокрутке занимает ровно ширину окна: перенос строк
      * вместо горизонтальной прокрутки и обрезанных справа полей.
      */
+    /**
+     * Прокрутка внутри прокрутки: колесо крутит внутренний список, пока ему
+     * есть куда, а у края (или если список весь виден) — отдаёт колесо странице.
+     * Без этого страница «залипала», когда мышь стояла над списком.
+     */
+    static void passWheel(javax.swing.JScrollPane inner) {
+        inner.setWheelScrollingEnabled(false);
+        inner.getVerticalScrollBar().setUnitIncrement(22);
+        inner.addMouseWheelListener(e -> {
+            var bar = inner.getVerticalScrollBar();
+
+            if (canScroll(bar.isVisible(), bar.getValue(), bar.getVisibleAmount(), bar.getMaximum(),
+                    e.getWheelRotation())) {
+                bar.setValue(bar.getValue() + e.getUnitsToScroll() * bar.getUnitIncrement());
+                return;
+            }
+
+            var outer = javax.swing.SwingUtilities.getAncestorOfClass(javax.swing.JScrollPane.class, inner.getParent());
+
+            if (outer != null) {
+                outer.dispatchEvent(javax.swing.SwingUtilities.convertMouseEvent(inner, e, outer));
+            }
+        });
+    }
+
+    /** Есть ли внутреннему списку куда крутить в эту сторону. */
+    static boolean canScroll(boolean visible, int value, int extent, int maximum, int rotation) {
+        if (!visible || rotation == 0) {
+            return false;
+        }
+
+        return rotation > 0 ? value + extent < maximum : value > 0;
+    }
+
     static final class FitWidth extends JPanel implements javax.swing.Scrollable {
 
         FitWidth() {

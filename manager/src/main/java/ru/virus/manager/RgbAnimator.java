@@ -90,6 +90,10 @@ final class RgbAnimator {
         thread.start();
     }
 
+    /** Кому сообщить, какие устройства видит OpenRGB, — при каждом подключении. */
+    volatile java.util.function.Consumer<List<OpenRgb.Device>> onDevices = list -> {
+    };
+
     synchronized void stop() {
         if (thread != null) {
             thread.interrupt();
@@ -108,6 +112,9 @@ final class RgbAnimator {
                 if (OpenRgb.applySizes(rgb, devices, zoneSizes)) {
                     devices = rgb.devices();
                 }
+
+                // Список — в окно: устройства видно сразу, без кнопки «Подключиться», как в iCUE
+                onDevices.accept(devices);
 
                 var wanted = devices.stream().filter(device -> level(device) > 0).toList();
                 // Кадры — тем, кто понимает цвет каждого светодиода; остальным (платы и память без

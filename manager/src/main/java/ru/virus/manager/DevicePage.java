@@ -144,7 +144,7 @@ final class DevicePage extends Ui.Card {
 
     private static Map<String, List<Integer>> groups() {
         var groups = new LinkedHashMap<String, List<Integer>>();
-        groups.put("Спокойные", List.of(0, 19, 1, 4, 8, 11));
+        groups.put("Спокойные", List.of(0, 19, 20, 1, 4, 8, 11));
         groups.put("Динамичные", List.of(2, 3, 5, 6, 7, 9, 14, 15, 16, 17));
         groups.put("Реагируют", List.of(12, 13, 10, 18));
         return java.util.Collections.unmodifiableMap(groups);

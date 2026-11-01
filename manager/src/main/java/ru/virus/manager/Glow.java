@@ -210,8 +210,53 @@ final class Glow {
             }
             // Градиент: неподвижный переход a → b вдоль устройства, как Gradient в Aura и SignalRGB
             case 19 -> mix(a, b, x);
+            // Естественный свет: цветовая температура по часам, как Natural Light у Hue и f.lux
+            case 20 -> kelvin(daylight(java.time.LocalTime.now()));
             default -> a;
         };
+    }
+
+    /**
+     * Цветовая температура по времени суток, K: ночью 2000 (свеча), утром
+     * поднимается, днём 6500 (дневной свет), к вечеру опускается — как
+     * расписание f.lux и Natural Light у Hue. Переходы плавные, по минутам.
+     */
+    static double daylight(java.time.LocalTime time) {
+        var hour = time.getHour() + time.getMinute() / 60.0;
+        double[][] points = {{0, 2000}, {5, 2000}, {8, 4500}, {11, 6500}, {16, 6500}, {19, 3400}, {22, 2200}, {24, 2000}};
+
+        for (var i = 1; i < points.length; i++) {
+            if (hour <= points[i][0]) {
+                var k = (hour - points[i - 1][0]) / (points[i][0] - points[i - 1][0]);
+                return points[i - 1][1] + (points[i][1] - points[i - 1][1]) * k;
+            }
+        }
+
+        return 2000;
+    }
+
+    /** Цвет абсолютно чёрного тела при такой температуре (приближение Таннера Хелланда). */
+    static Color kelvin(double kelvin) {
+        var t = Math.max(1000, Math.min(40000, kelvin)) / 100;
+        double r;
+        double g;
+        double b;
+
+        if (t <= 66) {
+            r = 255;
+            g = 99.4708025861 * Math.log(t) - 161.1195681661;
+            b = t <= 19 ? 0 : 138.5177312231 * Math.log(t - 10) - 305.0447927307;
+        } else {
+            r = 329.698727446 * Math.pow(t - 60, -0.1332047592);
+            g = 288.1221695283 * Math.pow(t - 60, -0.0755148492);
+            b = 255;
+        }
+
+        return new Color(clamp(r), clamp(g), clamp(b));
+    }
+
+    private static int clamp(double value) {
+        return (int) Math.round(Math.max(0, Math.min(255, value)));
     }
 
     /** Тот же цвет с оттенком, сдвинутым на {@code degrees}. */

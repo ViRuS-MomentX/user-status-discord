@@ -65,7 +65,8 @@ final class SignalRgb {
             new Mode(16, "Театр", true, true),
             new Mode(17, "Конфетти", true, false),
             new Mode(18, "Температура", false, false),
-            new Mode(19, "Градиент", true, true));
+            new Mode(19, "Градиент", true, true),
+            new Mode(20, "Естественный свет", false, false));
 
     /** Что делает режим — подсказка на плитке, как описание эффекта в SignalRGB. */
     static String describe(int id) {
@@ -88,6 +89,7 @@ final class SignalRgb {
             case 15 -> "Огонёк ездит туда-обратно, как сканер у K.I.T.T.";
             case 16 -> "Огоньки бегут шагами, как гирлянда над входом в театр.";
             case 17 -> "Случайные цветные вспышки, тающие сами по себе.";
+            case 20 -> "Цвет следует за временем суток: днём холодный белый, вечером тёплый, ночью совсем тёплый — как Natural Light у Philips Hue.";
             case 19 -> "Неподвижный плавный переход от первого цвета ко второму через все устройства.";
             case 18 -> "Цвет по температуре видеокарты: 40° — зелёный, 65° — жёлтый, 85° — красный.";
             default -> "";
@@ -475,6 +477,10 @@ final class SignalRgb {
         private String screen() {
             if (mode == 18) {
                 return ",\"temp\":\"" + hex(GpuSensor.color(GpuSensor.celsius())) + "\"";
+            }
+
+            if (mode == 20) {
+                return ",\"daylight\":\"" + hex(Glow.kelvin(Glow.daylight(java.time.LocalTime.now()))) + "\"";
             }
 
             if (mode == 13) {

@@ -1014,4 +1014,17 @@ class DeviceTest {
         assertEquals(25, RgbAnimator.approach(20, 100, 100), 0.001, "и обратно так же плавно");
         assertEquals(30, RgbAnimator.approach(30, 30, 33), 0.001);
     }
+
+    @Test
+    void naturalLightFollowsTheClock() {
+        assertEquals(6500, Glow.daylight(java.time.LocalTime.of(13, 0)), 1, "днём — дневной свет");
+        assertEquals(2000, Glow.daylight(java.time.LocalTime.of(3, 0)), 1, "ночью — свеча");
+        var evening = Glow.daylight(java.time.LocalTime.of(20, 30));
+        assertTrue(evening > 2000 && evening < 3400, "вечером — тёплый: " + evening);
+
+        var candle = Glow.kelvin(2000);
+        assertTrue(candle.getRed() == 255 && candle.getBlue() < 30, "свеча — оранжевая: " + candle);
+        var day = Glow.kelvin(6500);
+        assertTrue(day.getRed() > 240 && day.getGreen() > 240 && day.getBlue() > 230, "днём — почти белый: " + day);
+    }
 }

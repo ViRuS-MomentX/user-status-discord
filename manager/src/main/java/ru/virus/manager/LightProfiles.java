@@ -15,7 +15,17 @@ import java.util.Set;
  */
 final class LightProfiles {
 
-    record Profile(String name, int mode, Color color, Color color2, int speed) {
+    /**
+     * @param brightness яркость, %; −1 — профиль её не трогает (сохранён до того, как её запоминали)
+     * @param scale      масштаб узора; 0 — не трогает
+     */
+    record Profile(String name, int mode, Color color, Color color2, int speed, int brightness, boolean reverse,
+                   double scale) {
+
+        /** Профиль без яркости и узора — как сохраняли раньше. */
+        Profile(String name, int mode, Color color, Color color2, int speed) {
+            this(name, mode, color, color2, speed, -1, false, 0);
+        }
 
         Map<String, Object> toJson() {
             var json = new LinkedHashMap<String, Object>();
@@ -24,6 +34,13 @@ final class LightProfiles {
             json.put("color", SignalRgb.hex(color));
             json.put("color2", SignalRgb.hex(color2));
             json.put("speed", speed);
+
+            if (brightness >= 0) {
+                json.put("brightness", brightness);
+                json.put("reverse", reverse);
+                json.put("scale", scale);
+            }
+
             return json;
         }
 
@@ -32,7 +49,10 @@ final class LightProfiles {
                     json.get("mode") instanceof Number n ? n.intValue() : 0,
                     Color.decode(String.valueOf(json.containsKey("color") ? json.get("color") : "#39FF8A")),
                     Color.decode(String.valueOf(json.containsKey("color2") ? json.get("color2") : "#8A2BE2")),
-                    json.get("speed") instanceof Number n ? n.intValue() : 50);
+                    json.get("speed") instanceof Number n ? n.intValue() : 50,
+                    json.get("brightness") instanceof Number n ? n.intValue() : -1,
+                    Boolean.TRUE.equals(json.get("reverse")),
+                    json.get("scale") instanceof Number n ? n.doubleValue() : 0);
         }
     }
 

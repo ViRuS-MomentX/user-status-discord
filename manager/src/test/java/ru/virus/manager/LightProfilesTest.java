@@ -35,5 +35,11 @@ class LightProfilesTest {
         var back = LightProfiles.Profile.fromJson(profile.toJson());
         assertEquals(profile, back);
         assertFalse(LightProfiles.running().isEmpty(), "список запущенных программ читается");
+
+        // Новый профиль помнит яркость и узор
+        var full = new LightProfiles.Profile("Игра", 3, Color.RED, Color.BLUE, 70, 35, true, 2.5);
+        assertEquals(full, LightProfiles.Profile.fromJson(full.toJson()));
+        // Старый, без яркости, — её не трогает
+        assertEquals(-1, LightProfiles.Profile.fromJson(profile.toJson()).brightness());
     }
 }

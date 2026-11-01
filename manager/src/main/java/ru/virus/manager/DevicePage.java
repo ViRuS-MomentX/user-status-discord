@@ -99,6 +99,9 @@ final class DevicePage extends Ui.Card {
     private final JLabel signalStatus = Ui.muted("Не подключено.", 13f);
     private final Ui.Switch signalOn = new Ui.Switch(true);
     private final JSlider signalBrightness = new JSlider(0, 100, 100);
+    /** Направление и масштаб узора — полями, чтобы профиль мог их поставить. */
+    private final Ui.Switch reverseSwitch = new Ui.Switch(false);
+    private final JSlider scaleSlider = new JSlider(10, 40, 10);
     private final JPanel modeTiles = Ui.transparent(null);
     /** Кнопки режимов по номеру — чтобы профиль мог подсветить свою. */
     private final Map<Integer, JToggleButton> tileById = new LinkedHashMap<>();
@@ -763,14 +766,16 @@ final class DevicePage extends Ui.Card {
         patternRow.add(glowSpeed);
 
         // Направление и масштаб узора — как Reverse в WLED и Scale в SignalRGB
-        var reverse = new Ui.Switch(glow.reverse);
+        var reverse = reverseSwitch;
+        reverse.setOn(glow.reverse);
         reverse.setToolTipText("Узор бежит в другую сторону");
         reverse.onChange(on -> {
             glow.reverse = on;
             settings.glowReverse = on;
             settings.save();
         });
-        var scale = new JSlider(10, 40, (int) Math.round(glow.scale * 10));
+        var scale = scaleSlider;
+        scale.setValue((int) Math.round(glow.scale * 10));
         scale.setOpaque(false);
         scale.setPreferredSize(new Dimension(90, 28));
         scale.setToolTipText("Сколько раз узор помещается на устройстве: 1 — одна радуга на всё, 4 — четыре коротких");
@@ -1535,7 +1540,8 @@ final class DevicePage extends Ui.Card {
     }
 
     private LightProfiles.Profile current(String name) {
-        return new LightProfiles.Profile(name, glow.mode, glow.color, glow.color2, glow.speed);
+        return new LightProfiles.Profile(name, glow.mode, glow.color, glow.color2, glow.speed, glow.brightness,
+                glow.reverse, glow.scale);
     }
 
     private void applyProfile(LightProfiles.Profile profile) {
@@ -1545,6 +1551,18 @@ final class DevicePage extends Ui.Card {
         glowColor.setColor(profile.color());
         glowColor2.setColor(profile.color2());
         glowSpeed.setValue(profile.speed());
+
+        // Яркость и узор — если профиль их помнит (старые профили не трогают)
+        if (profile.brightness() >= 0) {
+            signalBrightness.setValue(profile.brightness());
+            reverseSwitch.setOn(profile.reverse());
+            glow.reverse = profile.reverse();
+            settings.glowReverse = profile.reverse();
+
+            if (profile.scale() > 0) {
+                scaleSlider.setValue((int) Math.round(profile.scale() * 10));
+            }
+        }
 
         var tile = tileById.get(profile.mode());
 

@@ -41,6 +41,10 @@ final class RgbAnimator {
     /** Смена режима или цвета — плавным переходом, как в iCUE и SignalRGB, а не скачком. */
     static final long FADE_MS = 400;
 
+    /** Что сделать, если OpenRGB не отвечает: поднять его задачей Планировщика. Не чаще раза в минуту. */
+    volatile Runnable whenMissing = () -> { };
+    private long missingAt;
+
     /** То же, но меняется в проверках. */
     volatile long recheckMs = RECHECK_MS;
 
@@ -106,6 +110,11 @@ final class RgbAnimator {
                 }
             } catch (IOException | RuntimeException e) {
                 status.accept("Жду OpenRGB — запусти его кнопкой справа (с сервером SDK).");
+
+                if (System.currentTimeMillis() - missingAt > 60_000) {
+                    missingAt = System.currentTimeMillis();
+                    whenMissing.run();
+                }
             }
 
             try {

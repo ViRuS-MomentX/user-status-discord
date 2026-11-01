@@ -169,6 +169,12 @@ final class DevicePage extends Ui.Card {
         animator = new RgbAnimator(glow, text -> SwingUtilities.invokeLater(() -> animatorStatus.setText(text)));
         animator.zoneSizes = Map.copyOf(settings.zoneSizes);
         animator.levels = Map.copyOf(settings.deviceLevels);
+        // OpenRGB закрыли или он ещё не стартовал после перезагрузки — поднимаем его задачей, без окна UAC
+        animator.whenMissing = () -> {
+            if (settings.openRgbTask) {
+                OpenRgbTask.start();
+            }
+        };
         setBorder(BorderFactory.createEmptyBorder(20, 22, 20, 22));
         Ui.rippleThrough(this, background);
 
@@ -661,6 +667,13 @@ final class DevicePage extends Ui.Card {
         openRgbButtons.add(stopAnimation);
         openRgbButtons.add(startOpenRgb);
         openRgbOnly.add(openRgbButtons, BorderLayout.EAST);
+        var atLogon = new Ui.Switch(settings.openRgbTask);
+        atLogon.onChange(this::toggleOpenRgbTask);
+        var logonRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        logonRow.add(atLogon);
+        logonRow.add(Ui.muted("OpenRGB сам при входе в Windows, с правами администратора (разрешение спросит один раз)",
+                12.5f));
+        openRgbOnly.add(logonRow, BorderLayout.SOUTH);
         animatorStatus.setText(openRgbEngine() ? "Жду OpenRGB…" : "");
 
         signalOnly.setLayout(new BoxLayout(signalOnly, BoxLayout.Y_AXIS));
@@ -2126,7 +2139,68 @@ final class DevicePage extends Ui.Card {
         return painted;
     }
 
+    /** Найти OpenRGB.exe: сохранённый путь, Program Files или спросить. null — не нашли. */
+    private String openRgbPath() {
+        var path = settings.openRgb;
+
+        if (path.isBlank() || !Files.isRegularFile(Path.of(path))) {
+            var guess = Path.of(System.getenv().getOrDefault("ProgramFiles", "C:\\Program Files"), "OpenRGB", "OpenRGB.exe");
+            path = Files.isRegularFile(guess) ? guess.toString() : choose("Где OpenRGB.exe?");
+
+            if (path == null) {
+                return null;
+            }
+
+            settings.openRgb = path;
+            settings.save();
+        }
+
+        return path;
+    }
+
+    private void toggleOpenRgbTask(boolean on) {
+        var path = on ? openRgbPath() : settings.openRgb;
+
+        if (on && path == null) {
+            return;
+        }
+
+        worker.submit(() -> {
+            try {
+                if (on) {
+                    OpenRgbTask.install(path);
+                } else {
+                    OpenRgbTask.remove();
+                }
+
+                var exists = OpenRgbTask.exists();
+                settings.openRgbTask = exists;
+                settings.save();
+                SwingUtilities.invokeLater(() -> toast.accept(exists
+                        ? "Готово: OpenRGB будет запускаться при входе в Windows, а V.I.R.U.S. поднимет его, если он закроется."
+                        : on ? "Задача не создалась — Windows не дала разрешение?" : "OpenRGB больше не запускается сам."));
+
+                if (exists) {
+                    OpenRgbTask.start();
+                }
+            } catch (IOException e) {
+                SwingUtilities.invokeLater(() -> toast.accept("Не получилось: " + e.getMessage()));
+            }
+        });
+    }
+
     private void launchOpenRgb() {
+        // Задача Планировщика есть — запускаем через неё: от администратора и без вопроса
+        if (settings.openRgbTask) {
+            worker.submit(() -> {
+                var started = OpenRgbTask.start();
+                SwingUtilities.invokeLater(() -> rgbStatus.setText(started
+                        ? "Запускаю OpenRGB… через несколько секунд он подключится сам."
+                        : "Задача запуска OpenRGB не сработала — проверь путь к OpenRGB.exe."));
+            });
+            return;
+        }
+
         var path = settings.openRgb;
 
         if (path.isBlank() || !Files.isRegularFile(Path.of(path))) {
@@ -2318,6 +2392,8 @@ final class DevicePage extends Ui.Card {
         /** Сохранённые профили подсветки и правила «программа → профиль». */
         final List<LightProfiles.Profile> profiles = new ArrayList<>();
         final Map<String, String> appRules = new LinkedHashMap<>();
+        /** Создана ли задача Планировщика, которая запускает OpenRGB от администратора. */
+        boolean openRgbTask;
         /** Ночь: с какого по какой час приглушать и до скольких процентов. */
         boolean nightOn;
         int nightFrom = 0;
@@ -2371,6 +2447,7 @@ final class DevicePage extends Ui.Card {
                     }
 
                     settings.nightOn = Boolean.TRUE.equals(json.get("nightOn"));
+                    settings.openRgbTask = Boolean.TRUE.equals(json.get("openRgbTask"));
                     settings.nightFrom = json.get("nightFrom") instanceof Number n ? n.intValue() : 0;
                     settings.nightTo = json.get("nightTo") instanceof Number n ? n.intValue() : 8;
                     settings.nightLevel = json.get("nightLevel") instanceof Number n ? n.intValue() : 20;
@@ -2439,6 +2516,7 @@ final class DevicePage extends Ui.Card {
             json.put("deviceLevels", deviceLevels);
             json.put("colorOrders", colorOrders);
             json.put("nightOn", nightOn);
+            json.put("openRgbTask", openRgbTask);
             json.put("nightFrom", nightFrom);
             json.put("nightTo", nightTo);
             json.put("nightLevel", nightLevel);

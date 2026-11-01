@@ -608,4 +608,17 @@ class DeviceTest {
         live.dim = 50;
         assertEquals(40, live.effective());
     }
+
+    @Test
+    void openRgbStartsAtLogonWithoutAskingAgain() {
+        var command = OpenRgbTask.command("C:\\Program Files\\OpenRGB\\OpenRGB.exe");
+        assertEquals("\"C:\\Program Files\\OpenRGB\\OpenRGB.exe\" --server --startminimized", command);
+
+        var script = OpenRgbTask.elevated(List.of("/Create", "/TN", OpenRgbTask.NAME, "/TR", command, "/RL", "HIGHEST"));
+        assertTrue(script.startsWith("Start-Process -FilePath 'schtasks.exe'"), script);
+        assertTrue(script.contains("-Verb RunAs"), "создание задачи — от администратора");
+        // Кавычки вокруг пути с пробелом доходят до schtasks как \"…\"
+        assertTrue(script.contains("'\"\\\"C:\\Program Files\\OpenRGB\\OpenRGB.exe\\\" --server --startminimized\"'"), script);
+        assertTrue(script.contains("'\"V.I.R.U.S. OpenRGB\"'"), script);
+    }
 }

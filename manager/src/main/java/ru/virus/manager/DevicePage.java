@@ -395,9 +395,9 @@ final class DevicePage extends Ui.Card {
 
         rgbDevices.setLayout(new BoxLayout(rgbDevices, BoxLayout.Y_AXIS));
         rgbDevices.add(Ui.muted("<html><body style='width:640px'>OpenRGB — бесплатная программа, которая управляет подсветкой сотен "
-                + "устройств разных фирм. Запусти её, во вкладке <b>SDK Server</b> нажми <b>Start Server</b> "
-                + "и нажми здесь «Подключиться». Если твоих JONSBO или Attack Shark в её списке нет — "
-                + "крась их программами производителей ниже.</body></html>", 13f));
+                + "устройств разных фирм. Запусти её (кнопка справа) и нажми «Подключиться» — здесь появятся "
+                + "устройства: у каждого своя яркость, режим, порядок цветов и проверка. Сам цвет и режим — "
+                + "в «Режимах подсветки» выше.</body></html>", 13f));
 
         var devicesScroll = new JScrollPane(rgbDevices);
         devicesScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
@@ -408,16 +408,14 @@ final class DevicePage extends Ui.Card {
         var rgbTop = Ui.transparent(null);
         rgbTop.setLayout(new BoxLayout(rgbTop, BoxLayout.Y_AXIS));
         rgbTop.add(left(statusRow));
-        rgbTop.add(Box.createVerticalStrut(14));
-        rgbTop.add(left(colorRow));
-        rgbTop.add(Box.createVerticalStrut(10));
-        rgbTop.add(left(actionRow));
         rgbTop.add(Box.createVerticalStrut(12));
+        // Цвет и режим задаются в одном месте — наверху (статичный цвет — режим «Статичный»);
+        // здесь — только устройства и их настройки, как список устройств у iCUE и SignalRGB
 
         var rgbBody = Ui.transparent(new BorderLayout());
         rgbBody.add(rgbTop, BorderLayout.NORTH);
         rgbBody.add(devicesScroll, BorderLayout.CENTER);
-        var rgb = inner("Подсветка через OpenRGB", rgbBody);
+        var rgb = inner("Устройства OpenRGB", rgbBody);
 
         // Программы производителей
         vendorRows.setLayout(new BoxLayout(vendorRows, BoxLayout.Y_AXIS));
@@ -2072,12 +2070,8 @@ final class DevicePage extends Ui.Card {
             var name = Ui.label("<html><b>" + ConfigPage.escape(device.name()) + "</b> <font color='#7C8C84'>· "
                     + device.kind() + " · " + ConfigPage.escape(how) + "</font></html>", Theme.ui, Theme.TEXT);
             row.add(name, BorderLayout.CENTER);
-            var paint = Ui.button("Покрасить");
-            paint.setEnabled(device.paintable());
-            paint.addActionListener(e -> paint(List.of(device), lit()));
             var controls = Ui.transparent(new FlowLayout(FlowLayout.RIGHT, 6, 0));
             controls.add(levelControl(device));
-            controls.add(paint);
             row.add(controls, BorderLayout.EAST);
             rgbDevices.add(row);
 

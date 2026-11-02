@@ -258,6 +258,10 @@ final class DevicePage extends Ui.Card {
             if (settings.bleLamps) {
                 lamps.start();
             }
+
+            if (settings.maonoMic) {
+                mic.start();
+            }
         }
 
         if (LIGHTING && openRgbEngine()) {
@@ -501,7 +505,7 @@ final class DevicePage extends Ui.Card {
         var page = new Ui.FitWidth();
         page.setLayout(new BoxLayout(page, BoxLayout.Y_AXIS));
 
-        for (var card : List.of(signalCard(), rgb, screensCard(), vendors)) {
+        for (var card : List.of(signalCard(), rgb, screensCard())) {
             card.setAlignmentX(LEFT_ALIGNMENT);
             page.add(card);
             page.add(Box.createVerticalStrut(14));
@@ -1000,6 +1004,27 @@ final class DevicePage extends Ui.Card {
         lampsRow.add(Ui.muted("Bluetooth-лампы и ленты (Lotus Lamp X, duoCo и подобные) повторяют режим", 12.5f));
         stack.add(left(lampsRow));
         stack.add(left(lampsStatus));
+
+        // Кольцо микрофона Maono PD200X/PD200XS — повторяет цвет режима (у него 8 цветов и радуга)
+        stack.add(Box.createVerticalStrut(10));
+        var micSwitch = new Ui.Switch(settings.maonoMic);
+        micSwitch.onChange(on -> {
+            settings.maonoMic = on;
+            settings.save();
+
+            if (on) {
+                micStatus.setText("Микрофон: ищу…");
+                mic.start();
+            } else {
+                mic.stop();
+                micStatus.setText("");
+            }
+        });
+        var micRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        micRow.add(micSwitch);
+        micRow.add(Ui.muted("подсветка микрофона Maono PD200X/PD200XS повторяет цвет (у него 8 цветов и радуга)", 12.5f));
+        stack.add(left(micRow));
+        stack.add(left(micStatus));
         signalOnly.add(Box.createVerticalStrut(16));
         signalOnly.add(left(effectsHead));
         signalOnly.add(Box.createVerticalStrut(6));
@@ -1768,11 +1793,23 @@ final class DevicePage extends Ui.Card {
     private double lampsTime;
     private long lampsAt = System.nanoTime();
 
+    /** Микрофон Maono: подсветка кольца. */
+    private final JLabel micStatus = Ui.muted("", 12.5f);
+    private final MaonoMic mic = new MaonoMic(text -> SwingUtilities.invokeLater(() -> micStatus.setText(text)));
+
     /** Цвет режима для ламп — как для устройства «одним цветом» в OpenRGB. */
     private void feedLamps() {
         var now = System.nanoTime();
         lampsTime += (now - lampsAt) / 1e9 * Math.max(1, Math.min(100, glow.speed)) / 50.0;
         lampsAt = now;
+
+        if (settings.maonoMic) {
+            // У микрофона нет своего RGB: ближайший из 8 цветов, радужные режимы — его радуга
+            var base = Glow.frame(glow.mode, lampsTime, List.of(new OpenRgb.Place(0.5, 0.5, false)), glow.color,
+                    glow.color2, glow.cpu(), 100, true, 300)[0];
+            var level = glow.on ? glow.effective() : 0;
+            mic.apply(level > 0, level, MaonoMic.nearest(base, MaonoMic.rainbow(glow.mode)));
+        }
 
         if (!settings.bleLamps) {
             return;
@@ -2009,68 +2046,111 @@ final class DevicePage extends Ui.Card {
                     + ConfigPage.escape(screen.answers() ? "ответил, прошивка " + screen.firmware() : screen.error())
                     + "</font></html>", Theme.ui, Theme.TEXT));
 
-            if (screen.answers()) {
-                var sizes = new javax.swing.JComboBox<>(CaseScreens.SIZES.stream().map(size -> size[0] + "×" + size[1])
-                        .toArray(String[]::new));
-                var test = Ui.button("Тестовая картинка");
-                test.addActionListener(e -> {
-                    var size = CaseScreens.SIZES.get(sizes.getSelectedIndex());
-                    test.setEnabled(false);
-                    worker.submit(() -> {
-                        // Табло держит экран: ставим на паузу, картинку показываем 15 секунд, потом табло вернётся
-                        var resume = pauseBoard();
-                        var problem = CaseScreens.show(screen, CaseScreens.testPattern(size[0], size[1], screen.id()),
-                                Math.max(30, glow.brightness));
-
-                        if (resume) {
-                            new Timer(15_000, t -> startBoard()) {{ setRepeats(false); }}.start();
-                        }
-                        SwingUtilities.invokeLater(() -> {
-                            test.setEnabled(true);
-                            toast.accept(problem == null ? "Картинка " + size[0] + "×" + size[1] + " ушла на экран. "
-                                    + "Рамка видна со всех сторон и надпись ровная — значит, разрешение то."
-                                    : "Экран: " + problem);
-                        });
-                    });
-                });
-                row.add(sizes);
-                row.add(test);
-
-                // Живое табло: разрешение и поворот запоминаются, табло само стартует с V.I.R.U.S.
-                var savedSize = CaseScreens.SIZES.stream().map(size -> size[0] + "×" + size[1]).toList()
-                        .indexOf(settings.screenSize);
-                sizes.setSelectedIndex(Math.max(0, savedSize));
-                var rotation = new javax.swing.JComboBox<>(new String[] {"0°", "90°", "180°", "270°"});
-                rotation.setSelectedIndex(Math.max(0, Math.min(3, settings.screenRotation / 90)));
-                rotation.setToolTipText("Если табло лежит боком или вверх ногами — поверни");
-                var live = new Ui.Switch(settings.screenBoard && screen.id().equals(settings.screenId));
-                Runnable save = () -> {
-                    settings.screenSize = (String) sizes.getSelectedItem();
-                    settings.screenRotation = rotation.getSelectedIndex() * 90;
-                    settings.save();
-                };
-                sizes.addActionListener(e -> save.run());
-                rotation.addActionListener(e -> save.run());
-                live.onChange(on -> {
-                    save.run();
-                    settings.screenBoard = on;
-                    settings.screenId = screen.id();
-                    settings.save();
-
-                    if (on) {
-                        startBoard();
-                    } else {
-                        stopBoard();
-                    }
-                });
-                row.add(Ui.muted("поворот", 12.5f));
-                row.add(rotation);
-                row.add(live);
-                row.add(Ui.muted("живое табло", 12.5f));
-            }
-
             row.setAlignmentX(LEFT_ALIGNMENT);
             screenRows.add(row);
+
+            // Что экран рассказал о себе: адреса USB и ответ на приветствие — по ним разбираемся с непонятными экранами
+            var about = (screen.details().isBlank() ? "" : "USB: " + screen.details())
+                    + (screen.reply().isBlank() ? "" : "<br>ответ: " + screen.reply());
+
+            if (!about.isBlank()) {
+                var info = Ui.label("<html><body style='width:760px'>" + about.replace("<br>", "\n")
+                        .lines().map(ConfigPage::escape).reduce((a, b) -> a + "<br>" + b).orElse("") + "</body></html>",
+                        Theme.mono.deriveFont(11f), Theme.DIM);
+                info.setBorder(BorderFactory.createEmptyBorder(0, 14, 4, 0));
+                info.setAlignmentX(LEFT_ALIGNMENT);
+                screenRows.add(info);
+            }
+
+            if (!screen.answers()) {
+                continue;
+            }
+
+            row = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 4));
+            row.setBorder(BorderFactory.createEmptyBorder(0, 6, 0, 0));
+            // Размер: готовый из списка или свой — ширина × высота, до 2048
+            var saved = settings.screenSize.split("×");
+            var width = new javax.swing.JSpinner(new javax.swing.SpinnerNumberModel(Integer.parseInt(saved[0]), 64, 2048, 8));
+            var height = new javax.swing.JSpinner(new javax.swing.SpinnerNumberModel(Integer.parseInt(saved[1]), 64, 2048, 8));
+            width.setPreferredSize(new Dimension(76, width.getPreferredSize().height));
+            height.setPreferredSize(new Dimension(76, height.getPreferredSize().height));
+            var presets = new javax.swing.JComboBox<>(java.util.stream.Stream.concat(java.util.stream.Stream.of("готовые…"),
+                    CaseScreens.SIZES.stream().map(size -> size[0] + "×" + size[1])).toArray(String[]::new));
+            presets.addActionListener(e -> {
+                if (presets.getSelectedIndex() > 0) {
+                    var size = CaseScreens.SIZES.get(presets.getSelectedIndex() - 1);
+                    width.setValue(size[0]);
+                    height.setValue(size[1]);
+                }
+            });
+            var test = Ui.button("Тестовая картинка");
+            test.addActionListener(e -> {
+                var w = (Integer) width.getValue();
+                var h = (Integer) height.getValue();
+                test.setEnabled(false);
+                worker.submit(() -> {
+                    // Табло держит экран: ставим на паузу, картинку показываем 15 секунд, потом табло вернётся
+                    var resume = pauseBoard();
+                    var problem = CaseScreens.show(screen, CaseScreens.testPattern(w, h, screen.id()),
+                            Math.max(30, glow.brightness));
+
+                    if (resume) {
+                        new Timer(15_000, t -> startBoard()) {{ setRepeats(false); }}.start();
+                    }
+
+                    SwingUtilities.invokeLater(() -> {
+                        test.setEnabled(true);
+                        toast.accept(problem == null ? "Картинка " + w + "×" + h + " ушла на экран. Рамка видна со всех "
+                                + "сторон, линии прямые и надпись ровная — значит, разрешение то."
+                                : "Экран: " + problem);
+                    });
+                });
+            });
+
+            // Живое табло: разрешение и поворот запоминаются, табло само стартует с V.I.R.U.S.
+            var rotation = new javax.swing.JComboBox<>(new String[] {"0°", "90°", "180°", "270°"});
+            rotation.setSelectedIndex(Math.max(0, Math.min(3, settings.screenRotation / 90)));
+            rotation.setToolTipText("Если табло лежит боком или вверх ногами — поверни");
+            var live = new Ui.Switch(settings.screenBoard && screen.id().equals(settings.screenId));
+            Runnable save = () -> {
+                settings.screenSize = width.getValue() + "×" + height.getValue();
+                settings.screenRotation = rotation.getSelectedIndex() * 90;
+                settings.save();
+            };
+            width.addChangeListener(e -> save.run());
+            height.addChangeListener(e -> save.run());
+            rotation.addActionListener(e -> save.run());
+            live.onChange(on -> {
+                save.run();
+                settings.screenBoard = on;
+                settings.screenId = screen.id();
+                settings.save();
+
+                if (on) {
+                    startBoard();
+                } else {
+                    stopBoard();
+                }
+            });
+            row.add(Ui.muted("размер", 12.5f));
+            row.add(width);
+            row.add(Ui.muted("×", 12.5f));
+            row.add(height);
+            row.add(presets);
+            row.add(test);
+            row.add(Ui.muted("поворот", 12.5f));
+            row.add(rotation);
+            row.add(live);
+            row.add(Ui.muted("живое табло", 12.5f));
+            row.setAlignmentX(LEFT_ALIGNMENT);
+            screenRows.add(row);
+        }
+
+        // Строки не растягиваются на всю высоту карточки — каждая ровно по себе
+        for (var child : screenRows.getComponents()) {
+            if (child instanceof JComponent part) {
+                part.setMaximumSize(new Dimension(Integer.MAX_VALUE, part.getPreferredSize().height));
+            }
         }
 
         screenRows.revalidate();
@@ -3620,6 +3700,7 @@ final class DevicePage extends Ui.Card {
         int idleLevel = 0;
         int rotateMinutes = 0;
         boolean bleLamps;
+        boolean maonoMic;
         boolean screenBoard;
         /** «Погасить всё» нажато — подсветка и экраны выключены, и после перезапуска тоже. */
         boolean allDark;
@@ -3692,6 +3773,7 @@ final class DevicePage extends Ui.Card {
                     settings.idleLevel = json.get("idleLevel") instanceof Number n ? n.intValue() : 0;
                     settings.rotateMinutes = json.get("rotateMinutes") instanceof Number n ? n.intValue() : 0;
                     settings.bleLamps = Boolean.TRUE.equals(json.get("bleLamps"));
+                    settings.maonoMic = Boolean.TRUE.equals(json.get("maonoMic"));
                     settings.screenBoard = Boolean.TRUE.equals(json.get("screenBoard"));
                     settings.allDark = Boolean.TRUE.equals(json.get("allDark"));
                     settings.screenId = json.get("screenId") instanceof String id && id.matches("[0-9a-f]{4}:[0-9a-f]{4}") ? id : "";
@@ -3794,6 +3876,7 @@ final class DevicePage extends Ui.Card {
             json.put("idleLevel", idleLevel);
             json.put("rotateMinutes", rotateMinutes);
             json.put("bleLamps", bleLamps);
+            json.put("maonoMic", maonoMic);
             json.put("screenBoard", screenBoard);
             json.put("allDark", allDark);
             json.put("screenId", screenId);

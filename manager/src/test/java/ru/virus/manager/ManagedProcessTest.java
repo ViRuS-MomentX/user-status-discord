@@ -20,11 +20,14 @@ class ManagedProcessTest {
     final List<ManagedProcess> started = new ArrayList<>();
 
     @AfterEach
-    void down() {
+    void down() throws InterruptedException {
         started.forEach(process -> {
             process.stop();
             process.awaitStop(5000);
         });
+        // Последнюю строку («завершился…») процесс дописывает в журнал уже после выхода —
+        // даём дописать, иначе JUnit удаляет папку теста одновременно с записью
+        Thread.sleep(500);
     }
 
     ManagedProcess child(boolean restart, boolean supervised, String... args) {

@@ -1209,4 +1209,32 @@ class DeviceTest {
         assertTrue(DevicePage.listsOpenRgb("OpenRGB.exe                  12345 Console    1    210 000 K"));
         assertFalse(DevicePage.listsOpenRgb("INFO: No tasks are running which match the specified criteria."));
     }
+
+    @Test
+    void maonoMicPacketsMatchPd200xProtocol() {
+        // Как build() в pd200x-linux: 4B C4 len 00 00 03 (addr value)… csum
+        var packet = MaonoMic.packet(MaonoMic.COLOUR, 4);
+        assertEquals(64, packet.length);
+        assertEquals(0x4B, packet[0] & 0xff);
+        assertEquals(0xC4, packet[1] & 0xff);
+        assertEquals(11, packet[2] & 0xff, "длина: 7 + 2 слова × 2 байта");
+        assertEquals(3, packet[5] & 0xff, "запись");
+        assertEquals(0x38, packet[6] & 0xff);
+        assertEquals(0x20, packet[7] & 0xff);
+        assertEquals(4, packet[8] & 0xff);
+        var sum = 0;
+        for (var i = 1; i <= 9; i++) {
+            sum += packet[i] & 0xff;
+        }
+        var check = (packet[10] & 0xff) | (packet[11] & 0xff) << 8;
+        assertEquals(0, (sum + check) & 0xFFFF, "контрольная сумма сходится");
+        assertEquals(0, packet[12], "дальше нули до 64 байт");
+
+        assertEquals(MaonoMic.RED, MaonoMic.nearest(new Color(255, 20, 20), false));
+        assertEquals(MaonoMic.GREEN, MaonoMic.nearest(new Color(0x39, 0xFF, 0x8A), false));
+        assertEquals(MaonoMic.BLUE, MaonoMic.nearest(new Color(0x20, 0x50, 0xFF), false));
+        assertEquals(MaonoMic.WHITE, MaonoMic.nearest(new Color(230, 230, 235), false));
+        assertEquals(MaonoMic.PINK, MaonoMic.nearest(new Color(0xFF, 0x30, 0xB0), false));
+        assertEquals(MaonoMic.RAINBOW, MaonoMic.nearest(Color.RED, true));
+    }
 }

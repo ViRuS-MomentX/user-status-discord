@@ -1,6 +1,8 @@
 package ru.virus.manager;
 
+import org.usb4java.ConfigDescriptor;
 import org.usb4java.Context;
+import org.usb4java.Device;
 import org.usb4java.DeviceDescriptor;
 import org.usb4java.DeviceHandle;
 import org.usb4java.DeviceList;
@@ -52,16 +54,97 @@ final class CaseScreens {
     private static final byte[] KEY = "slv3tuzx".getBytes(StandardCharsets.US_ASCII);
     private static final byte OUT = 0x01;
     private static final byte IN = (byte) 0x81;
+
+    /**
+     * Через что говорить с экраном: интерфейс и адреса передачи из описания
+     * USB-устройства. У TURZX это обычно интерфейс 0, bulk 0x01/0x81, но у
+     * других моделей (полоски 338) могут быть свои — их берём из описания.
+     */
+    record Link(DeviceHandle handle, int iface, byte out, byte in, boolean interrupt, String text) {
+
+        static Link of(Device device, DeviceHandle handle) {
+            var config = new ConfigDescriptor();
+            var parts = new ArrayList<String>();
+            Link bulk = null;
+            Link interruptLink = null;
+
+            if (LibUsb.getActiveConfigDescriptor(device, config) == LibUsb.SUCCESS) {
+                try {
+                    for (var iface : config.iface()) {
+                        for (var alt : iface.altsetting()) {
+                            int out = -1;
+                            int in = -1;
+                            var type = 0;
+                            var eps = new ArrayList<String>();
+
+                            for (var ep : alt.endpoint()) {
+                                var address = ep.bEndpointAddress() & 0xff;
+                                var kind = ep.bmAttributes() & 3;
+                                eps.add(String.format("%s 0x%02x %s", (address & 0x80) != 0 ? "IN" : "OUT", address,
+                                        kind == 2 ? "bulk" : kind == 3 ? "interrupt" : kind == 1 ? "iso" : "control"));
+
+                                if (kind == 2 || kind == 3) {
+                                    if ((address & 0x80) != 0 && in < 0) {
+                                        in = address;
+                                    } else if ((address & 0x80) == 0 && out < 0) {
+                                        out = address;
+                                    }
+
+                                    type = kind;
+                                }
+                            }
+
+                            parts.add(String.format("интерфейс %d, класс 0x%02x: %s", alt.bInterfaceNumber() & 0xff,
+                                    alt.bInterfaceClass() & 0xff, eps.isEmpty() ? "без адресов" : String.join(", ", eps)));
+
+                            if (out >= 0 && in >= 0) {
+                                var link = new Link(handle, alt.bInterfaceNumber() & 0xff, (byte) out, (byte) in, type == 3, "");
+
+                                if (type == 2 && bulk == null) {
+                                    bulk = link;
+                                } else if (type == 3 && interruptLink == null) {
+                                    interruptLink = link;
+                                }
+                            }
+                        }
+                    }
+                } finally {
+                    LibUsb.freeConfigDescriptor(config);
+                }
+            }
+
+            var text = String.join("; ", parts);
+            var chosen = bulk != null ? bulk : interruptLink != null ? interruptLink : new Link(handle, 0, OUT, IN, false, "");
+            return new Link(handle, chosen.iface(), chosen.out(), chosen.in(), chosen.interrupt(), text);
+        }
+
+        int transfer(byte endpoint, ByteBuffer buffer, IntBuffer done, long timeout) {
+            return interrupt ? LibUsb.interruptTransfer(handle, endpoint, buffer, done, timeout)
+                    : LibUsb.bulkTransfer(handle, endpoint, buffer, done, timeout);
+        }
+    }
     private static final int MAX_JPEG = 1024 * 1024;
 
     /** Разрешения, которые бывают у экранов TURZX (портрет: ширина × высота). */
     static final List<int[]> SIZES = List.of(new int[] {640, 480}, new int[] {480, 640}, new int[] {320, 480},
-            new int[] {480, 320}, new int[] {800, 600}, new int[] {800, 480}, new int[] {480, 800}, new int[] {480, 480}, new int[] {400, 400},
+            new int[] {480, 320}, new int[] {800, 600}, new int[] {800, 480}, new int[] {480, 800}, new int[] {480, 480},
+            new int[] {1024, 768}, new int[] {1280, 720}, new int[] {1280, 960}, new int[] {1600, 1200},
+            new int[] {1920, 1080}, new int[] {1080, 1920}, new int[] {1920, 1440}, new int[] {2048, 1536}, new int[] {400, 400},
             new int[] {320, 960}, new int[] {480, 1920}, new int[] {462, 1920}, new int[] {720, 1280},
             new int[] {800, 1280}, new int[] {720, 720}, new int[] {720, 1920});
 
     /** Найденный экран: где он и что ответил на приветствие. */
-    record Screen(int bus, int address, int vendor, int product, String name, String firmware, String error) {
+    /**
+     * @param details описание USB: интерфейсы и адреса передачи
+     * @param reply   ответ на приветствие целиком (hex) — там бывает и разрешение
+     */
+    record Screen(int bus, int address, int vendor, int product, String name, String firmware, String error,
+                  String details, String reply) {
+
+        Screen(int bus, int address, int vendor, int product, String name, String firmware, String error) {
+            this(bus, address, vendor, product, name, firmware, error, "", "");
+        }
+
 
         String id() {
             return String.format("%04x:%04x", vendor, product);
@@ -278,22 +361,24 @@ final class CaseScreens {
 
                 try {
                     var name = String.valueOf(LibUsb.getStringDescriptor(handle, descriptor.iProduct()));
-                    var claimed = LibUsb.claimInterface(handle, 0);
+                    var link = Link.of(device, handle);
+                    var claimed = LibUsb.claimInterface(handle, link.iface());
 
                     if (claimed != LibUsb.SUCCESS) {
-                        found.add(new Screen(bus, address, vendor, product, name, "", explain(claimed)));
+                        found.add(new Screen(bus, address, vendor, product, name, "", explain(claimed), link.text(), ""));
                         continue;
                     }
 
                     try {
-                        drain(handle);
-                        var reply = command(handle, SYNC, new byte[0], null);
+                        drain(link);
+                        var reply = command(link, SYNC, new byte[0], null);
                         found.add(reply == null
                                 ? new Screen(bus, address, vendor, product, name, "", "не ответил на приветствие — "
-                                + "похоже, у него другой протокол")
-                                : new Screen(bus, address, vendor, product, name, firmware(reply), null));
+                                + "похоже, у него другой протокол", link.text(), "")
+                                : new Screen(bus, address, vendor, product, name, firmware(reply), null, link.text(),
+                                hex(reply, 64)));
                     } finally {
-                        LibUsb.releaseInterface(handle, 0);
+                        LibUsb.releaseInterface(handle, link.iface());
                     }
                 } finally {
                     LibUsb.close(handle);
@@ -332,21 +417,23 @@ final class CaseScreens {
                     return explain(opened);
                 }
 
+                var link = Link.of(device, handle);
+
                 try {
-                    var claimed = LibUsb.claimInterface(handle, 0);
+                    var claimed = LibUsb.claimInterface(handle, link.iface());
 
                     if (claimed != LibUsb.SUCCESS) {
                         return explain(claimed);
                     }
 
                     try {
-                        drain(handle);
-                        command(handle, SYNC, new byte[0], null);
+                        drain(link);
+                        command(link, SYNC, new byte[0], null);
                         // Свой ролик или обои экрана — остановить, иначе он перерисует нашу картинку
-                        command(handle, STOP_PLAYBACK, new byte[0], null);
+                        command(link, STOP_PLAYBACK, new byte[0], null);
 
                         for (var i = 0; i < 10; i++) {
-                            var busy = command(handle, PLAYBACK_BUSY, new byte[0], null);
+                            var busy = command(link, PLAYBACK_BUSY, new byte[0], null);
 
                             if (busy == null || busy[8] == 0) {
                                 break;
@@ -355,9 +442,9 @@ final class CaseScreens {
                             Thread.sleep(100);
                         }
 
-                        command(handle, BRIGHTNESS, new byte[] {(byte) Math.round(brightness * 102 / 100.0)}, null);
+                        command(link, BRIGHTNESS, new byte[] {(byte) Math.round(brightness * 102 / 100.0)}, null);
                         var data = jpeg(image);
-                        var reply = command(handle, SHOW_JPEG, be32(data.length), data);
+                        var reply = command(link, SHOW_JPEG, be32(data.length), data);
 
                         if (reply == null) {
                             return "экран не ответил на картинку";
@@ -365,7 +452,7 @@ final class CaseScreens {
 
                         return (reply[1] & 0xff) == 0xc8 ? null : "экран не принял картинку (код " + (reply[1] & 0xff) + ")";
                     } finally {
-                        LibUsb.releaseInterface(handle, 0);
+                        LibUsb.releaseInterface(handle, link.iface());
                     }
                 } finally {
                     LibUsb.close(handle);
@@ -390,6 +477,7 @@ final class CaseScreens {
         private final Context context = new Context();
         private final DeviceList list = new DeviceList();
         private DeviceHandle handle;
+        private Link link;
 
         Session(Screen screen, int brightness) throws IOException {
             if (LibUsb.init(context) != LibUsb.SUCCESS) {
@@ -415,7 +503,8 @@ final class CaseScreens {
                     throw new IOException(explain(opened));
                 }
 
-                var claimed = LibUsb.claimInterface(candidate, 0);
+                var candidateLink = Link.of(device, candidate);
+                var claimed = LibUsb.claimInterface(candidate, candidateLink.iface());
 
                 if (claimed != LibUsb.SUCCESS) {
                     LibUsb.close(candidate);
@@ -424,6 +513,7 @@ final class CaseScreens {
                 }
 
                 handle = candidate;
+                link = candidateLink;
                 break;
             }
 
@@ -432,12 +522,12 @@ final class CaseScreens {
                 throw new IOException("экран не найден — отключён?");
             }
 
-            drain(handle);
-            command(handle, SYNC, new byte[0], null);
-            command(handle, STOP_PLAYBACK, new byte[0], null);
+            drain(link);
+            command(link, SYNC, new byte[0], null);
+            command(link, STOP_PLAYBACK, new byte[0], null);
 
             for (var i = 0; i < 10; i++) {
-                var busy = command(handle, PLAYBACK_BUSY, new byte[0], null);
+                var busy = command(link, PLAYBACK_BUSY, new byte[0], null);
 
                 if (busy == null || busy.length < 9 || busy[8] == 0) {
                     break;
@@ -455,21 +545,21 @@ final class CaseScreens {
         }
 
         void brightness(int percent) {
-            command(handle, BRIGHTNESS, new byte[] {(byte) Math.round(Math.max(0, Math.min(100, percent)) * 102 / 100.0)},
+            command(link, BRIGHTNESS, new byte[] {(byte) Math.round(Math.max(0, Math.min(100, percent)) * 102 / 100.0)},
                     null);
         }
 
         /** Кадр на экран; false — экран не принял (отключили или сбой). */
         boolean show(BufferedImage image) throws IOException {
             var data = jpeg(image);
-            var reply = command(handle, SHOW_JPEG, be32(data.length), data);
+            var reply = command(link, SHOW_JPEG, be32(data.length), data);
             return reply != null && (reply[1] & 0xff) == 0xc8;
         }
 
         @Override
         public void close() {
             if (handle != null) {
-                LibUsb.releaseInterface(handle, 0);
+                LibUsb.releaseInterface(handle, link.iface());
                 LibUsb.close(handle);
                 handle = null;
             }
@@ -500,12 +590,12 @@ final class CaseScreens {
     }
 
     /** Прочитать накопившиеся старые ответы, чтобы не путать их с новыми. */
-    private static void drain(DeviceHandle handle) {
+    private static void drain(Link link) {
         for (var i = 0; i < 16; i++) {
             var in = ByteBuffer.allocateDirect(1024);
             var got = IntBuffer.allocate(1);
 
-            if (LibUsb.bulkTransfer(handle, IN, in, got, 50) != LibUsb.SUCCESS) {
+            if (link.transfer(link.in(), in, got, 50) != LibUsb.SUCCESS) {
                 return;
             }
         }
@@ -516,7 +606,7 @@ final class CaseScreens {
      * сразу 1024: иначе ответы съезжают на одну команду. Чужие ответы
      * (с другим номером команды) пропускаем.
      */
-    private static byte[] command(DeviceHandle handle, int command, byte[] args, byte[] payload) {
+    private static byte[] command(Link link, int command, byte[] args, byte[] payload) {
         var packet = header(command, args, now());
         var out = ByteBuffer.allocateDirect(packet.length + (payload == null ? 0 : payload.length));
         out.put(packet);
@@ -528,7 +618,7 @@ final class CaseScreens {
         out.flip();
         var sent = IntBuffer.allocate(1);
 
-        if (LibUsb.bulkTransfer(handle, OUT, out, sent, 5000) != LibUsb.SUCCESS) {
+        if (link.transfer(link.out(), out, sent, 5000) != LibUsb.SUCCESS) {
             return null;
         }
 
@@ -536,7 +626,7 @@ final class CaseScreens {
             var in = ByteBuffer.allocateDirect(1024);
             var got = IntBuffer.allocate(1);
 
-            if (LibUsb.bulkTransfer(handle, IN, in, got, 1500) != LibUsb.SUCCESS) {
+            if (link.transfer(link.in(), in, got, 1500) != LibUsb.SUCCESS) {
                 return null;
             }
 
@@ -549,6 +639,17 @@ final class CaseScreens {
         }
 
         return null;
+    }
+
+    /** Первые байты ответа в hex — по ним видно, что ещё сообщает экран. */
+    static String hex(byte[] data, int limit) {
+        var text = new StringBuilder();
+
+        for (var i = 0; i < Math.min(limit, data.length); i++) {
+            text.append(String.format("%02x", data[i] & 0xff)).append(i % 16 == 15 ? "  " : " ");
+        }
+
+        return text.toString().strip();
     }
 
     /** Ошибка libusb → что сделать. */

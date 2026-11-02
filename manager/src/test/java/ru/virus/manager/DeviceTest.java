@@ -1237,4 +1237,36 @@ class DeviceTest {
         assertEquals(MaonoMic.PINK, MaonoMic.nearest(new Color(0xFF, 0x30, 0xB0), false));
         assertEquals(MaonoMic.RAINBOW, MaonoMic.nearest(Color.RED, true));
     }
+
+    @Test
+    void eachLampModelGetsItsOwnCommands() {
+        // ELK-BLEDOB: цвет 7e 07 05 03 R G B 0a ef — как в models.json проекта elkbledom
+        var bledob = BleLamps.model("ELK-BLEDOB");
+        assertEquals("ELK-BLEDOB", bledob.prefix());
+        assertArrayEquals(new byte[] {0x7e, 0x07, 0x05, 0x03, (byte) 255, 0, 10, 0x0a, (byte) 0xef},
+                BleLamps.colorFrame(bledob, 255, 0, 10));
+        // У LED- порядок R B G
+        assertArrayEquals(new byte[] {0x7e, 0x07, 0x05, 0x03, 1, 3, 2, 0, (byte) 0xef},
+                BleLamps.colorFrame(BleLamps.model("LED-1234"), 1, 2, 3));
+        // Обычная ELK-BLEDOM — прежний формат
+        assertArrayEquals(new byte[] {0x7e, 0x00, 0x05, 0x03, 9, 8, 7, 0, (byte) 0xef},
+                BleLamps.colorFrame(BleLamps.model("ELK-BLEDOM"), 9, 8, 7));
+        assertTrue(BleLamps.script().contains("@{ p = 'ELK-BLEDOB'") && !BleLamps.script().contains("%MODELS%"));
+    }
+
+    @Test
+    void screensAreRecognisedByTheirCode() throws Exception {
+        assertEquals(480, CaseScreens.model(0x1cbe, 0x0088).width());
+        assertEquals(1920, CaseScreens.model(0x1cbe, 0x0088).height());
+        var guess = CaseScreens.model(0x1cbe, 0x0035);
+        assertEquals(320, guess.width());
+        assertFalse(guess.exact(), "3,5″ — по коду, не проверено");
+        assertNull(CaseScreens.model(0x43a8, 0x0e61), "чужой производитель — не угадываем");
+
+        // PNG с прозрачностью и подписью PNG
+        var png = CaseScreens.png(CaseScreens.testPattern(320, 480, "x"));
+        assertEquals((byte) 0x89, png[0]);
+        assertEquals('P', png[1]);
+        assertTrue(png.length < 1024 * 1024);
+    }
 }

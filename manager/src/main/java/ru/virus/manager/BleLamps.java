@@ -23,10 +23,71 @@ import java.util.regex.Pattern;
 final class BleLamps {
 
     /** Не чаще: Bluetooth не успевает за 30 кадрами в секунду, лампы начинают отставать. */
-    static final long PERIOD_MS = 80;
+    static final long PERIOD_MS = 120;
+
+    /**
+     * Команды разных моделей этого семейства — из таблицы проекта elkbledom
+     * (models.json). У ELK-BLEDOB и похожих свой формат: цвет
+     * {@code 7e 07 05 03 R G B 0a ef}, а не {@code 7e 00 05 03 R G B 00 ef}, —
+     * чужую команду лампа не понимает и мигает красным. В шаблоне цвета −1, −2,
+     * −3 — места красного, зелёного и синего (у LED-/JACKYLED порядок R B G).
+     * Порядок важен: длинные имена раньше коротких.
+     */
+    record Model(String prefix, int[] on, int[] color) {
+    }
+
+    static final java.util.List<Model> MODELS = java.util.List.of(
+            new Model("ELK-BLEDOB", new int[] {126, 7, 4, 255, 0, 1, 2, 1, 239}, new int[] {126, 7, 5, 3, -1, -2, -3, 10, 239}),
+            new Model("ELK-BLEDOM0E", new int[] {126, 7, 4, 255, 0, 1, 2, 1, 239}, new int[] {126, 7, 5, 3, -1, -2, -3, 10, 239}),
+            new Model("ELK-BLEDDM", new int[] {126, 4, 4, 240, 0, 1, 255, 0, 239}, new int[] {126, 0, 5, 3, -1, -2, -3, 0, 239}),
+            new Model("ELK-BTC", new int[] {126, 0, 4, 240, 0, 1, 255, 0, 239}, new int[] {126, 0, 5, 3, -1, -2, -3, 10, 239}),
+            new Model("MELK-OG10", new int[] {126, 7, 4, 255, 0, 1, 2, 1, 239}, new int[] {126, 0, 5, 3, -1, -2, -3, 0, 239}),
+            new Model("MELK-O", new int[] {126, 4, 4, 240, 0, 1, 255, 0, 239}, new int[] {126, 0, 5, 3, -1, -2, -3, 0, 239}),
+            new Model("MELK", new int[] {126, 0, 4, 1, 0, 0, 0, 0, 239}, new int[] {126, 0, 5, 3, -1, -2, -3, 0, 239}),
+            new Model("ELK-BULB2", new int[] {126, 0, 4, 240, 0, 1, 255, 0, 239}, new int[] {126, 0, 5, 3, -1, -2, -3, 0, 239}),
+            new Model("ELK-BULB", new int[] {126, 0, 4, 1, 0, 0, 0, 0, 239}, new int[] {126, 0, 5, 3, -1, -2, -3, 0, 239}),
+            new Model("ELK-LAMPL", new int[] {126, 0, 4, 1, 0, 0, 0, 0, 239}, new int[] {126, 0, 5, 3, -1, -2, -3, 0, 239}),
+            new Model("LEDBLE", new int[] {126, 0, 4, 1, 0, 0, 0, 0, 239}, new int[] {126, 0, 5, 3, -1, -2, -3, 0, 239}),
+            new Model("LED-", new int[] {126, 4, 4, 1, 255, 255, 255, 0, 239}, new int[] {126, 7, 5, 3, -1, -3, -2, 0, 239}),
+            new Model("JACKYLED", new int[] {126, 4, 4, 1, 255, 255, 255, 0, 239}, new int[] {126, 7, 5, 3, -1, -3, -2, 0, 239}),
+            // Всё остальное (ELK-BLEDOM, ELK-BLE…) — самый распространённый вариант
+            new Model("", new int[] {126, 0, 4, 240, 0, 1, 255, 0, 239}, new int[] {126, 0, 5, 3, -1, -2, -3, 0, 239}));
+
+    /** Модель по имени лампы в эфире. */
+    static Model model(String name) {
+        var upper = name.toUpperCase(java.util.Locale.ROOT);
+        return MODELS.stream().filter(model -> upper.startsWith(model.prefix())).findFirst().orElse(MODELS.getLast());
+    }
+
+    /** Команда цвета для модели. */
+    static byte[] colorFrame(Model model, int red, int green, int blue) {
+        var frame = new byte[model.color().length];
+
+        for (var i = 0; i < frame.length; i++) {
+            var value = model.color()[i];
+            frame[i] = (byte) (value == -1 ? red : value == -2 ? green : value == -3 ? blue : value);
+        }
+
+        return frame;
+    }
+
+    /** Таблица моделей для помощника на PowerShell. */
+    static String modelsTable() {
+        var rows = new java.util.ArrayList<String>();
+
+        for (var model : MODELS) {
+            rows.add("  @{ p = '" + model.prefix() + "'; on = @(" + join(model.on()) + "); col = @(" + join(model.color()) + ") }");
+        }
+
+        return "$models = @(\n" + String.join(",\n", rows) + "\n)";
+    }
+
+    private static String join(int[] values) {
+        return java.util.Arrays.stream(values).mapToObj(String::valueOf).collect(java.util.stream.Collectors.joining(","));
+    }
 
     /** Имена ламп этого семейства в эфире. */
-    static final Pattern NAMES = Pattern.compile("(?i)^(ELK|MELK|LEDBLE|BLEDOM|ELK-|LAMPL|LED-|Triones|QHM-)");
+    static final Pattern NAMES = Pattern.compile("(?i)^(ELK|MELK|LEDBLE|BLEDOM|ELK-|LAMPL|LED-|JACKYLED|Triones|QHM-)");
 
     private final Consumer<String> status;
     private volatile boolean wanted;
@@ -209,6 +270,8 @@ final class BleLamps {
                     foreach ($d in $list) { if ($d.Name -match '%NAMES%') { $found += $d } }
                   } catch { }
                 }
+                %MODELS%
+                function ModelOf([string]$name) { foreach ($m in $models) { if ($name.ToUpper().StartsWith($m.p)) { return $m } } }
                 $lamps = @()
                 foreach ($d in ($found | Sort-Object Id -Unique)) {
                   try {
@@ -223,28 +286,30 @@ final class BleLamps {
                         elseif ($u.StartsWith('0000ffe1') -and $target -eq $null) { $target = $c }
                       }
                     }
-                    if ($target -ne $null) { $lamps += [pscustomobject]@{ Name = $d.Name; Char = $target } }
+                    if ($target -ne $null) { $lamps += [pscustomobject]@{ Name = $d.Name; Char = $target; Model = (ModelOf $d.Name) } }
                   } catch { [Console]::WriteLine('error ' + $d.Name + ': ' + $_.Exception.Message) }
                 }
                 if ($lamps.Count -eq 0) { [Console]::WriteLine('none'); exit }
                 $statusType = [Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus]
                 $noReply = [Windows.Devices.Bluetooth.GenericAttributeProfile.GattWriteOption]::WriteWithoutResponse
-                function Send([byte[]]$bytes) {
+                function SendTo($l, [byte[]]$bytes) {
                   $buffer = [System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeBufferExtensions]::AsBuffer($bytes)
-                  foreach ($l in $lamps) {
-                    try { $null = Await ($l.Char.WriteValueAsync($buffer, $noReply)) $statusType }
-                    catch { [Console]::WriteLine('lost ' + $l.Name); exit }
-                  }
+                  try { $null = Await ($l.Char.WriteValueAsync($buffer, $noReply)) $statusType }
+                  catch { [Console]::WriteLine('lost ' + $l.Name); exit }
                 }
-                Send ([byte[]](0x7e,0x00,0x04,0xf0,0x00,0x01,0xff,0x00,0xef))
+                # Включить каждую лампу её собственной командой
+                foreach ($l in $lamps) { SendTo $l ([byte[]]$l.Model.on) }
                 [Console]::WriteLine('found ' + (($lamps | ForEach-Object { $_.Name }) -join ', '))
                 while ($true) {
                   $line = [Console]::In.ReadLine()
                   if ($line -eq $null -or $line -eq 'quit') { break }
                   $p = $line.Split(' ')
                   if ($p.Count -ne 3) { continue }
-                  Send ([byte[]](0x7e,0x00,0x05,0x03,[byte]$p[0],[byte]$p[1],[byte]$p[2],0x00,0xef))
+                  foreach ($l in $lamps) {
+                    $frame = foreach ($v in $l.Model.col) { if ($v -eq -1) { [byte]$p[0] } elseif ($v -eq -2) { [byte]$p[1] } elseif ($v -eq -3) { [byte]$p[2] } else { [byte]$v } }
+                    SendTo $l ([byte[]]$frame)
+                  }
                 }
-                """.replace("%NAMES%", NAMES.pattern().replace("(?i)", ""));
+                """.replace("%NAMES%", NAMES.pattern().replace("(?i)", "")).replace("%MODELS%", modelsTable());
     }
 }

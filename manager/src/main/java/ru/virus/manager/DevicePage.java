@@ -2043,7 +2043,9 @@ final class DevicePage extends Ui.Card {
             var row = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 4));
             var title = (screen.name().isBlank() ? "Экран" : screen.name()) + " · " + screen.id();
             row.add(Ui.label("<html><b>" + ConfigPage.escape(title) + "</b> <font color='#7C8C84'>· "
-                    + ConfigPage.escape(screen.answers() ? "ответил, прошивка " + screen.firmware() : screen.error())
+                    + ConfigPage.escape(screen.answers() ? "ответил, прошивка " + screen.firmware()
+                    + (CaseScreens.model(screen.vendor(), screen.product()) == null ? ""
+                    : " · " + CaseScreens.model(screen.vendor(), screen.product()).name()) : screen.error())
                     + "</font></html>", Theme.ui, Theme.TEXT));
 
             row.setAlignmentX(LEFT_ALIGNMENT);
@@ -2132,6 +2134,29 @@ final class DevicePage extends Ui.Card {
                     stopBoard();
                 }
             });
+            // Модель по коду устройства — сама подставляет размер
+            var model = CaseScreens.model(screen.vendor(), screen.product());
+            var detect = Ui.button("Определить");
+            detect.setToolTipText(model == null ? "Модель по коду устройства неизвестна — подбери размер вручную"
+                    : model.name() + ": " + model.width() + "×" + model.height());
+            detect.setEnabled(model != null);
+            detect.addActionListener(e -> {
+                width.setValue(model.width());
+                height.setValue(model.height());
+                toast.accept("Экран: " + model.name() + ", " + model.width() + "×" + model.height()
+                        + ". Нажми «Тестовая картинка» — рамка должна быть ровной по всем краям.");
+            });
+
+            if (model != null && !settings.screenSized) {
+                // Первый раз — сразу размер модели, а не наугад
+                settings.screenSized = true;
+                width.setValue(model.width());
+                height.setValue(model.height());
+                settings.screenSize = model.width() + "×" + model.height();
+                settings.save();
+            }
+
+            row.add(detect);
             row.add(Ui.muted("размер", 12.5f));
             row.add(width);
             row.add(Ui.muted("×", 12.5f));
@@ -3702,6 +3727,8 @@ final class DevicePage extends Ui.Card {
         boolean bleLamps;
         boolean maonoMic;
         boolean screenBoard;
+        /** Размер экрана уже подставлен по модели — дальше не трогаем, вдруг поправили руками. */
+        boolean screenSized;
         /** «Погасить всё» нажато — подсветка и экраны выключены, и после перезапуска тоже. */
         boolean allDark;
         String screenId = "";
@@ -3775,6 +3802,7 @@ final class DevicePage extends Ui.Card {
                     settings.bleLamps = Boolean.TRUE.equals(json.get("bleLamps"));
                     settings.maonoMic = Boolean.TRUE.equals(json.get("maonoMic"));
                     settings.screenBoard = Boolean.TRUE.equals(json.get("screenBoard"));
+                    settings.screenSized = Boolean.TRUE.equals(json.get("screenSized"));
                     settings.allDark = Boolean.TRUE.equals(json.get("allDark"));
                     settings.screenId = json.get("screenId") instanceof String id && id.matches("[0-9a-f]{4}:[0-9a-f]{4}") ? id : "";
                     settings.screenSize = json.get("screenSize") instanceof String size && size.matches("\\d+×\\d+") ? size : "320×480";
@@ -3878,6 +3906,7 @@ final class DevicePage extends Ui.Card {
             json.put("bleLamps", bleLamps);
             json.put("maonoMic", maonoMic);
             json.put("screenBoard", screenBoard);
+            json.put("screenSized", screenSized);
             json.put("allDark", allDark);
             json.put("screenId", screenId);
             json.put("screenSize", screenSize);

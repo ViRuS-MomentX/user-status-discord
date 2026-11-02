@@ -48,6 +48,51 @@ final class CaseScreens {
     static final int SYNC = 10;
     static final int BRIGHTNESS = 14;
     static final int SHOW_JPEG = 101;
+    static final int SHOW_PNG = 102;
+
+    /** Модель экрана: название и разрешение (портрет, ширина × высота). */
+    record Model(String name, int width, int height, boolean exact) {
+    }
+
+    /**
+     * Известные модели TURZX по коду устройства — из turing-smart-screen-python
+     * и turzx-linux. Код совпадает с размером экрана в дюймах (0x0088 — 8,8″),
+     * поэтому неизвестный код, похожий на размер, угадываем по ближайшему.
+     */
+    static final java.util.Map<Integer, Model> MODELS = java.util.Map.ofEntries(
+            java.util.Map.entry(0x0005, new Model("Turing 1.6″", 400, 400, true)),
+            java.util.Map.entry(0x0016, new Model("Turing 2.8″ квадратный", 400, 400, true)),
+            java.util.Map.entry(0x0021, new Model("Turing 2.1″ круглый", 480, 480, true)),
+            java.util.Map.entry(0x0028, new Model("Turing 2.8″ круглый", 480, 480, true)),
+            java.util.Map.entry(0x0034, new Model("Turing 3.4″", 480, 480, true)),
+            java.util.Map.entry(0x0040, new Model("Turing 4″", 720, 720, true)),
+            java.util.Map.entry(0x0046, new Model("Turing 4.6″", 320, 960, true)),
+            java.util.Map.entry(0x0050, new Model("Turing 5.2″", 720, 1280, true)),
+            java.util.Map.entry(0x0080, new Model("Turing 8″", 800, 1280, true)),
+            java.util.Map.entry(0x0088, new Model("Turing 8.8″", 480, 1920, true)),
+            java.util.Map.entry(0x0092, new Model("Turing 9.2″", 462, 1920, true)),
+            java.util.Map.entry(0x0123, new Model("Turing 12.3″", 720, 1920, true)),
+            java.util.Map.entry(0x0288, new Model("Turing 2.88″ круглый", 480, 480, true)));
+
+    /** Модель по коду; null — не знаем и не угадать. */
+    static Model model(int vendor, int product) {
+        if (vendor != (VID_TURZX & 0xffff)) {
+            return null;
+        }
+
+        var known = MODELS.get(product);
+
+        if (known != null) {
+            return known;
+        }
+
+        // 0x0035 → 3.5″: у Turing 3.5″ экран 320×480
+        if (product == 0x0035) {
+            return new Model("Turing 3.5″ (по коду, не проверено)", 320, 480, false);
+        }
+
+        return null;
+    }
     static final int STOP_PLAYBACK = 111;
     static final int PLAYBACK_BUSY = 112;
 
@@ -443,8 +488,7 @@ final class CaseScreens {
                         }
 
                         command(link, BRIGHTNESS, new byte[] {(byte) Math.round(brightness * 102 / 100.0)}, null);
-                        var data = jpeg(image);
-                        var reply = command(link, SHOW_JPEG, be32(data.length), data);
+                        var reply = send(link, image);
 
                         if (reply == null) {
                             return "экран не ответил на картинку";
@@ -551,8 +595,7 @@ final class CaseScreens {
 
         /** Кадр на экран; false — экран не принял (отключили или сбой). */
         boolean show(BufferedImage image) throws IOException {
-            var data = jpeg(image);
-            var reply = command(link, SHOW_JPEG, be32(data.length), data);
+            var reply = send(link, image);
             return reply != null && (reply[1] & 0xff) == 0xc8;
         }
 
@@ -639,6 +682,33 @@ final class CaseScreens {
         }
 
         return null;
+    }
+
+    /**
+     * Кадр на экран: PNG с прозрачностью (команда 102), как шлёт
+     * turing-smart-screen-python, — старые прошивки раскладывают JPEG косо.
+     * Не влез PNG в 1 МБ — тогда JPEG.
+     */
+    private static byte[] send(Link link, BufferedImage image) throws IOException {
+        var png = png(image);
+
+        if (png.length <= MAX_JPEG) {
+            return command(link, SHOW_PNG, be32(png.length), png);
+        }
+
+        var data = jpeg(image);
+        return command(link, SHOW_JPEG, be32(data.length), data);
+    }
+
+    /** PNG с альфа-каналом: экран неправильно читает PNG без прозрачности (turzx-linux). */
+    static byte[] png(BufferedImage image) throws IOException {
+        var argb = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        var g = argb.createGraphics();
+        g.drawImage(image, 0, 0, null);
+        g.dispose();
+        var out = new ByteArrayOutputStream();
+        ImageIO.write(argb, "png", out);
+        return out.toByteArray();
     }
 
     /** Первые байты ответа в hex — по ним видно, что ещё сообщает экран. */

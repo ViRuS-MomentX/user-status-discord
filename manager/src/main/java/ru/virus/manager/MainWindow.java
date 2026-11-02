@@ -318,6 +318,16 @@ final class MainWindow extends JFrame {
         // Обновления с GitHub: через полминуты после запуска, дальше раз в 5 минут
         new Timer(30_000, e -> worker.submit(this::checkUpdate)) {{ setRepeats(false); }}.start();
         new Timer(5 * 60_000, e -> worker.submit(this::checkUpdate)).start();
+        // zapret: новая версия на GitHub Flowseal — скачать и поставить (через минуту после запуска и раз в 6 часов)
+        Runnable zapretUpdate = () -> worker.submit(() -> {
+            var result = ZapretPanel.autoUpdate(supervisor.home());
+
+            if (result != null) {
+                SwingUtilities.invokeLater(() -> toast(result));
+            }
+        });
+        new Timer(60_000, e -> zapretUpdate.run()) {{ setRepeats(false); }}.start();
+        new Timer(6 * 60 * 60_000, e -> zapretUpdate.run()).start();
 
         // Лишние копии ботов — когда наши уже запустились, чтобы не принять их за чужие
         new Timer(20_000, e -> findDuplicates(true)) {{ setRepeats(false); }}.start();
@@ -776,9 +786,12 @@ final class MainWindow extends JFrame {
             watch(process);
         }
 
-        // Состояние процессов — на табло экрана в корпусе
+        // Состояние процессов — на табло экрана в корпусе: id → «off», «start», «run», «error»
         var states = new java.util.LinkedHashMap<String, String>();
-        all.forEach(process -> states.put(process.spec().name(), process.state().name()));
+        var now = System.currentTimeMillis();
+        all.forEach(process -> states.put(process.spec().id(), ScreenBoard.status(process.state(),
+                process.toJson().get("startedAt") instanceof Long since ? now - since : Long.MAX_VALUE,
+                !doctor(process).active(now).isEmpty())));
         devicePage.processStates(states);
 
         rows.forEach((id, row) -> row.setSelected(view.equals("process:" + id)));

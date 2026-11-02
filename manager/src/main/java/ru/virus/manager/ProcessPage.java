@@ -59,6 +59,8 @@ final class ProcessPage extends Ui.Card {
     private String doctorActionId = "";
     /** Кнопки сервера Minecraft — отдельным рядом: в одну строку с остальными не влезают. */
     private final javax.swing.JPanel serverButtons = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
+    /** Настройки zapret — только на его странице. */
+    private final ZapretPanel zapretPanel;
     private final JTextField commandLine = new JTextField();
     private final JLabel inputHint = Ui.muted("", 12f);
     private final JTextField filter = new JTextField();
@@ -66,6 +68,7 @@ final class ProcessPage extends Ui.Card {
     private final ExecutorService worker;
 
     private ManagedProcess process;
+    private ManagedProcess zapretFor;
     private long seq;
 
     ProcessPage(MatrixBackground background, ExecutorService worker, Consumer<ManagedProcess> onEdit) {
@@ -131,7 +134,14 @@ final class ProcessPage extends Ui.Card {
         var allButtons = Ui.transparent(new BorderLayout(0, 10));
         allButtons.setBorder(BorderFactory.createEmptyBorder(6, 0, 0, 0));
         allButtons.add(mainRow, BorderLayout.NORTH);
-        allButtons.add(serverButtons, BorderLayout.SOUTH);
+        var extra = Ui.transparent(null);
+        extra.setLayout(new javax.swing.BoxLayout(extra, javax.swing.BoxLayout.Y_AXIS));
+        zapretPanel = new ZapretPanel(worker);
+        serverButtons.setAlignmentX(LEFT_ALIGNMENT);
+        zapretPanel.setAlignmentX(LEFT_ALIGNMENT);
+        extra.add(serverButtons);
+        extra.add(zapretPanel);
+        allButtons.add(extra, BorderLayout.SOUTH);
         head.add(allButtons, BorderLayout.SOUTH);
 
         start.addActionListener(e -> act(ManagedProcess::start));
@@ -642,6 +652,14 @@ final class ProcessPage extends Ui.Card {
         showInputHint();
         var server = ServerTools.isServer(process.spec());
         serverButtons.setVisible(server);
+        var isZapret = Zapret.ID.equals(process.spec().id());
+
+        if (isZapret && !zapretPanel.isVisible() || isZapret && this.zapretFor != process) {
+            zapretPanel.bind(process.workdir().getParent());
+            zapretFor = process;
+        }
+
+        zapretPanel.setVisible(isZapret);
         showAutoDeploy();
         showDoctor();
         badge.set(STATE_NAMES.get(state), Ui.Dot.color(state));

@@ -51,7 +51,7 @@ final class MatrixBackground extends JPanel {
     private static final float BASE = 0.07f;
 
     /** Цвета цифр по яркости: заранее, а не по объекту на цифру в каждом кадре. */
-    private static final Color[] SHADES = new Color[48];
+    static final Color[] SHADES = new Color[48];
 
     static {
         for (var i = 0; i < SHADES.length; i++) {

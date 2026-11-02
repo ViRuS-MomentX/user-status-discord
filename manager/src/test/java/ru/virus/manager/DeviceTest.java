@@ -1142,14 +1142,62 @@ class DeviceTest {
     }
 
     @Test
-    void caseBoardDrawsAndTurns() {
-        var data = new ScreenBoard.Data(java.time.LocalTime.of(16, 30), 0.42, 61, "Альтрон",
-                java.util.Map.of("Тестовый сервер", "RUNNING", "Discord-бот", "FAILED"));
-        var landscape = ScreenBoard.render(480, 320, data);
+    void caseBoardShowsProcessIconsByState() {
+        var states = java.util.Map.of("discord", "run", "parody", "error", "test-server", "start");
+        var landscape = ScreenBoard.render(480, 320, states);
         var portrait = CaseScreens.rotate(landscape, 90);
         assertEquals(320, portrait.getWidth(), "повернули под экран, стоящий боком");
         assertEquals(480, portrait.getHeight());
-        assertEquals(landscape.getWidth(), CaseScreens.rotate(landscape, 180).getWidth());
-        assertEquals("упал", ScreenBoard.label("FAILED"));
+
+        // Состояние → цвет: выключен серый, запускается жёлтый, работает зелёный, ошибка красная
+        assertEquals("off", ScreenBoard.status(ManagedProcess.State.STOPPED, 0, false));
+        assertEquals("start", ScreenBoard.status(ManagedProcess.State.RUNNING, 3_000, false), "только запустился");
+        assertEquals("run", ScreenBoard.status(ManagedProcess.State.RUNNING, 60_000, false));
+        assertEquals("error", ScreenBoard.status(ManagedProcess.State.RUNNING, 60_000, true), "ошибка в консоли");
+        assertEquals("error", ScreenBoard.status(ManagedProcess.State.FAILED, 0, false));
+        assertEquals(ScreenBoard.RUN, ScreenBoard.color("run"));
+
+        // Иконка Discord зелёная там, где процесс работает: в центре первой плитки есть зелёный
+        var green = 0;
+        for (var x = 40; x < 200; x++) {
+            for (var y = 40; y < 140; y++) {
+                var c = new java.awt.Color(landscape.getRGB(x, y));
+                if (c.getGreen() > 200 && c.getRed() < 100) {
+                    green++;
+                }
+            }
+        }
+        assertTrue(green > 200, "иконка Discord горит зелёным: " + green);
+    }
+
+    @Test
+    void zapretStrategyBecomesServiceCommand() throws Exception {
+        var bat = String.join("\r\n",
+                "@echo off",
+                "call service.bat status_zapret",
+                "set \"BIN=%~dp0bin\\\"",
+                "start \"zapret: %~n0\" /min \"%BIN%winws.exe\" --wf-tcp=80,443,%GameFilterTCP% --wf-udp=443,%GameFilterUDP% ^",
+                "--filter-udp=443 --hostlist=\"%LISTS%list-general.txt\" --dpi-desync=fake --new ^",
+                "--filter-tcp=%GameFilterTCP% --dpi-desync-fake-unknown-udp=\"%BIN%ACTIVE_GAME_UDP.bin\"",
+                "echo done");
+        var app = java.nio.file.Path.of("C:\\Program Files\\VIRUS-zapret");
+        var off = Zapret.arguments(bat, app, "disabled");
+        assertTrue(off.startsWith("--wf-tcp=80,443,12 --wf-udp=443,12"), off);
+        assertTrue(off.contains("--hostlist=\"C:\\Program Files\\VIRUS-zapret\\lists\\list-general.txt\""), off);
+        assertFalse(off.contains("echo"), "строка после ^-продолжений не попадает");
+        assertTrue(Zapret.arguments(bat, app, "all").contains("--filter-tcp=1024-65535"));
+        assertTrue(Zapret.arguments(bat, app, "udp").contains("--wf-tcp=80,443,12"));
+
+        assertTrue(Zapret.newer("1.10.4", "1.9.9"));
+        assertFalse(Zapret.newer("1.10.4", "1.10.4"));
+        assertTrue(Zapret.newer("1.10.4", ""));
+        assertTrue(Zapret.strategyOrder("general.bat") < Zapret.strategyOrder("general (ALT).bat"));
+        assertTrue(Zapret.strategyOrder("general (ALT2).bat") < Zapret.strategyOrder("general (ALT10).bat"));
+
+        var release = Zapret.parseRelease("{\"tag_name\":\"1.10.4\",\"assets\":[{\"name\":\"zapret.rar\",\"browser_download_url\":\"r\"},"
+                + "{\"name\":\"zapret-discord-youtube-1.10.4.zip\",\"browser_download_url\":\"https://x/z.zip\"}]}");
+        assertEquals("https://x/z.zip", release.zip());
+        assertTrue(Zapret.keeperScript().contains("Start-Service"));
+        assertTrue(Zapret.defaultSpec().supervised(), "останавливается словом stop — смотритель гасит службу");
     }
 }

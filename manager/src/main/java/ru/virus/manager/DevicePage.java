@@ -1836,7 +1836,7 @@ final class DevicePage extends Ui.Card {
     /** Живое табло на экране корпуса: свой поток, раз в 2 секунды кадр. */
     private volatile Thread board;
     private final JLabel boardStatus = Ui.muted("", 12.5f);
-    /** Состояние процессов для табло: имя → состояние; присылает главное окно. */
+    /** Состояние процессов для табло: id → «off/start/run/error»; присылает главное окно. */
     private volatile Map<String, String> processes = Map.of();
 
     void processStates(Map<String, String> states) {
@@ -1877,9 +1877,7 @@ final class DevicePage extends Ui.Card {
                     var width = Integer.parseInt(size[0]);
                     var height = Integer.parseInt(size[1]);
                     var turned = settings.screenRotation % 180 != 0;
-                    var data = new ScreenBoard.Data(java.time.LocalTime.now(), glow.cpu(), GpuSensor.celsius(),
-                            SignalRgb.mode(glow.mode).name() + (glow.on ? "" : " (выкл)"), processes);
-                    var frame = ScreenBoard.render(turned ? height : width, turned ? width : height, data);
+                    var frame = ScreenBoard.render(turned ? height : width, turned ? width : height, processes);
 
                     if (!session.show(CaseScreens.rotate(frame, settings.screenRotation))) {
                         throw new IOException("экран перестал принимать кадры");

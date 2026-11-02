@@ -75,6 +75,18 @@ final class Supervisor {
             seeded.add(ServerTools.ID);
             Files.write(memo, seeded, StandardCharsets.UTF_8);
         }
+
+        // zapret (обход блокировок Discord/YouTube) — тоже один раз; сам он ставится из своих настроек
+        if (!seeded.contains(Zapret.ID)) {
+            if (!processes.containsKey(Zapret.ID)) {
+                var spec = Zapret.defaultSpec();
+                processes.put(spec.id(), create(spec));
+                Files.createDirectories(home.resolve(spec.workdir()));
+            }
+
+            seeded.add(Zapret.ID);
+            Files.write(memo, seeded, StandardCharsets.UTF_8);
+        }
     }
 
     private ManagedProcess create(ProcessSpec spec) {

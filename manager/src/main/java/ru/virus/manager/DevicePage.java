@@ -264,6 +264,12 @@ final class DevicePage extends Ui.Card {
             if (settings.maonoMic) {
                 mic.start();
             }
+
+            tuya.lamps(settings.tuya);
+
+            if (settings.tuyaLamps) {
+                tuya.start();
+            }
         }
 
         if (LIGHTING && openRgbEngine()) {
@@ -1020,6 +1026,31 @@ final class DevicePage extends Ui.Card {
         lampsRow.add(Ui.muted("Bluetooth-лампы и ленты (Lotus Lamp X, duoCo и подобные) повторяют режим", 12.5f));
         stack.add(left(lampsRow));
         stack.add(left(lampsStatus));
+
+        // Лампы из приложения Smart Life (Tuya) — по Wi-Fi, ключи один раз из облака Tuya
+        stack.add(Box.createVerticalStrut(10));
+        var tuyaSwitch = new Ui.Switch(settings.tuyaLamps);
+        tuyaSwitch.onChange(on -> {
+            settings.tuyaLamps = on;
+            settings.save();
+
+            if (on) {
+                tuyaStatus.setText("Smart Life: подключаюсь…");
+                tuya.start();
+            } else {
+                tuya.stop();
+                tuyaStatus.setText("");
+            }
+        });
+        var tuyaRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        tuyaRow.add(tuyaSwitch);
+        var smartLife = Ui.ghost("Smart Life…");
+        smartLife.setToolTipText("Забрать лампы из аккаунта Smart Life (нужен бесплатный проект на iot.tuya.com)");
+        smartLife.addActionListener(e -> smartLife(tuyaSwitch));
+        tuyaRow.add(smartLife);
+        tuyaRow.add(Ui.muted("лампы Smart Life / Tuya (по Wi-Fi) повторяют режим", 12.5f));
+        stack.add(left(tuyaRow));
+        stack.add(left(tuyaStatus));
 
         // Кольцо микрофона Maono PD200X/PD200XS — повторяет цвет режима (у него 8 цветов и радуга)
         stack.add(Box.createVerticalStrut(10));
@@ -1809,6 +1840,108 @@ final class DevicePage extends Ui.Card {
     private double lampsTime;
     private long lampsAt = System.nanoTime();
 
+    /** Лампы Smart Life (Tuya). */
+    private final JLabel tuyaStatus = Ui.muted("", 12.5f);
+    private final TuyaLamps tuya = new TuyaLamps(text -> SwingUtilities.invokeLater(() -> tuyaStatus.setText(text)));
+
+    /**
+     * Забрать лампы из Smart Life: Access ID и Secret проекта iot.tuya.com
+     * (секрет не сохраняем), из облака — имена и локальные ключи, в сети —
+     * адреса. Дальше лампы работают без облака.
+     */
+    private void smartLife(Ui.Switch tuyaSwitch) {
+        var panel = Ui.transparent(null);
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.add(new JLabel("<html><body style='width:460px'>Лампы Smart Life управляются по домашней сети, но для "
+                + "этого нужен их «локальный ключ». Его один раз выдаёт облако Tuya:<br>"
+                + "1. Зарегистрируйся на <b>iot.tuya.com</b> (бесплатно) → Cloud → Create Cloud Project, "
+                + "Data Center — твой регион (как в Smart Life: Профиль → Настройки → Регион).<br>"
+                + "2. В проекте: Devices → Link App Account → Add App Account — отсканируй QR-код в Smart Life "
+                + "(Профиль → значок сканера).<br>"
+                + "3. Overview: скопируй сюда Access ID и Access Secret.<br>"
+                + "Секрет V.I.R.U.S. не сохраняет; лампы и компьютер должны быть в одной сети.</body></html>"));
+        panel.add(Box.createVerticalStrut(8));
+        var region = new javax.swing.JComboBox<>(TuyaCloud.REGIONS.keySet().toArray(String[]::new));
+        var accessId = new javax.swing.JTextField(28);
+        var secret = new javax.swing.JPasswordField(28);
+        var form = Ui.transparent(new java.awt.GridLayout(0, 2, 8, 6));
+        form.add(new JLabel("Регион (Data Center)"));
+        form.add(region);
+        form.add(new JLabel("Access ID / Client ID"));
+        form.add(accessId);
+        form.add(new JLabel("Access Secret"));
+        form.add(secret);
+        form.setAlignmentX(LEFT_ALIGNMENT);
+        panel.add(form);
+
+        if (!settings.tuya.isEmpty()) {
+            panel.add(Box.createVerticalStrut(8));
+            panel.add(new JLabel("Уже добавлены: " + String.join(", ", settings.tuya.stream().map(TuyaLamps.Lamp::name).toList())));
+        }
+
+        if (javax.swing.JOptionPane.showConfirmDialog(this, panel, "Лампы Smart Life",
+                javax.swing.JOptionPane.OK_CANCEL_OPTION, javax.swing.JOptionPane.PLAIN_MESSAGE) != javax.swing.JOptionPane.OK_OPTION) {
+            return;
+        }
+
+        var host = TuyaCloud.REGIONS.get((String) region.getSelectedItem());
+        var id = accessId.getText().strip();
+        var chars = secret.getPassword();
+        var key = new String(chars).strip();
+        java.util.Arrays.fill(chars, '\0');
+        secret.setText("");
+
+        if (id.isEmpty() || key.isEmpty()) {
+            tuyaStatus.setText("Smart Life: нужны и Access ID, и Access Secret.");
+            return;
+        }
+
+        tuyaStatus.setText("Smart Life: спрашиваю облако Tuya и ищу лампы в сети…");
+        worker.submit(() -> {
+            String text;
+
+            try {
+                var devices = new TuyaCloud(host, id, key).devices();
+                var found = Tuya.discover(6000);
+                var chosen = new java.util.ArrayList<TuyaLamps.Lamp>();
+                var skipped = new java.util.ArrayList<String>();
+
+                for (var device : devices) {
+                    if (!TuyaCloud.light(device.category()) || device.key().isBlank() || device.key().equals("null")) {
+                        skipped.add(device.name());
+                        continue;
+                    }
+
+                    var net = found.stream().filter(f -> f.id().equals(device.id())).findFirst();
+                    chosen.add(new TuyaLamps.Lamp(device.id(), device.name(), device.key(),
+                            net.map(Tuya.Found::ip).orElse(""), net.map(Tuya.Found::version).orElse("3.3")));
+                }
+
+                text = chosen.isEmpty() ? "Smart Life: в аккаунте нет ламп" + (devices.isEmpty()
+                        ? " — привязан ли аккаунт Smart Life к проекту (Devices → Link App Account)?"
+                        : " (есть: " + String.join(", ", skipped) + ")")
+                        : "Smart Life: добавлены " + String.join(", ", chosen.stream().map(lamp -> lamp.name()
+                        + (lamp.ip().isBlank() ? " (пока не видна в сети)" : "")).toList());
+                var lamps = List.copyOf(chosen);
+                SwingUtilities.invokeLater(() -> {
+                    if (!lamps.isEmpty()) {
+                        settings.tuya = lamps;
+                        settings.tuyaLamps = true;
+                        settings.save();
+                        tuya.lamps(lamps);
+                        tuya.start();
+                        tuyaSwitch.setOn(true);
+                    }
+                });
+            } catch (Exception e) {
+                text = "Smart Life: " + e.getMessage() + ". Проверь регион, Access ID и Secret.";
+            }
+
+            var result = text;
+            SwingUtilities.invokeLater(() -> tuyaStatus.setText(result));
+        });
+    }
+
     /** Микрофон Maono: подсветка кольца. */
     private final JLabel micStatus = Ui.muted("", 12.5f);
     private final MaonoMic mic = new MaonoMic(text -> SwingUtilities.invokeLater(() -> micStatus.setText(text)));
@@ -1868,14 +2001,22 @@ final class DevicePage extends Ui.Card {
             mic.apply(level > 0, level, MaonoMic.nearest(base, MaonoMic.rainbow(glow.mode)));
         }
 
-        if (!settings.bleLamps) {
+        if (!settings.bleLamps && !settings.tuyaLamps) {
             return;
         }
 
         var color = Glow.frame(glow.mode, lampsTime, List.of(new OpenRgb.Place(0.5, 0.5, false)), glow.color,
                 glow.color2, glow.cpu(), glow.effective(), glow.on, 300)[0];
-        lamps.color(RgbAnimator.overlay(new Color[] {color}, glow.flashColor,
-                glow.flashLevel(System.currentTimeMillis()))[0]);
+        var shown = RgbAnimator.overlay(new Color[] {color}, glow.flashColor,
+                glow.flashLevel(System.currentTimeMillis()))[0];
+
+        if (settings.bleLamps) {
+            lamps.color(shown);
+        }
+
+        if (settings.tuyaLamps) {
+            tuya.color(settings.allDark ? Color.BLACK : shown);
+        }
     }
 
     /** Экраны корпуса (TURZX/JONSBO): найденные и что они ответили. */
@@ -1908,6 +2049,7 @@ final class DevicePage extends Ui.Card {
                 SwingUtilities.invokeLater(() -> {
                     find.setEnabled(true);
                     showScreens(result);
+                    autoBoard(result);
                 });
 
                 if (resume) {
@@ -1930,6 +2072,19 @@ final class DevicePage extends Ui.Card {
 
         if (settings.screenBoard && !settings.screenId.isBlank() && !settings.allDark) {
             startBoard();
+        } else if (!settings.screenAuto && !settings.allDark && SystemInfo.isWindows()) {
+            // Первый запуск: сами находим экран и включаем на нём табло с процессами
+            worker.submit(() -> {
+                try {
+                    var found = CaseScreens.probe();
+                    SwingUtilities.invokeLater(() -> {
+                        showScreens(found);
+                        autoBoard(found);
+                    });
+                } catch (Throwable ignored) {
+                    // USB недоступен — пусть ищут кнопкой
+                }
+            });
         }
 
         return inner("Экраны корпуса", body);
@@ -2084,6 +2239,33 @@ final class DevicePage extends Ui.Card {
                 } catch (InterruptedException stop) {
                     return;
                 }
+            }
+        }
+    }
+
+    /**
+     * Табло с процессами само встаёт на экран, модель которого известна
+     * (3,5″ на материнке — 640×480). Один раз: дальше решает переключатель.
+     */
+    private void autoBoard(List<CaseScreens.Screen> found) {
+        if (settings.allDark || settings.screenAuto || (settings.screenBoard && !settings.screenId.isBlank())) {
+            return;
+        }
+
+        for (var screen : found) {
+            var model = CaseScreens.model(screen.vendor(), screen.product());
+
+            if (screen.answers() && model != null) {
+                settings.screenAuto = true;
+                settings.screenBoard = true;
+                settings.screenId = screen.id();
+                settings.screenSize = model.width() + "×" + model.height();
+                settings.screenSized = true;
+                settings.save();
+                showScreens(found);
+                startBoard();
+                toast.accept("На экран " + model.name() + " выведено табло с процессами (" + settings.screenSize + ").");
+                return;
             }
         }
     }
@@ -3792,6 +3974,11 @@ final class DevicePage extends Ui.Card {
         List<String> bleNames = List.of();
         boolean maonoMic;
         boolean screenBoard;
+        /** Табло уже само включалось на найденном экране — второй раз не навязываем. */
+        boolean screenAuto;
+        /** Лампы Smart Life (Tuya) по Wi-Fi: включены и какие (с локальными ключами — их не показываем). */
+        boolean tuyaLamps;
+        List<TuyaLamps.Lamp> tuya = List.of();
         /** Размер экрана уже подставлен по модели — дальше не трогаем, вдруг поправили руками. */
         boolean screenSized;
         /** «Погасить всё» нажато — подсветка и экраны выключены, и после перезапуска тоже. */
@@ -3869,6 +4056,10 @@ final class DevicePage extends Ui.Card {
                             ? names.stream().map(String::valueOf).toList() : List.of();
                     settings.maonoMic = Boolean.TRUE.equals(json.get("maonoMic"));
                     settings.screenBoard = Boolean.TRUE.equals(json.get("screenBoard"));
+                    settings.screenAuto = Boolean.TRUE.equals(json.get("screenAuto"));
+                    settings.tuyaLamps = Boolean.TRUE.equals(json.get("tuyaLamps"));
+                    settings.tuya = json.get("tuya") instanceof List<?> lamps ? lamps.stream().map(TuyaLamps.Lamp::fromJson)
+                            .filter(java.util.Objects::nonNull).toList() : List.of();
                     settings.screenSized = Boolean.TRUE.equals(json.get("screenSized"));
                     settings.allDark = Boolean.TRUE.equals(json.get("allDark"));
                     settings.screenId = json.get("screenId") instanceof String id && id.matches("[0-9a-f]{4}:[0-9a-f]{4}") ? id : "";
@@ -3974,6 +4165,9 @@ final class DevicePage extends Ui.Card {
             json.put("bleNames", bleNames);
             json.put("maonoMic", maonoMic);
             json.put("screenBoard", screenBoard);
+            json.put("screenAuto", screenAuto);
+            json.put("tuyaLamps", tuyaLamps);
+            json.put("tuya", tuya.stream().map(TuyaLamps.Lamp::toJson).toList());
             json.put("screenSized", screenSized);
             json.put("allDark", allDark);
             json.put("screenId", screenId);

@@ -1105,6 +1105,37 @@ class DeviceTest {
     }
 
     @Test
+    void smartLifeLampsSpeakTuya() throws Exception {
+        // Подпись облака — как у tinytuya (посчитано на Python)
+        assertEquals("9AF3E82AD68E6CCD4AD861F718E75D445CE0298F9CD4C2D87E265CD17FC187CA",
+                TuyaCloud.sign("secret", "abc", null, 1700000000000L, "/v1.0/token?grant_type=1"));
+        assertTrue(TuyaCloud.light("dj") && TuyaCloud.light("dd") && !TuyaCloud.light("cz"));
+
+        // Кадр 3.3: туда и обратно
+        var key = "0123456789abcdef".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        var sealed = Tuya.ecb(key, "{\"dps\":{\"20\":true}}".getBytes(java.nio.charset.StandardCharsets.UTF_8), true, true);
+        var frame = Tuya.pack55(1, Tuya.CONTROL, sealed, null);
+        assertEquals(0x000055AA, java.nio.ByteBuffer.wrap(frame).getInt());
+        assertEquals("{\"dps\":{\"20\":true}}", new String(Tuya.ecb(key, Tuya.unpack55(frame, false, false), false, true),
+                java.nio.charset.StandardCharsets.UTF_8));
+
+        // Цвет: новые лампы — DP 20/21/24, старые — 1/2/5; чёрный — выключить
+        var red = Tuya.light(Color.RED, true, true);
+        assertEquals(true, red.get("20"));
+        assertEquals("colour", red.get("21"));
+        assertEquals("000003e803e8", red.get("24"));
+        assertEquals(false, Tuya.light(Color.BLACK, true, true).get("20"));
+        assertEquals("ff00000000ffff", Tuya.light(Color.RED, true, false).get("5"));
+
+        // Лампа в настройках: туда и обратно; без ключа — не лампа
+        var lamp = new TuyaLamps.Lamp("bf123", "Лампа", "0123456789abcdef", "192.168.1.5", "3.4");
+        assertEquals(lamp, TuyaLamps.Lamp.fromJson(lamp.toJson()));
+        assertNull(TuyaLamps.Lamp.fromJson(java.util.Map.of("id", "x")));
+        assertTrue(TuyaLamps.same(new Color(10, 10, 10), new Color(12, 12, 12)));
+        assertFalse(TuyaLamps.same(Color.RED, Color.BLUE));
+    }
+
+    @Test
     void bluetoothLampsSpeakElkBledom() {
         assertArrayEquals(new byte[] {0x7e, 0x00, 0x05, 0x03, (byte) 0xff, 0x00, 0x00, 0x00, (byte) 0xef},
                 BleLamps.frame(255, 0, 0), "красный — как в открытом описании протокола");

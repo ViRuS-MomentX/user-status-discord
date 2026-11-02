@@ -1180,6 +1180,8 @@ class DeviceTest {
         assertEquals(0xdc23aabbccddL, TuyaBle.address("dc:23:aa:bb:cc:dd"));
         assertTrue(TuyaBle.script(1).contains("00002b11") && TuyaBle.script(1).contains("[uint64]1"));
         assertNull(TuyaBle.Link.cleanLine("#< CLIXML"));
+        assertEquals(List.of(new java.net.InetSocketAddress("127.0.0.1", 6743)),
+                OpenRgb.parseListening("listen 0.0.0.0 6743\r\nчто-то ещё\nlisten 0.0.0.0 6743\n"));
         assertEquals("error Нет доступа", TuyaBle.Link.cleanLine("<Objs Version=\"1.1.0.1\"><S S=\"Error\">Нет доступа_x000D__x000A_</S></Objs>"));
         assertNull(TuyaBle.Link.cleanLine("<Objs Version=\"1.1.0.1\"><Obj S=\"progress\"></Obj></Objs>"));
         assertEquals("ready", TuyaBle.Link.cleanLine("ready "));

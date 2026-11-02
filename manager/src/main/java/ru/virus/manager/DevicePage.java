@@ -3161,7 +3161,9 @@ final class DevicePage extends Ui.Card {
             } catch (IOException | RuntimeException e) {
                 // Коротко и по делу: открыт ли OpenRGB вообще
                 var text = !(e instanceof IOException) || sdkOpen(settings.host) ? e.getMessage()
-                        : openRgbRunning() ? "OpenRGB открыт без сервера — нажми «Запустить OpenRGB»"
+                        : openRgbRunning() ? (OpenRgb.listening().isEmpty()
+                        ? "Сервер SDK в OpenRGB выключен — в OpenRGB: SDK Server → Start Server"
+                        : "OpenRGB слушает " + OpenRgb.listening() + ", но не отвечает")
                         : "OpenRGB не запущен — нажми «Запустить OpenRGB»";
                 SwingUtilities.invokeLater(() -> {
                     rgbStatus.setText(text);
@@ -3770,7 +3772,8 @@ final class DevicePage extends Ui.Card {
     /** Отвечает ли сервер SDK OpenRGB (порт открыт). */
     static boolean sdkOpen(String host) {
         try (var socket = new java.net.Socket()) {
-            socket.connect(new java.net.InetSocketAddress(host, OpenRgb.PORT), 700);
+            var known = OpenRgb.found;
+            socket.connect(known != null ? known : new java.net.InetSocketAddress(host, OpenRgb.PORT), 700);
             return true;
         } catch (IOException e) {
             return false;

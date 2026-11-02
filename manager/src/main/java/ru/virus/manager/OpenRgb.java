@@ -198,21 +198,116 @@ final class OpenRgb implements AutoCloseable {
     private int protocol;
 
     OpenRgb(String host, int port) throws IOException {
-        socket = new Socket();
-
-        try {
-            socket.connect(new InetSocketAddress(host, port), 2000);
-        } catch (IOException e) {
-            socket.close();
-            throw new IOException("OpenRGB не отвечает на " + host + ":" + port
-                    + " — запусти OpenRGB и включи в нём SDK Server (вкладка SDK Server → Start Server)");
-        }
+        socket = open(host, port);
 
         socket.setSoTimeout(5000);
         in = new DataInputStream(socket.getInputStream());
         out = socket.getOutputStream();
         send(0, SET_CLIENT_NAME, (Virus.NAME + "\0").getBytes(StandardCharsets.UTF_8));
         protocol = negotiate();
+    }
+
+    /** Где на самом деле слушает OpenRGB этого компьютера (адрес и порт могли поменять в его настройках). */
+    static volatile InetSocketAddress found;
+    private static volatile long lookedAt;
+    private static volatile List<InetSocketAddress> looked = List.of();
+
+    private static Socket dial(InetSocketAddress address) throws IOException {
+        var socket = new Socket();
+
+        try {
+            socket.connect(address, 2000);
+            return socket;
+        } catch (IOException e) {
+            socket.close();
+            throw e;
+        }
+    }
+
+    private static boolean local(String host) {
+        return host.equals("127.0.0.1") || host.equalsIgnoreCase("localhost") || host.equals("::1");
+    }
+
+    private static Socket open(String host, int port) throws IOException {
+        var standard = new InetSocketAddress(host, port);
+        var known = found;
+
+        if (known != null && local(host) && port == PORT) {
+            try {
+                return dial(known);
+            } catch (IOException ignored) {
+                found = null;
+            }
+        }
+
+        try {
+            return dial(standard);
+        } catch (IOException e) {
+            if (local(host) && port == PORT) {
+                for (var other : listening()) {
+                    try {
+                        var socket = dial(other);
+                        found = other;
+                        return socket;
+                    } catch (IOException ignored) {
+                        // дальше
+                    }
+                }
+            }
+
+            throw new IOException("OpenRGB не отвечает на " + host + ":" + port
+                    + " — запусти OpenRGB и включи в нём SDK Server (вкладка SDK Server → Start Server)");
+        }
+    }
+
+    /**
+     * На каких адресах и портах слушает процесс OpenRGB (Windows). Пусто —
+     * сервер SDK в нём не включён. Не чаще раза в 20 секунд.
+     */
+    static synchronized List<InetSocketAddress> listening() {
+        if (!SystemInfo.isWindows()) {
+            return List.of();
+        }
+
+        if (System.currentTimeMillis() - lookedAt < 20_000) {
+            return looked;
+        }
+
+        lookedAt = System.currentTimeMillis();
+        var result = new java.util.ArrayList<InetSocketAddress>();
+
+        try {
+            var script = "$ids = (Get-Process OpenRGB -ErrorAction SilentlyContinue).Id; if ($ids) { "
+                    + "Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $ids -contains $_.OwningProcess } "
+                    + "| ForEach-Object { 'listen ' + $_.LocalAddress + ' ' + $_.LocalPort } }";
+            var process = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+                    .redirectErrorStream(true).start();
+            process.getOutputStream().close();
+            var out = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS);
+            result.addAll(parseListening(out));
+        } catch (Exception ignored) {
+            // не узнали — значит, не узнали
+        }
+
+        looked = List.copyOf(result);
+        return looked;
+    }
+
+    /** «listen 0.0.0.0 6742» → 127.0.0.1:6742 (слушает на всех адресах — стучимся на свой). */
+    static List<InetSocketAddress> parseListening(String output) {
+        var result = new java.util.ArrayList<InetSocketAddress>();
+
+        for (var line : output.lines().toList()) {
+            var parts = line.strip().split("\\s+");
+
+            if (parts.length == 3 && parts[0].equals("listen") && parts[2].matches("\\d{1,5}")) {
+                var address = parts[1].equals("0.0.0.0") ? "127.0.0.1" : parts[1].equals("::") ? "::1" : parts[1];
+                result.add(InetSocketAddress.createUnresolved(address, Integer.parseInt(parts[2])));
+            }
+        }
+
+        return result.stream().map(a -> new InetSocketAddress(a.getHostString(), a.getPort())).distinct().toList();
     }
 
     /**

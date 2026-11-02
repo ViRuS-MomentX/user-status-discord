@@ -342,7 +342,7 @@ final class TuyaBle {
                     }
 
                     if (line == null || line.equals("closed") || line.equals("none") || line.equals("nobt")
-                            || line.equals("nochar")) {
+                            || line.equals("nochar") || line.equals("unheard")) {
                         throw new IOException(helperError(problem != null && (line == null || line.equals("closed"))
                                 ? "error " + problem : line));
                     }
@@ -422,6 +422,8 @@ final class TuyaBle {
                 case "nobt" -> "на компьютере нет Bluetooth или он выключен";
                 case "none" -> "лампа не отвечает по Bluetooth — она включена и рядом? Закрой Smart Life на телефоне";
                 case "nochar" -> "это не Bluetooth-лампа Tuya (нет её характеристик)";
+                case "unheard" -> "лампу не слышно в эфире Bluetooth: она включена, рядом с компьютером и не подключена к "
+                        + "телефону? (выключи Bluetooth на телефоне)";
                 default -> line.startsWith("error ") ? line.substring(6) : line;
             };
         }
@@ -561,8 +563,43 @@ final class TuyaBle {
                   $null = $task.Wait(20000)
                   $task.Result
                 }
+                # Сначала слушаем эфир: Windows подключается по адресу, только если недавно видела устройство.
+                # Заодно ищем лампы Tuya (производитель 0x07D0, служба a201) — вдруг облако дало другой адрес
+                $target = [uint64]%ADDR%
+                $tuya = @{}
+                $heard = $false
                 try {
-                  $dev = Await ([Windows.Devices.Bluetooth.BluetoothLEDevice]::FromBluetoothAddressAsync([uint64]%ADDR%)) ([Windows.Devices.Bluetooth.BluetoothLEDevice])
+                  $null = [Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementWatcher, Windows.Devices.Bluetooth, ContentType = WindowsRuntime]
+                  $watcher = New-Object Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementWatcher
+                  $watcher.ScanningMode = [Windows.Devices.Bluetooth.Advertisement.BluetoothLEScanningMode]::Active
+                  Register-ObjectEvent -InputObject $watcher -EventName Received -SourceIdentifier adv | Out-Null
+                  $watcher.Start()
+                  $deadline = (Get-Date).AddSeconds(12)
+                  while ((Get-Date) -lt $deadline -and -not $heard) {
+                    foreach ($e in @(Get-Event -SourceIdentifier adv -ErrorAction SilentlyContinue)) {
+                      $a = $e.SourceEventArgs
+                      if ($a.BluetoothAddress -eq $target) { $heard = $true }
+                      $isTuya = $false
+                      foreach ($m in $a.Advertisement.ManufacturerData) { if ($m.CompanyId -eq 0x07D0) { $isTuya = $true } }
+                      foreach ($u in $a.Advertisement.ServiceUuids) { if ($u.ToString().StartsWith('0000a201')) { $isTuya = $true } }
+                      if ($isTuya) { $tuya[$a.BluetoothAddress] = $a.Advertisement.LocalName }
+                      Remove-Event -EventIdentifier $e.EventIdentifier
+                    }
+                    Start-Sleep -Milliseconds 50
+                  }
+                  $watcher.Stop()
+                  Unregister-Event -SourceIdentifier adv
+                } catch { }
+                if (-not $heard) {
+                  if ($tuya.Count -ge 1) {
+                    $target = @($tuya.Keys)[0]
+                    [Console]::WriteLine('moved ' + $target.ToString('x12') + ' ' + $tuya[$target])
+                  } else {
+                    [Console]::WriteLine('unheard'); exit
+                  }
+                }
+                try {
+                  $dev = Await ([Windows.Devices.Bluetooth.BluetoothLEDevice]::FromBluetoothAddressAsync($target)) ([Windows.Devices.Bluetooth.BluetoothLEDevice])
                 } catch { $dev = $null }
                 if ($dev -eq $null) { [Console]::WriteLine('none'); exit }
                 $notify = $null; $write = $null

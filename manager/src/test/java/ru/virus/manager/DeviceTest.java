@@ -1259,7 +1259,8 @@ class DeviceTest {
         assertEquals(480, CaseScreens.model(0x1cbe, 0x0088).width());
         assertEquals(1920, CaseScreens.model(0x1cbe, 0x0088).height());
         var guess = CaseScreens.model(0x1cbe, 0x0035);
-        assertEquals(320, guess.width());
+        assertEquals(640, guess.width(), "по фото: 320×480 заняла левую половину");
+        assertEquals(480, guess.height());
         assertFalse(guess.exact(), "3,5″ — по коду, не проверено");
         assertNull(CaseScreens.model(0x43a8, 0x0e61), "чужой производитель — не угадываем");
 

@@ -2147,6 +2147,12 @@ final class DevicePage extends Ui.Card {
                         + ". Нажми «Тестовая картинка» — рамка должна быть ровной по всем краям.");
             });
 
+            // Прошлая догадка 320×480 оказалась половиной экрана — поправляем один раз
+            if (model != null && settings.screenSized && settings.screenSize.equals("320×480")
+                    && model.width() == 640 && screen.product() == 0x0035) {
+                settings.screenSized = false;
+            }
+
             if (model != null && !settings.screenSized) {
                 // Первый раз — сразу размер модели, а не наугад
                 settings.screenSized = true;

@@ -88,7 +88,8 @@ final class CaseScreens {
 
         // 0x0035 → 3.5″: у Turing 3.5″ экран 320×480
         if (product == 0x0035) {
-            return new Model("Turing 3.5″ (по коду, не проверено)", 320, 480, false);
+            // По фото: картинка 320×480 в PNG встала ровно, но на левую половину — экран лёжа 640×480
+            return new Model("Turing 3.5″", 640, 480, false);
         }
 
         return null;
@@ -417,9 +418,13 @@ final class CaseScreens {
                     try {
                         drain(link);
                         var reply = command(link, SYNC, new byte[0], null);
+                        // Непонятный ответ тоже ценен: по сырым байтам видно, на что похож их протокол
+                        var raw = reply == null ? rawRead(link) : null;
                         found.add(reply == null
-                                ? new Screen(bus, address, vendor, product, name, "", "не ответил на приветствие — "
-                                + "похоже, у него другой протокол", link.text(), "")
+                                ? new Screen(bus, address, vendor, product, name, "", raw == null || raw.length == 0
+                                ? "не ответил на приветствие — похоже, у него другой протокол"
+                                : "ответил не по протоколу TURZX — сырые байты ниже", link.text(),
+                                raw == null ? "" : hex(raw, 64))
                                 : new Screen(bus, address, vendor, product, name, firmware(reply), null, link.text(),
                                 hex(reply, 64)));
                     } finally {
@@ -709,6 +714,20 @@ final class CaseScreens {
         var out = new ByteArrayOutputStream();
         ImageIO.write(argb, "png", out);
         return out.toByteArray();
+    }
+
+    /** Прочитать всё, что устройство прислало само, без разбора; null — ничего. */
+    private static byte[] rawRead(Link link) {
+        var in = ByteBuffer.allocateDirect(1024);
+        var got = IntBuffer.allocate(1);
+
+        if (link.transfer(link.in(), in, got, 800) != LibUsb.SUCCESS || got.get(0) <= 0) {
+            return null;
+        }
+
+        var data = new byte[got.get(0)];
+        in.get(data);
+        return data;
     }
 
     /** Первые байты ответа в hex — по ним видно, что ещё сообщает экран. */

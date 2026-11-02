@@ -67,6 +67,15 @@ final class ZapretPanel extends JPanel {
         check.setToolTipText("Запустить winws.exe напрямую на 5 секунд и показать, что он скажет (нужны права администратора)");
         check.addActionListener(e -> run("Проверяю winws.exe — подтверди права администратора…", () -> zapret.diagnose()));
         head.add(check);
+        var defender = Ui.ghost("В исключения Защитника");
+        defender.setToolTipText("Защитник Windows часто блокирует WinDivert из zapret («Access is denied»). Добавить папки "
+                + "zapret в исключения — так советует и сам Flowseal (нужны права администратора)");
+        defender.addActionListener(e -> run("Добавляю папки zapret в исключения Защитника — подтверди права…", () -> {
+            var problem = zapret.exclude();
+            return problem == null ? "Готово: Защитник больше не трогает папки zapret. Нажми «Обновить» (скачать заново, "
+                    + "если файлы удалены), потом «Применить»." : "Не получилось: " + problem;
+        }));
+        head.add(defender);
 
         var options = row();
         options.add(Ui.muted("Стратегия", 12.5f));

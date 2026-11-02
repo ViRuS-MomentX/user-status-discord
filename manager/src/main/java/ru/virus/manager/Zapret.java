@@ -451,16 +451,45 @@ final class Zapret {
                 "  try { Start-Service $name -ErrorAction Stop } catch {",
                 "    $missing = @('winws.exe', 'WinDivert.dll', 'WinDivert64.sys', 'cygwin1.dll') | Where-Object { -not (Test-Path (Join-Path $app (Join-Path 'bin' $_))) }",
                 "    if ($missing) { throw ('нет файлов ' + ($missing -join ', ') + ' — их удалил антивирус. Восстанови их в «Безопасность Windows → Журнал защиты», добавь папку ' + $app + ' в исключения и нажми «Применить».') }",
+                // Защитник: zapret из-за WinDivert часто числится у него «нежелательной программой» и запуск блокируется
+                "    $hits = @()",
+                "    try { $hits = @(Get-MpThreatDetection -ErrorAction Stop | Where-Object { ($_.Resources -join ' ') -match 'winws|WinDivert|VIRUS-zapret' }) } catch { }",
+                "    if ($hits.Count -gt 0) {",
+                "      $names = ($hits | ForEach-Object { (Get-MpThreat -ThreatID $_.ThreatID -ErrorAction SilentlyContinue).ThreatName } | Select-Object -Unique) -join ', '",
+                "      throw ('Защитник Windows блокирует zapret (' + $names + '). Нажми «В исключения Защитника» в настройках zapret, потом «Обновить» и «Применить».')",
+                "    }",
                 "    $exe = Join-Path $app 'bin\\winws.exe'",
                 "    $out = Join-Path $PSScriptRoot 'winws-out.txt'",
                 "    $err = Join-Path $PSScriptRoot 'winws-err.txt'",
-                "    $p = Start-Process -FilePath $exe -ArgumentList '" + ps(args) + "' -WorkingDirectory (Split-Path $exe) -PassThru -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err",
+                "    try {",
+                "      $p = Start-Process -FilePath $exe -ArgumentList '" + ps(args) + "' -WorkingDirectory (Split-Path $exe) -PassThru -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err -ErrorAction Stop",
+                "    } catch {",
+                "      throw ('Windows не даёт запустить winws.exe: ' + $_.Exception.Message + ' Обычно так блокирует антивирус — нажми «В исключения Защитника» в настройках zapret, потом «Обновить» и «Применить».')",
+                "    }",
                 "    Start-Sleep -Seconds 5",
                 "    $said = ((Get-Content $out -Raw -ErrorAction SilentlyContinue) + ' ' + (Get-Content $err -Raw -ErrorAction SilentlyContinue)).Trim()",
                 "    if ($p.HasExited) { throw ('служба не запускается: winws.exe сразу завершился (код ' + $p.ExitCode + '): ' + $said) }",
                 "    Stop-Process -Id $p.Id -Force",
                 "    throw ('служба не запускается, хотя сам winws.exe работает (' + $_.Exception.Message + '). ' + $said)",
                 "  }");
+    }
+
+    /**
+     * Исключение в Защитнике для папок zapret — как советует README Flowseal:
+     * WinDivert он часто считает «нежелательной программой» и блокирует.
+     * Только по нажатию пользователя, никогда молча.
+     */
+    String excludeScript() {
+        return String.join("\n",
+                "$log = Join-Path $PSScriptRoot 'apply.log'",
+                "try {",
+                "  Add-MpPreference -ExclusionPath '" + ps(app().toString()) + "', '" + ps(stage().toString()) + "'",
+                "  Set-Content -Path $log -Value 'ok' -Encoding UTF8",
+                "} catch { Set-Content -Path $log -Value ('error: ' + $_.Exception.Message) -Encoding UTF8 }");
+    }
+
+    String exclude() {
+        return elevate(excludeScript());
     }
 
     /** Удаление службы и папки — тоже с правами. */

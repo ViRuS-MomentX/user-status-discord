@@ -33,12 +33,18 @@ final class BleLamps {
      * −3 — места красного, зелёного и синего (у LED-/JACKYLED порядок R B G).
      * Порядок важен: длинные имена раньше коротких.
      */
-    record Model(String prefix, int[] on, int[] color) {
+    record Model(String prefix, int[] on, int[] color, int[] bright) {
+
+        Model(String prefix, int[] on, int[] color) {
+            this(prefix, on, color, new int[] {126, 4, 1, 100, 255, 0, 255, 0, 239});
+        }
     }
 
     static final java.util.List<Model> MODELS = java.util.List.of(
-            new Model("ELK-BLEDOB", new int[] {126, 7, 4, 255, 0, 1, 2, 1, 239}, new int[] {126, 7, 5, 3, -1, -2, -3, 10, 239}),
-            new Model("ELK-BLEDOM0E", new int[] {126, 7, 4, 255, 0, 1, 2, 1, 239}, new int[] {126, 7, 5, 3, -1, -2, -3, 10, 239}),
+            new Model("ELK-BLEDOB", new int[] {126, 7, 4, 255, 0, 1, 2, 1, 239}, new int[] {126, 7, 5, 3, -1, -2, -3, 10, 239},
+                    new int[] {126, 4, 1, 100, 1, 255, 2, 1, 239}),
+            new Model("ELK-BLEDOM0E", new int[] {126, 7, 4, 255, 0, 1, 2, 1, 239}, new int[] {126, 7, 5, 3, -1, -2, -3, 10, 239},
+                    new int[] {126, 4, 1, 100, 1, 255, 2, 1, 239}),
             new Model("ELK-BLEDDM", new int[] {126, 4, 4, 240, 0, 1, 255, 0, 239}, new int[] {126, 0, 5, 3, -1, -2, -3, 0, 239}),
             new Model("ELK-BTC", new int[] {126, 0, 4, 240, 0, 1, 255, 0, 239}, new int[] {126, 0, 5, 3, -1, -2, -3, 10, 239}),
             new Model("MELK-OG10", new int[] {126, 7, 4, 255, 0, 1, 2, 1, 239}, new int[] {126, 0, 5, 3, -1, -2, -3, 0, 239}),
@@ -48,7 +54,8 @@ final class BleLamps {
             new Model("ELK-BULB", new int[] {126, 0, 4, 1, 0, 0, 0, 0, 239}, new int[] {126, 0, 5, 3, -1, -2, -3, 0, 239}),
             new Model("ELK-LAMPL", new int[] {126, 0, 4, 1, 0, 0, 0, 0, 239}, new int[] {126, 0, 5, 3, -1, -2, -3, 0, 239}),
             new Model("LEDBLE", new int[] {126, 0, 4, 1, 0, 0, 0, 0, 239}, new int[] {126, 0, 5, 3, -1, -2, -3, 0, 239}),
-            new Model("LED-", new int[] {126, 4, 4, 1, 255, 255, 255, 0, 239}, new int[] {126, 7, 5, 3, -1, -3, -2, 0, 239}),
+            new Model("LED-", new int[] {126, 4, 4, 1, 255, 255, 255, 0, 239}, new int[] {126, 7, 5, 3, -1, -3, -2, 0, 239},
+                    new int[] {126, 4, 1, 100, 255, 255, 255, 0, 239}),
             new Model("JACKYLED", new int[] {126, 4, 4, 1, 255, 255, 255, 0, 239}, new int[] {126, 7, 5, 3, -1, -3, -2, 0, 239}),
             // Всё остальное (ELK-BLEDOM, ELK-BLE…) — самый распространённый вариант
             new Model("", new int[] {126, 0, 4, 240, 0, 1, 255, 0, 239}, new int[] {126, 0, 5, 3, -1, -2, -3, 0, 239}));
@@ -76,7 +83,8 @@ final class BleLamps {
         var rows = new java.util.ArrayList<String>();
 
         for (var model : MODELS) {
-            rows.add("  @{ p = '" + model.prefix() + "'; on = @(" + join(model.on()) + "); col = @(" + join(model.color()) + ") }");
+            rows.add("  @{ p = '" + model.prefix() + "'; on = @(" + join(model.on()) + "); col = @(" + join(model.color())
+                    + "); bright = @(" + join(model.bright()) + ") }");
         }
 
         return "$models = @(\n" + String.join(",\n", rows) + "\n)";
@@ -292,13 +300,24 @@ final class BleLamps {
                 if ($lamps.Count -eq 0) { [Console]::WriteLine('none'); exit }
                 $statusType = [Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus]
                 $noReply = [Windows.Devices.Bluetooth.GenericAttributeProfile.GattWriteOption]::WriteWithoutResponse
+                $withReply = [Windows.Devices.Bluetooth.GenericAttributeProfile.GattWriteOption]::WriteWithResponse
+                $props = [Windows.Devices.Bluetooth.GenericAttributeProfile.GattCharacteristicProperties]
+                $complained = $false
                 function SendTo($l, [byte[]]$bytes) {
                   $buffer = [System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeBufferExtensions]::AsBuffer($bytes)
-                  try { $null = Await ($l.Char.WriteValueAsync($buffer, $noReply)) $statusType }
-                  catch { [Console]::WriteLine('lost ' + $l.Name); exit }
+                  # Как умеет характеристика: без ответа, если можно, иначе с ответом
+                  $option = if (($l.Char.CharacteristicProperties -band $props::WriteWithoutResponse) -ne 0) { $noReply } else { $withReply }
+                  try {
+                    $status = Await ($l.Char.WriteValueAsync($buffer, $option)) $statusType
+                    if ($status -ne [Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus]::Success -and -not $script:complained) {
+                      $script:complained = $true
+                      [Console]::WriteLine('error ' + $l.Name + ' не принимает команды: ' + $status)
+                    }
+                  } catch { [Console]::WriteLine('lost ' + $l.Name); exit }
+                  Start-Sleep -Milliseconds 60
                 }
-                # Включить каждую лампу её собственной командой
-                foreach ($l in $lamps) { SendTo $l ([byte[]]$l.Model.on) }
+                # Включить каждую лампу её собственной командой и поставить полную яркость
+                foreach ($l in $lamps) { SendTo $l ([byte[]]$l.Model.on); SendTo $l ([byte[]]$l.Model.bright) }
                 [Console]::WriteLine('found ' + (($lamps | ForEach-Object { $_.Name }) -join ', '))
                 while ($true) {
                   $line = [Console]::In.ReadLine()

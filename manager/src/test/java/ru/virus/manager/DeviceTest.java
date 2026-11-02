@@ -1252,6 +1252,7 @@ class DeviceTest {
         assertArrayEquals(new byte[] {0x7e, 0x00, 0x05, 0x03, 9, 8, 7, 0, (byte) 0xef},
                 BleLamps.colorFrame(BleLamps.model("ELK-BLEDOM"), 9, 8, 7));
         assertTrue(BleLamps.script().contains("@{ p = 'ELK-BLEDOB'") && !BleLamps.script().contains("%MODELS%"));
+        assertArrayEquals(new int[] {126, 4, 1, 100, 1, 255, 2, 1, 239}, bledob.bright(), "яркость BLEDOB — её формат");
     }
 
     @Test

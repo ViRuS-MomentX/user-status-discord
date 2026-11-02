@@ -205,19 +205,8 @@ final class DevicePage extends Ui.Card {
         glow.reverse = settings.glowReverse;
         glow.scale = Math.max(1, Math.min(4, settings.glowScale));
 
-        if ("openrgb".equals(settings.engine)) {
-            glow.on = settings.glowOn;
-            glow.brightness = settings.glowBrightness;
-        }
-
-        try {
-            // Эффект «VIRUS» в SignalRGB спрашивает настройки здесь — всё время, пока открыт V.I.R.U.S.
-            if (LIGHTING) {
-                glow.start(SignalRgb.OUR_PORT);
-            }
-        } catch (IOException e) {
-            // порт занят — значит, V.I.R.U.S. уже запущен ещё раз; эффект спросит у того
-        }
+        glow.on = settings.glowOn;
+        glow.brightness = settings.glowBrightness;
 
         urlFallback = new Timer(700, e -> pushByUrl());
         urlFallback.setRepeats(false);
@@ -239,7 +228,9 @@ final class DevicePage extends Ui.Card {
         animator.order = List.copyOf(settings.canvasOrder);
         // OpenRGB закрыли или он ещё не стартовал после перезагрузки — поднимаем его задачей, без окна UAC
         animator.whenMissing = () -> {
-            if (settings.openRgbTask) {
+            // Только если OpenRGB вообще не запущен: если он работает, но ещё ищет устройства или
+            // не включил сервер, второй экземпляр только помешает (так он «запускался бесконечно»)
+            if (settings.openRgbTask && !openRgbRunning()) {
                 OpenRgbTask.start();
             }
         };
@@ -510,7 +501,7 @@ final class DevicePage extends Ui.Card {
         var page = new Ui.FitWidth();
         page.setLayout(new BoxLayout(page, BoxLayout.Y_AXIS));
 
-        for (var card : List.of(signalCard(), rgb, screensCard(), apps(), lighting(), vendors)) {
+        for (var card : List.of(signalCard(), rgb, screensCard(), vendors)) {
             card.setAlignmentX(LEFT_ALIGNMENT);
             page.add(card);
             page.add(Box.createVerticalStrut(14));
@@ -913,10 +904,7 @@ final class DevicePage extends Ui.Card {
         signalOnly.setLayout(new BoxLayout(signalOnly, BoxLayout.Y_AXIS));
         signalOnly.add(left(statusRow));
 
-        stack.add(left(engineRow));
-        stack.add(Box.createVerticalStrut(12));
         stack.add(left(openRgbOnly));
-        stack.add(left(signalOnly));
         stack.add(Box.createVerticalStrut(12));
         stack.add(left(powerRow));
         stack.add(Box.createVerticalStrut(14));
@@ -2138,8 +2126,9 @@ final class DevicePage extends Ui.Card {
         }
     }
 
+    /** Подсветка только через OpenRGB: SignalRGB из V.I.R.U.S. убран (он к тому же перехватывает устройства). */
     private boolean openRgbEngine() {
-        return "openrgb".equals(settings.engine);
+        return true;
     }
 
     private void useEngine(String engine) {
@@ -3373,7 +3362,36 @@ final class DevicePage extends Ui.Card {
         });
     }
 
+    /**
+     * Запущен ли OpenRGB — по списку процессов Windows (tasklist видит и
+     * процессы, запущенные от администратора, в отличие от Java).
+     */
+    static boolean openRgbRunning() {
+        if (!SystemInfo.isWindows()) {
+            return false;
+        }
+
+        try {
+            var process = new ProcessBuilder("tasklist", "/FI", "IMAGENAME eq OpenRGB.exe", "/NH").redirectErrorStream(true).start();
+            var out = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+            return listsOpenRgb(out);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    static boolean listsOpenRgb(String tasklist) {
+        return tasklist.toLowerCase(java.util.Locale.ROOT).contains("openrgb.exe");
+    }
+
     private void launchOpenRgb() {
+        if (openRgbRunning()) {
+            rgbStatus.setText("OpenRGB уже запущен — жду, пока он найдёт устройства и включит сервер SDK. Если долго не "
+                    + "подключается — в OpenRGB: вкладка SDK Server → Start Server.");
+            return;
+        }
+
         // Задача Планировщика есть — запускаем через неё: от администратора и без вопроса
         if (settings.openRgbTask) {
             worker.submit(() -> {

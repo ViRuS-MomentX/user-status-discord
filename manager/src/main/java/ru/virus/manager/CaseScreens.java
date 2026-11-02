@@ -55,7 +55,8 @@ final class CaseScreens {
     private static final int MAX_JPEG = 1024 * 1024;
 
     /** Разрешения, которые бывают у экранов TURZX (портрет: ширина × высота). */
-    static final List<int[]> SIZES = List.of(new int[] {320, 480}, new int[] {480, 320}, new int[] {480, 480}, new int[] {400, 400},
+    static final List<int[]> SIZES = List.of(new int[] {640, 480}, new int[] {480, 640}, new int[] {320, 480},
+            new int[] {480, 320}, new int[] {800, 600}, new int[] {800, 480}, new int[] {480, 800}, new int[] {480, 480}, new int[] {400, 400},
             new int[] {320, 960}, new int[] {480, 1920}, new int[] {462, 1920}, new int[] {720, 1280},
             new int[] {800, 1280}, new int[] {720, 720}, new int[] {720, 1920});
 

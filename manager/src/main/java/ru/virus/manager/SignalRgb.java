@@ -69,7 +69,7 @@ final class SignalRgb {
             new Mode(20, "Естественный свет", false, false),
             new Mode(21, "Отклик на ввод", true, true),
             new Mode(22, "Альтрон", false, false),
-            new Mode(23, "Дыхание двух цветов", true, true),
+            new Mode(23, "Дыхание ×2", true, true),
             new Mode(24, "Плазма", false, false),
             new Mode(25, "Метеоры", true, false));
 

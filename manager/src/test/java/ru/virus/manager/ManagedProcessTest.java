@@ -75,6 +75,11 @@ class ManagedProcessTest {
         // Строка в журнале появляется чуть позже смены состояния — ждём её, а не проверяем сразу
         await(() -> logged(process, "Перезапущу через 5 с"), "записи о перезапуске");
         await(() -> (int) process.toJson().get("restarts") == 1, "перезапуска");
+
+        // Падающий процесс перезапускался бы дальше и писал журнал, пока JUnit удаляет папку теста
+        process.stop();
+        await(() -> process.state() == ManagedProcess.State.STOPPED, "остановки");
+        Thread.sleep(300);
     }
 
     @Test

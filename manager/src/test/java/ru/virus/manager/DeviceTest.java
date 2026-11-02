@@ -1203,4 +1203,10 @@ class DeviceTest {
         assertTrue(explain.contains("WinDivert64.sys") && explain.contains("it''s"), "кавычка в аргументах экранирована для PowerShell");
         assertTrue(Zapret.defaultSpec().supervised(), "останавливается словом stop — смотритель гасит службу");
     }
+
+    @Test
+    void openRgbIsNotStartedTwice() {
+        assertTrue(DevicePage.listsOpenRgb("OpenRGB.exe                  12345 Console    1    210 000 K"));
+        assertFalse(DevicePage.listsOpenRgb("INFO: No tasks are running which match the specified criteria."));
+    }
 }

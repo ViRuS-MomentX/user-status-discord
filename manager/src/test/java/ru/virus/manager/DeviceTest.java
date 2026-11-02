@@ -1271,4 +1271,11 @@ class DeviceTest {
         assertEquals('P', png[1]);
         assertTrue(png.length < 1024 * 1024);
     }
+
+    @Test
+    void chosenBluetoothDevicesAreMatchedByName() {
+        assertEquals(List.of("ELK-BLEDOB", "MELK-OA10"), BleLamps.devices("dev MELK-OA10\ndev ELK-BLEDOB\nnone\ndev ELK-BLEDOB\ndev  \n"));
+        assertTrue(BleLamps.script(List.of("LotusBar 1", "It's")).contains("$d.Name -in @('LotusBar 1', 'It''s')"));
+        assertTrue(BleLamps.script().contains("$d.Name -match '^(ELK"), "без выбора — по виду имени");
+    }
 }

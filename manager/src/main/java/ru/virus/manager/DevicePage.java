@@ -255,6 +255,8 @@ final class DevicePage extends Ui.Card {
             new Timer(10_000, e -> followAccent()).start();
             new Timer((int) BleLamps.PERIOD_MS, e -> feedLamps()).start();
 
+            lamps.chosen = settings.bleNames;
+
             if (settings.bleLamps) {
                 lamps.start();
             }
@@ -1001,6 +1003,20 @@ final class DevicePage extends Ui.Card {
         });
         var lampsRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
         lampsRow.add(lampsSwitch);
+        var pick = Ui.ghost("Выбрать устройства…");
+        pick.setToolTipText("Найти все Bluetooth-устройства рядом и отметить, какими управлять (лампы, ленты, подсветка комнаты)");
+        pick.addActionListener(e -> {
+            pick.setEnabled(false);
+            lampsStatus.setText("Ищу Bluetooth-устройства рядом… (10–20 секунд; лампы отключи от телефона)");
+            worker.submit(() -> {
+                lamps.stop();
+                var names = BleLamps.scan();
+                SwingUtilities.invokeLater(() -> {
+                    pick.setEnabled(true);
+                    chooseLamps(names);
+                });
+            });
+        });
         lampsRow.add(Ui.muted("Bluetooth-лампы и ленты (Lotus Lamp X, duoCo и подобные) повторяют режим", 12.5f));
         stack.add(left(lampsRow));
         stack.add(left(lampsStatus));
@@ -1796,6 +1812,47 @@ final class DevicePage extends Ui.Card {
     /** Микрофон Maono: подсветка кольца. */
     private final JLabel micStatus = Ui.muted("", 12.5f);
     private final MaonoMic mic = new MaonoMic(text -> SwingUtilities.invokeLater(() -> micStatus.setText(text)));
+
+    /** Отметить, какими Bluetooth-устройствами управлять; сохранить и переподключиться. */
+    private void chooseLamps(List<String> names) {
+        if (names.isEmpty()) {
+            lampsStatus.setText("Bluetooth-устройств рядом не нашлось. Включи их, отключи от телефона (закрой Lotus) и "
+                    + "проверь, что Bluetooth на компьютере включён.");
+
+            if (settings.bleLamps) {
+                lamps.start();
+            }
+
+            return;
+        }
+
+        var panel = Ui.transparent(null);
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.add(new JLabel("<html>Отметь, чем управлять. Лампы и ленты из приложения Lotus обычно называются "
+                + "ELK-…, MELK-…, LEDBLE…<br>Наушники, телефоны и т. п. отмечать не нужно.</html>"));
+        var boxes = new java.util.ArrayList<javax.swing.JCheckBox>();
+
+        for (var name : names) {
+            var box = new javax.swing.JCheckBox(name, settings.bleNames.isEmpty()
+                    ? BleLamps.NAMES.matcher(name).find() : settings.bleNames.contains(name));
+            boxes.add(box);
+            panel.add(box);
+        }
+
+        if (javax.swing.JOptionPane.showConfirmDialog(this, new JScrollPane(panel), "Bluetooth-устройства",
+                javax.swing.JOptionPane.OK_CANCEL_OPTION, javax.swing.JOptionPane.PLAIN_MESSAGE) == javax.swing.JOptionPane.OK_OPTION) {
+            settings.bleNames = boxes.stream().filter(javax.swing.JCheckBox::isSelected).map(javax.swing.JCheckBox::getText).toList();
+            settings.bleLamps = !settings.bleNames.isEmpty() || settings.bleLamps;
+            settings.save();
+        }
+
+        lamps.chosen = settings.bleNames;
+
+        if (settings.bleLamps) {
+            lampsStatus.setText("Подключаюсь к выбранным: " + String.join(", ", settings.bleNames));
+            lamps.start();
+        }
+    }
 
     /** Цвет режима для ламп — как для устройства «одним цветом» в OpenRGB. */
     private void feedLamps() {
@@ -3731,6 +3788,8 @@ final class DevicePage extends Ui.Card {
         int idleLevel = 0;
         int rotateMinutes = 0;
         boolean bleLamps;
+        /** Выбранные Bluetooth-устройства по именам; пусто — все похожие на лампы. */
+        List<String> bleNames = List.of();
         boolean maonoMic;
         boolean screenBoard;
         /** Размер экрана уже подставлен по модели — дальше не трогаем, вдруг поправили руками. */
@@ -3806,6 +3865,8 @@ final class DevicePage extends Ui.Card {
                     settings.idleLevel = json.get("idleLevel") instanceof Number n ? n.intValue() : 0;
                     settings.rotateMinutes = json.get("rotateMinutes") instanceof Number n ? n.intValue() : 0;
                     settings.bleLamps = Boolean.TRUE.equals(json.get("bleLamps"));
+                    settings.bleNames = json.get("bleNames") instanceof List<?> names
+                            ? names.stream().map(String::valueOf).toList() : List.of();
                     settings.maonoMic = Boolean.TRUE.equals(json.get("maonoMic"));
                     settings.screenBoard = Boolean.TRUE.equals(json.get("screenBoard"));
                     settings.screenSized = Boolean.TRUE.equals(json.get("screenSized"));
@@ -3910,6 +3971,7 @@ final class DevicePage extends Ui.Card {
             json.put("idleLevel", idleLevel);
             json.put("rotateMinutes", rotateMinutes);
             json.put("bleLamps", bleLamps);
+            json.put("bleNames", bleNames);
             json.put("maonoMic", maonoMic);
             json.put("screenBoard", screenBoard);
             json.put("screenSized", screenSized);

@@ -103,6 +103,8 @@ final class BleLamps {
     private volatile String last = "";
     private volatile long sentAt;
     private Thread thread;
+    /** Какими устройствами управлять — по имени в эфире; пусто — всеми похожими на лампы ELK-BLEDOM. */
+    volatile java.util.List<String> chosen = java.util.List.of();
 
     BleLamps(Consumer<String> status) {
         this.status = status;
@@ -179,7 +181,7 @@ final class BleLamps {
             Process process = null;
 
             try {
-                var encoded = java.util.Base64.getEncoder().encodeToString(script().getBytes(StandardCharsets.UTF_16LE));
+                var encoded = java.util.Base64.getEncoder().encodeToString(script(chosen).getBytes(StandardCharsets.UTF_16LE));
                 process = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
                         "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded).redirectErrorStream(true).start();
                 input = new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8);
@@ -252,6 +254,52 @@ final class BleLamps {
      * ламп — ffe1), включает лампы и дальше пишет цвет из каждой строки.
      */
     static String script() {
+        return script(java.util.List.of());
+    }
+
+    /** Отбор устройств в помощнике: выбранные имена или похожие на лампы этого семейства. */
+    static String filter(java.util.List<String> names) {
+        if (names.isEmpty()) {
+            return "$d.Name -match '" + NAMES.pattern().replace("(?i)", "") + "'";
+        }
+
+        return "$d.Name -in @(" + names.stream().map(name -> "'" + name.replace("'", "''") + "'")
+                .collect(java.util.stream.Collectors.joining(", ")) + ")";
+    }
+
+    /**
+     * Все Bluetooth LE-устройства рядом — имена, чтобы выбрать, какие из них
+     * лампы. Занимает несколько секунд; устройство, подключённое к телефону,
+     * в эфире не видно.
+     */
+    static java.util.List<String> scan() {
+        if (!SystemInfo.isWindows()) {
+            return java.util.List.of();
+        }
+
+        try {
+            var script = script(java.util.List.of()).replaceFirst("(?s)\\$models = @\\(.*", "")
+                    .replace("foreach ($d in $list) { if (" + filter(java.util.List.of()) + ") { $found += $d } }",
+                            "foreach ($d in $list) { if ($d.Name) { [Console]::WriteLine('dev ' + $d.Name) } }");
+            var encoded = java.util.Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
+            var process = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+                    "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded).redirectErrorStream(true).start();
+            process.getOutputStream().close();
+            var out = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS);
+            return devices(out);
+        } catch (Exception e) {
+            return java.util.List.of();
+        }
+    }
+
+    /** Имена из вывода поиска, без повторов. */
+    static java.util.List<String> devices(String output) {
+        return output.lines().filter(line -> line.startsWith("dev ")).map(line -> line.substring(4).strip())
+                .filter(name -> !name.isBlank()).distinct().sorted().toList();
+    }
+
+    static String script(java.util.List<String> names) {
         return """
                 $ErrorActionPreference = 'Stop'
                 try {
@@ -275,7 +323,7 @@ final class BleLamps {
                   $aqs = [Windows.Devices.Bluetooth.BluetoothLEDevice]::GetDeviceSelectorFromPairingState($paired)
                   try {
                     $list = Await ([Windows.Devices.Enumeration.DeviceInformation]::FindAllAsync($aqs, $null, $kind)) $infoType
-                    foreach ($d in $list) { if ($d.Name -match '%NAMES%') { $found += $d } }
+                    foreach ($d in $list) { if (%FILTER%) { $found += $d } }
                   } catch { }
                 }
                 %MODELS%
@@ -329,6 +377,6 @@ final class BleLamps {
                     SendTo $l ([byte[]]$frame)
                   }
                 }
-                """.replace("%NAMES%", NAMES.pattern().replace("(?i)", "")).replace("%MODELS%", modelsTable());
+                """.replace("%FILTER%", filter(names)).replace("%MODELS%", modelsTable());
     }
 }

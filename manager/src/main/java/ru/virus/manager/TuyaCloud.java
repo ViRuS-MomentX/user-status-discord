@@ -39,7 +39,7 @@ final class TuyaCloud {
     }
 
     /** Устройство из облака. */
-    record Device(String id, String name, String key, String category, String product, boolean online) {
+    record Device(String id, String name, String key, String category, String product, boolean online, String uuid) {
     }
 
     private final String host;
@@ -113,7 +113,8 @@ final class TuyaCloud {
                         devices.add(new Device(String.valueOf(device.get("id")), String.valueOf(device.get("name")),
                                 String.valueOf(device.get("local_key")), String.valueOf(device.get("category")),
                                 String.valueOf(device.get("product_name")),
-                                Boolean.TRUE.equals(device.get("online"))));
+                                Boolean.TRUE.equals(device.get("online")),
+                                device.get("uuid") instanceof String uuid ? uuid : ""));
                     }
                 }
             }
@@ -126,6 +127,24 @@ final class TuyaCloud {
         }
 
         return devices;
+    }
+
+    /**
+     * MAC устройства (для Bluetooth-ламп — по нему подключаемся) из
+     * «заводских данных». Пусто, если облако не дало.
+     */
+    String mac(String deviceId) {
+        try {
+            if (get("/v1.0/iot-03/devices/factory-infos?device_ids=" + deviceId).get("result") instanceof List<?> list
+                    && !list.isEmpty() && list.get(0) instanceof Map<?, ?> info && info.get("mac") instanceof String mac
+                    && mac.replace(":", "").matches("[0-9a-fA-F]{12}")) {
+                return mac.replace(":", "").toLowerCase(Locale.ROOT);
+            }
+        } catch (Exception ignored) {
+            // нет доступа к заводским данным — обойдёмся
+        }
+
+        return "";
     }
 
     /** Лампа ли это: категории освещения Tuya (dj — лампы, dd — ленты, fwd — атмосферные, dc — гирлянды, xdd — потолочные). */

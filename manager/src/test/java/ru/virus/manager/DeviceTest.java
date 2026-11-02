@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DeviceTest {
@@ -1134,6 +1135,52 @@ class DeviceTest {
         assertNull(TuyaLamps.Lamp.fromJson(java.util.Map.of("id", "x")));
         assertTrue(TuyaLamps.same(new Color(10, 10, 10), new Color(12, 12, 12)));
         assertFalse(TuyaLamps.same(Color.RED, Color.BLUE));
+    }
+
+    @Test
+    void smartLifeBluetoothLampsSpeakTuyaBle() throws Exception {
+        // Пакеты сверены с открытой интеграцией tuya_ble (Python, тот же IV)
+        var iv = new byte[16];
+
+        for (var i = 0; i < 16; i++) {
+            iv[i] = (byte) i;
+        }
+
+        var login = Tuya.md5("012345".getBytes(StandardCharsets.UTF_8));
+        assertEquals("d6a9a933c8aafc51e55ac0662b6e4d4a", Tuya.hex(login).toLowerCase());
+        assertEquals(List.of("00212004000102030405060708090a0b0c0d0e0f", "0135a7c0a89c84145e2ce517b648d9d45a"),
+                TuyaBle.packets(1, TuyaBle.DEVICE_INFO, new byte[0], 0, login, 4, 2, iv).stream()
+                        .map(p -> Tuya.hex(p).toLowerCase()).toList());
+        var session = Tuya.md5(Tuya.concat("012345".getBytes(StandardCharsets.UTF_8), new byte[] {1, 2, 3, 4, 5, 6}));
+        var pair = TuyaBle.pairing("uuid12345678", "0123456789abcdef", "bf0013fycpkdtvq1");
+        var packets = TuyaBle.packets(2, TuyaBle.PAIR, pair, 0, session, 5, 3, iv);
+        assertEquals(List.of("00513005000102030405060708090a0b0c0d0e0f", "0168ebd0e5c29ad68c81f68298f2887edd4307fb",
+                "02b05a0b5c75154f2c362ddf9e203738f83bc9d4", "03af9dd43e123dba65ea9a7fbbed14c12a602e76", "041d9994621c16e4"),
+                packets.stream().map(p -> Tuya.hex(p).toLowerCase()).toList());
+        assertEquals(0x4b37, TuyaBle.crc16("123456789".getBytes(StandardCharsets.US_ASCII), 9));
+
+        // Сборка из уведомлений и расшифровка — обратно то же сообщение
+        var input = new TuyaBle.Input();
+        byte[] whole = null;
+
+        for (var packet : packets) {
+            whole = input.feed(packet);
+        }
+
+        var message = TuyaBle.parse(whole, login, session);
+        assertEquals(TuyaBle.PAIR, message.code());
+        assertArrayEquals(pair, message.data());
+        assertThrows(IOException.class, () -> TuyaBle.parse(Tuya.concat(new byte[] {5}, iv, new byte[32]), login, session));
+
+        // Цвет: вкл (DP 20), режим «цвет» (21), цвет строкой (24)
+        var data = TuyaBle.colour(Color.RED, java.util.Map.of());
+        assertEquals(java.util.Map.of(20, TuyaBle.BOOL, 21, TuyaBle.ENUM, 24, TuyaBle.STRING), TuyaBle.dpTypes(data, 0));
+        assertTrue(new String(data, StandardCharsets.US_ASCII).contains("000003e803e8"));
+        assertEquals(java.util.Map.of(20, TuyaBle.BOOL), TuyaBle.dpTypes(TuyaBle.colour(Color.BLACK, java.util.Map.of()), 0));
+        assertEquals(0xdc23aabbccddL, TuyaBle.address("dc:23:aa:bb:cc:dd"));
+        assertTrue(TuyaBle.script(1).contains("00002b11") && TuyaBle.script(1).contains("[uint64]1"));
+        var lamp = new TuyaLamps.Lamp("bf1", "Лампа", "0123456789abcdef", "", "3.3", false, "u", "dc23aabbccdd", true);
+        assertEquals(lamp, TuyaLamps.Lamp.fromJson(lamp.toJson()));
     }
 
     @Test

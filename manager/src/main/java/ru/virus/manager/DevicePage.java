@@ -1912,7 +1912,8 @@ final class DevicePage extends Ui.Card {
             String text;
 
             try {
-                var devices = new TuyaCloud(host, id, key).devices();
+                var cloud = new TuyaCloud(host, id, key);
+                var devices = cloud.devices();
                 var found = Tuya.discover(6000);
                 var chosen = new java.util.ArrayList<TuyaLamps.Lamp>();
                 var skipped = new java.util.ArrayList<String>();
@@ -1924,16 +1925,20 @@ final class DevicePage extends Ui.Card {
                     }
 
                     var net = found.stream().filter(f -> f.id().equals(device.id())).findFirst();
+                    var mac = net.isPresent() ? "" : cloud.mac(device.id());
+                    var old = settings.tuya.stream().filter(lamp -> lamp.id().equals(device.id())).findFirst();
                     chosen.add(new TuyaLamps.Lamp(device.id(), device.name(), device.key(),
-                            net.map(Tuya.Found::ip).orElse(""), net.map(Tuya.Found::version).orElse("3.3"), device.online()));
+                            net.map(Tuya.Found::ip).orElse(""), net.map(Tuya.Found::version).orElse("3.3"), device.online(),
+                            device.uuid(), mac, net.isEmpty() && old.map(TuyaLamps.Lamp::ble).orElse(false)));
                 }
 
                 text = chosen.isEmpty() ? "Smart Life: в аккаунте нет ламп" + (devices.isEmpty()
                         ? " — привязан ли аккаунт Smart Life к проекту (Devices → Link App Account)?"
                         : " (есть: " + String.join(", ", skipped) + ")")
                         : "Smart Life: добавлены " + String.join(", ", chosen.stream().map(lamp -> lamp.name()
-                        + (!lamp.online() ? " (облако Tuya тоже не видит её в сети: не подключена к Wi-Fi или она Bluetooth-лампа)"
-                        : lamp.ip().isBlank() ? " (ищу её в домашней сети…)" : "")).toList());
+                        + (!lamp.ip().isBlank() ? " (Wi-Fi)" : lamp.canBle() ? " (подключаюсь по Bluetooth…)"
+                        : !lamp.online() ? " (облако не дало её MAC для Bluetooth и не видит её в сети)"
+                        : " (ищу её в домашней сети…)")).toList());
                 var lamps = List.copyOf(chosen);
                 SwingUtilities.invokeLater(() -> {
                     if (!lamps.isEmpty()) {

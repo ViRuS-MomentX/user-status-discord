@@ -14,11 +14,28 @@ import java.util.function.Consumer;
  */
 final class TuyaLamps {
 
-    /** Лампа: id, имя, локальный ключ (не показываем), адрес и версия протокола. */
-    record Lamp(String id, String name, String key, String ip, String version, boolean online) {
+    /**
+     * Лампа: id, имя, локальный ключ (не показываем), адрес и версия протокола
+     * по Wi-Fi; для Bluetooth-ламп — uuid и MAC из облака, ble — работает по Bluetooth.
+     */
+    record Lamp(String id, String name, String key, String ip, String version, boolean online, String uuid, String mac,
+                boolean ble) {
 
         Lamp(String id, String name, String key, String ip, String version) {
-            this(id, name, key, ip, version, true);
+            this(id, name, key, ip, version, true, "", "", false);
+        }
+
+        Lamp at(String ip, String version) {
+            return new Lamp(id, name, key, ip, version, online, uuid, mac, ble);
+        }
+
+        Lamp bluetooth() {
+            return new Lamp(id, name, key, "", version, online, uuid, mac, true);
+        }
+
+        /** Можно ли попробовать Bluetooth: есть MAC и uuid. */
+        boolean canBle() {
+            return !mac.isBlank() && !uuid.isBlank();
         }
 
         Map<String, Object> toJson() {
@@ -28,6 +45,10 @@ final class TuyaLamps {
             json.put("key", key);
             json.put("ip", ip);
             json.put("version", version);
+            json.put("online", online);
+            json.put("uuid", uuid);
+            json.put("mac", mac);
+            json.put("ble", ble);
             return json;
         }
 
@@ -37,7 +58,9 @@ final class TuyaLamps {
             }
 
             return new Lamp(id, String.valueOf(map.get("name")), key, map.get("ip") instanceof String ip ? ip : "",
-                    map.get("version") instanceof String version ? version : "3.3");
+                    map.get("version") instanceof String version ? version : "3.3", !Boolean.FALSE.equals(map.get("online")),
+                    map.get("uuid") instanceof String uuid ? uuid : "", map.get("mac") instanceof String mac ? mac : "",
+                    Boolean.TRUE.equals(map.get("ble")));
         }
     }
 
@@ -56,11 +79,11 @@ final class TuyaLamps {
     /** Нашли адрес лампы — запомнить, чтобы в следующий раз не искать. */
     volatile Consumer<List<Lamp>> learned = lamps -> { };
 
-    private void learn(Lamp lamp, String ip, String version) {
+    private void learn(Lamp lamp, java.util.function.UnaryOperator<Lamp> change) {
         var updated = new ArrayList<Lamp>();
 
         for (var item : lamps) {
-            updated.add(item.id().equals(lamp.id()) ? new Lamp(item.id(), item.name(), item.key(), ip, version, true) : item);
+            updated.add(item.id().equals(lamp.id()) ? change.apply(item) : item);
         }
 
         lamps = List.copyOf(updated);
@@ -104,6 +127,7 @@ final class TuyaLamps {
 
     private void run() {
         var sessions = new HashMap<String, Tuya.Session>();
+        var links = new HashMap<String, TuyaBle.Link>();
         var styles = new HashMap<String, Boolean>();
         var sent = new HashMap<String, Color>();
         var retryAt = new HashMap<String, Long>();
@@ -121,6 +145,25 @@ final class TuyaLamps {
                     }
 
                     try {
+                        if (lamp.ble() || !lamp.online() && lamp.canBle()) {
+                            var link = links.get(lamp.id());
+
+                            if (link == null) {
+                                status.accept("Smart Life: подключаюсь к " + lamp.name() + " по Bluetooth…");
+                                link = new TuyaBle.Link(lamp.mac(), lamp.uuid(), lamp.key(), lamp.id());
+                                links.put(lamp.id(), link);
+
+                                if (!lamp.ble()) {
+                                    learn(lamp, Lamp::bluetooth);
+                                }
+                            }
+
+                            link.color(target);
+                            sent.put(lamp.id(), target);
+                            problems.remove(lamp.id());
+                            continue;
+                        }
+
                         var session = sessions.get(lamp.id());
 
                         if (session == null) {
@@ -148,12 +191,20 @@ final class TuyaLamps {
                                     }
                                 }
 
+                                if (ip.isBlank() && lamp.canBle()) {
+                                    // По Wi-Fi нет — пробуем как Bluetooth-лампу
+                                    learn(lamp, Lamp::bluetooth);
+                                    throw new java.io.IOException("по Wi-Fi не видна — пробую по Bluetooth");
+                                }
+
                                 if (ip.isBlank()) {
                                     throw new java.io.IOException("не видна в домашней сети — она подключена к Wi-Fi? "
                                             + "(в облаке: " + (lamp.online() ? "в сети" : "не в сети") + ")");
                                 }
 
-                                learn(lamp, ip, version);
+                                var where = ip;
+                                var how = version;
+                                learn(lamp, item -> item.at(where, how));
                             }
 
                             session = new Tuya.Session(ip, lamp.id(), lamp.key(), version);
@@ -177,15 +228,23 @@ final class TuyaLamps {
                             session.close();
                         }
 
+                        var link = links.remove(lamp.id());
+
+                        if (link != null) {
+                            link.close();
+                        }
+
                         sent.remove(lamp.id());
                         // Сохранённый адрес не отвечает — лампа могла получить новый, в следующий раз ищем заново
                         var lost = !lamp.ip().isBlank() && e instanceof java.net.ConnectException;
 
                         if (lost) {
-                            learn(lamp, "", lamp.version());
+                            learn(lamp, item -> item.at("", item.version()));
                         }
 
-                        retryAt.put(lamp.id(), now + (lamp.ip().isBlank() ? 30_000 : 8000));
+                        var current = lamps.stream().filter(item -> item.id().equals(lamp.id())).findFirst().orElse(lamp);
+                        retryAt.put(lamp.id(), now + (current.ble() && !lamp.ble() ? 300 : lamp.ble() ? 10_000
+                                : lamp.ip().isBlank() ? 30_000 : 8000));
                         problems.put(lamp.id(), lamp.name() + ": " + (e.getMessage() == null ? e.getClass().getSimpleName()
                                 : e.getMessage()));
                     }
@@ -206,6 +265,7 @@ final class TuyaLamps {
             Thread.currentThread().interrupt();
         } finally {
             sessions.values().forEach(Tuya.Session::close);
+            links.values().forEach(TuyaBle.Link::close);
         }
     }
 

@@ -3759,15 +3759,39 @@ final class DevicePage extends Ui.Card {
         return tasklist.toLowerCase(java.util.Locale.ROOT).contains("openrgb.exe");
     }
 
+    /** Следующий запуск — сначала закрыть OpenRGB, открытый без сервера. */
+    private boolean restartOpenRgb;
+
+    /** Отвечает ли сервер SDK OpenRGB (порт открыт). */
+    static boolean sdkOpen(String host) {
+        try (var socket = new java.net.Socket()) {
+            socket.connect(new java.net.InetSocketAddress(host, OpenRgb.PORT), 700);
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
     private void launchOpenRgb() {
         if (openRgbRunning()) {
-            rgbStatus.setText("OpenRGB уже запущен — жду, пока он найдёт устройства и включит сервер SDK. Если долго не "
-                    + "подключается — в OpenRGB: вкладка SDK Server → Start Server.");
-            return;
+            if (sdkOpen(settings.host)) {
+                rgbStatus.setText("OpenRGB уже запущен и сервер включён — нажми «Подключиться».");
+                return;
+            }
+
+            // Открыт вручную, без сервера SDK — V.I.R.U.S. его не видит. Перезапускаем с сервером.
+            if (javax.swing.JOptionPane.showConfirmDialog(this, "OpenRGB открыт без сервера SDK, поэтому V.I.R.U.S. "
+                    + "к нему не подключается.\nПерезапустить OpenRGB с сервером? (Windows спросит права администратора)",
+                    "OpenRGB", javax.swing.JOptionPane.OK_CANCEL_OPTION) != javax.swing.JOptionPane.OK_OPTION) {
+                rgbStatus.setText("Или включи сервер сам: в OpenRGB вкладка SDK Server → Start Server.");
+                return;
+            }
+
+            restartOpenRgb = true;
         }
 
         // Задача Планировщика есть — запускаем через неё: от администратора и без вопроса
-        if (settings.openRgbTask) {
+        if (settings.openRgbTask && !restartOpenRgb) {
             worker.submit(() -> {
                 var started = OpenRgbTask.start();
                 SwingUtilities.invokeLater(() -> rgbStatus.setText(started
@@ -3796,6 +3820,16 @@ final class DevicePage extends Ui.Card {
             try {
                 var script = "Start-Process -FilePath '" + path.replace("'", "''") + "' -ArgumentList "
                         + "'--server','--startminimized' -Verb RunAs";
+
+                if (restartOpenRgb) {
+                    // Закрыть открытый без сервера (он от администратора — закрываем тоже с правами) и открыть заново
+                    var inner = "Stop-Process -Name OpenRGB -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; "
+                            + "Start-Process -FilePath '" + path.replace("'", "''") + "' -ArgumentList '--server','--startminimized'";
+                    script = "Start-Process powershell.exe -WindowStyle Hidden -Verb RunAs -ArgumentList '-NoProfile','-EncodedCommand','"
+                            + java.util.Base64.getEncoder().encodeToString(inner.getBytes(java.nio.charset.StandardCharsets.UTF_16LE)) + "'";
+                    restartOpenRgb = false;
+                }
+
                 new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
                         "-Command", script).start();
             } catch (IOException e) {

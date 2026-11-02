@@ -403,6 +403,44 @@ final class Zapret {
                 "}");
     }
 
+    /**
+     * Проверка с правами: запустить winws.exe с той же командой на 5 секунд
+     * (служба на это время остановлена) и записать, что он сказал. Так видно
+     * его собственную ошибку — Windows о службе пишет только «не удалось».
+     */
+    String diagnoseScript(String args) {
+        var exe = app() + "\\bin\\winws.exe";
+        return String.join("\n",
+                "$log = Join-Path $PSScriptRoot 'apply.log'",
+                "$out = Join-Path $PSScriptRoot 'winws-out.txt'",
+                "$err = Join-Path $PSScriptRoot 'winws-err.txt'",
+                "try {",
+                "  Stop-Service '" + SERVICE + "' -Force -ErrorAction SilentlyContinue",
+                "  Get-Process winws -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue",
+                "  $exe = '" + ps(exe) + "'",
+                "  if (-not (Test-Path $exe)) { throw 'нет winws.exe — его удалил антивирус или zapret не поставлен' }",
+                "  $p = Start-Process -FilePath $exe -ArgumentList '" + ps(args) + "' -WorkingDirectory (Split-Path $exe) -PassThru -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err",
+                "  Start-Sleep -Seconds 5",
+                "  $text = ((Get-Content $out -Raw -ErrorAction SilentlyContinue) + ' ' + (Get-Content $err -Raw -ErrorAction SilentlyContinue)).Trim()",
+                "  if ($p.HasExited) { $result = 'winws.exe сразу завершился (код ' + $p.ExitCode + '): ' + $text }",
+                "  else { Stop-Process -Id $p.Id -Force; $result = 'winws.exe запускается и работает — значит, дело в самой службе. ' + $text }",
+                "  Set-Content -Path $log -Value ('error: ' + $result) -Encoding UTF8",
+                "} catch { Set-Content -Path $log -Value ('error: ' + $_.Exception.Message) -Encoding UTF8 }");
+    }
+
+    /** Проверить запуск winws.exe напрямую; вернёт, что он сказал. */
+    String diagnose() {
+        try {
+            var props = settings();
+            var bat = stage().resolve(props.getProperty("strategy", "general.bat"));
+            var args = arguments(Files.readString(bat, StandardCharsets.ISO_8859_1), app(), props.getProperty("game", "disabled"));
+            var result = elevate(diagnoseScript(args));
+            return result == null ? "проверка ничего не сказала" : result;
+        } catch (Exception e) {
+            return e.getMessage();
+        }
+    }
+
     /** Удаление службы и папки — тоже с правами. */
     String removeScript() {
         return String.join("\n",
@@ -523,6 +561,18 @@ final class Zapret {
                 "  Write-Output 'Запускаю службу zapret…'",
                 "  try { Start-Service $name -ErrorAction Stop } catch {",
                 "    Write-Output ('ERROR: служба не запустилась: ' + $_.Exception.Message)",
+                // Почему — файлы на месте ли (их часто удаляет антивирус), код ошибки и запись журнала Windows
+                "    $bin = '" + ps(app().toString()) + "\\bin'",
+                "    foreach ($file in 'winws.exe', 'WinDivert.dll', 'WinDivert64.sys', 'cygwin1.dll') {",
+                "      if (-not (Test-Path (Join-Path $bin $file))) { Write-Output ('ERROR: нет файла ' + $file + ' — скорее всего его удалил антивирус. Добавь папку в исключения и нажми «Применить».') }",
+                "    }",
+                "    $sc = (sc.exe start $name) -join ' '",
+                "    if ($sc -match '(\\d{3,5})') { Write-Output ('Код Windows: ' + $Matches[1] + ' (' + ($sc -replace '\\s+', ' ').Trim() + ')') }",
+                "    try {",
+                "      Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Service Control Manager'; StartTime = (Get-Date).AddMinutes(-2) } -MaxEvents 20 -ErrorAction Stop |",
+                "        Where-Object { $_.Message -match 'zapret' } | Select-Object -First 2 | ForEach-Object { Write-Output ('Журнал Windows: ' + ($_.Message -replace '\\s+', ' ')) }",
+                "    } catch { }",
+                "    Write-Output 'Подробности даст кнопка «Проверить запуск» в настройках zapret.'",
                 "    exit 1",
                 "  }",
                 "}",

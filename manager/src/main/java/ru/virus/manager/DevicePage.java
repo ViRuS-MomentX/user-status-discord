@@ -1799,6 +1799,8 @@ final class DevicePage extends Ui.Card {
             screenRows.revalidate();
             worker.submit(() -> {
                 List<CaseScreens.Screen> found;
+                // Своё табло держит экран — на время поиска отпускаем
+                var resume = pauseBoard();
 
                 try {
                     found = CaseScreens.probe();
@@ -1811,6 +1813,10 @@ final class DevicePage extends Ui.Card {
                     find.setEnabled(true);
                     showScreens(result);
                 });
+
+                if (resume) {
+                    startBoard();
+                }
             });
         });
 
@@ -1851,6 +1857,29 @@ final class DevicePage extends Ui.Card {
         board = new Thread(this::runBoard, "virus-case-board");
         board.setDaemon(true);
         board.start();
+    }
+
+    /** Остановить табло и дождаться, пока оно отпустит экран; true — оно работало. */
+    private boolean pauseBoard() {
+        Thread running;
+
+        synchronized (this) {
+            running = board;
+        }
+
+        if (running == null || !running.isAlive()) {
+            return false;
+        }
+
+        stopBoard();
+
+        try {
+            running.join(4000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        return true;
     }
 
     private synchronized void stopBoard() {
@@ -1923,8 +1952,14 @@ final class DevicePage extends Ui.Card {
                     var size = CaseScreens.SIZES.get(sizes.getSelectedIndex());
                     test.setEnabled(false);
                     worker.submit(() -> {
+                        // Табло держит экран: ставим на паузу, картинку показываем 15 секунд, потом табло вернётся
+                        var resume = pauseBoard();
                         var problem = CaseScreens.show(screen, CaseScreens.testPattern(size[0], size[1], screen.id()),
                                 Math.max(30, glow.brightness));
+
+                        if (resume) {
+                            new Timer(15_000, t -> startBoard()) {{ setRepeats(false); }}.start();
+                        }
                         SwingUtilities.invokeLater(() -> {
                             test.setEnabled(true);
                             toast.accept(problem == null ? "Картинка " + size[0] + "×" + size[1] + " ушла на экран. "

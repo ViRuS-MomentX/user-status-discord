@@ -1139,6 +1139,7 @@ class DeviceTest {
 
         var pattern = CaseScreens.testPattern(320, 480, "1cbe:0035");
         assertTrue(CaseScreens.jpeg(pattern).length < 1024 * 1024);
+        assertEquals(0x11, CaseScreens.sampling(CaseScreens.jpeg(pattern)), "цвет без прореживания — 4:4:4, как у turzx-linux");
     }
 
     @Test

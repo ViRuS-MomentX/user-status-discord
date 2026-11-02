@@ -179,7 +179,7 @@ final class CaseScreens {
 
             try (var stream = ImageIO.createImageOutputStream(out)) {
                 writer.setOutput(stream);
-                writer.write(null, new IIOImage(image, null, null), params);
+                writer.write(null, new IIOImage(image, null, fullColor(writer, image, params)), params);
             } finally {
                 writer.dispose();
             }
@@ -190,6 +190,44 @@ final class CaseScreens {
         }
 
         throw new IOException("картинка не сжимается до 1 МБ");
+    }
+
+    /**
+     * Метаданные JPEG без прореживания цвета (4:4:4), как шлют turzx-linux и
+     * turing-smart-screen: Java по умолчанию делает 4:2:0, и прошивка экрана
+     * рисует такое с полосами и не тем фоном.
+     */
+    private static javax.imageio.metadata.IIOMetadata fullColor(javax.imageio.ImageWriter writer, BufferedImage image,
+                                                                ImageWriteParam params) {
+        try {
+            var metadata = writer.getDefaultImageMetadata(new javax.imageio.ImageTypeSpecifier(image), params);
+            var format = "javax_imageio_jpeg_image_1.0";
+            var root = (javax.imageio.metadata.IIOMetadataNode) metadata.getAsTree(format);
+            var components = root.getElementsByTagName("componentSpec");
+
+            for (var i = 0; i < components.getLength(); i++) {
+                var component = (javax.imageio.metadata.IIOMetadataNode) components.item(i);
+                component.setAttribute("HsamplingFactor", "1");
+                component.setAttribute("VsamplingFactor", "1");
+            }
+
+            metadata.setFromTree(format, root);
+            return metadata;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Прореживание цвета в готовом JPEG: множители первой компоненты (для проверки). */
+    static int sampling(byte[] jpeg) {
+        for (var i = 0; i + 11 < jpeg.length; i++) {
+            // Маркер SOF0 (ff c0): ... число компонент, затем id и байт множителей
+            if ((jpeg[i] & 0xff) == 0xff && (jpeg[i + 1] & 0xff) == 0xc0) {
+                return jpeg[i + 11] & 0xff;
+            }
+        }
+
+        return -1;
     }
 
     private static int now() {

@@ -31,7 +31,14 @@ final class ZapretPanel extends JPanel {
 
     private final ExecutorService worker;
     private final JLabel version = Ui.label("", Theme.ui.deriveFont(13f), Theme.TEXT);
-    private final JLabel status = Ui.muted("", 12.5f);
+    private final JLabel status = new JLabel() {
+        @Override
+        public void setText(String text) {
+            // Длинные ответы (ошибки winws) — переносом, а не обрезкой
+            super.setText(text == null || text.isBlank() ? "" : "<html><body style='width:760px'>"
+                    + ConfigPage.escape(text) + "</body></html>");
+        }
+    };
     private final JComboBox<String> strategy = new JComboBox<>();
     private final JComboBox<String> game = new JComboBox<>(GAME_NAMES.toArray(String[]::new));
     private final JComboBox<String> ipset = new JComboBox<>(IPSET_NAMES.toArray(String[]::new));
@@ -47,6 +54,8 @@ final class ZapretPanel extends JPanel {
         this.worker = worker;
         setOpaque(false);
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
+        status.setFont(Theme.ui.deriveFont(12.5f));
+        status.setForeground(Theme.MUTED);
 
         var head = row();
         head.add(Ui.caption("zapret"));
@@ -54,6 +63,10 @@ final class ZapretPanel extends JPanel {
         head.add(update);
         head.add(apply);
         head.add(remove);
+        var check = Ui.ghost("Проверить запуск");
+        check.setToolTipText("Запустить winws.exe напрямую на 5 секунд и показать, что он скажет (нужны права администратора)");
+        check.addActionListener(e -> run("Проверяю winws.exe — подтверди права администратора…", () -> zapret.diagnose()));
+        head.add(check);
 
         var options = row();
         options.add(Ui.muted("Стратегия", 12.5f));

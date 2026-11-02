@@ -149,6 +149,7 @@ final class TuyaLamps {
                             var link = links.get(lamp.id());
 
                             if (link == null) {
+                                lastStatus = "";
                                 status.accept("Smart Life: подключаюсь к " + lamp.name() + " по Bluetooth…");
                                 link = new TuyaBle.Link(lamp.mac(), lamp.uuid(), lamp.key(), lamp.id());
                                 links.put(lamp.id(), link);
@@ -172,6 +173,7 @@ final class TuyaLamps {
                             var version = lamp.version();
 
                             if (ip.isBlank()) {
+                                lastStatus = "";
                                 status.accept("Smart Life: ищу " + lamp.name() + " в домашней сети…");
                                 var found = Tuya.discover(6000).stream().filter(f -> f.id().equals(lamp.id())).findFirst();
 

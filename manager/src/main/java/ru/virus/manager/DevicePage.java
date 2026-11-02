@@ -1052,7 +1052,7 @@ final class DevicePage extends Ui.Card {
         smartLife.setToolTipText("Забрать лампы из аккаунта Smart Life (нужен бесплатный проект на iot.tuya.com)");
         smartLife.addActionListener(e -> smartLife(tuyaSwitch));
         tuyaRow.add(smartLife);
-        tuyaRow.add(Ui.muted("лампы Smart Life / Tuya (по Wi-Fi) повторяют режим", 12.5f));
+        tuyaRow.add(Ui.muted("лампы Smart Life / Tuya (Wi-Fi и Bluetooth) повторяют режим", 12.5f));
         stack.add(left(tuyaRow));
         stack.add(left(tuyaStatus));
 
@@ -3159,8 +3159,13 @@ final class DevicePage extends Ui.Card {
                 var found = OpenRgb.applySizes(rgb, listed, settings.zoneSizes) ? rgb.devices() : listed;
                 SwingUtilities.invokeLater(() -> showDevices(found));
             } catch (IOException | RuntimeException e) {
+                // Коротко и по делу: открыт ли OpenRGB вообще
+                var text = !(e instanceof IOException) || sdkOpen(settings.host) ? e.getMessage()
+                        : openRgbRunning() ? "OpenRGB открыт без сервера — нажми «Запустить OpenRGB»"
+                        : "OpenRGB не запущен — нажми «Запустить OpenRGB»";
                 SwingUtilities.invokeLater(() -> {
-                    rgbStatus.setText(e.getMessage());
+                    rgbStatus.setText(text);
+                    rgbStatus.setToolTipText(e.getMessage());
                     rgbStatus.setForeground(Theme.ERROR);
                 });
             }

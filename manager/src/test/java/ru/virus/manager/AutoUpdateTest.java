@@ -68,6 +68,8 @@ class AutoUpdateTest {
     @Test
     void runningProcessesStartAgainAfterUpdate(@TempDir Path home) throws Exception {
         Files.writeString(home.resolve(Supervisor.RESUME), "nobody\n");
+        // Без своих процессов: запущенные боты писали бы журналы, пока JUnit удаляет временную папку
+        Files.writeString(home.resolve("processes.json"), "[]");
         var supervisor = new Supervisor(home, "java");
         supervisor.load();
         supervisor.startAutostart();

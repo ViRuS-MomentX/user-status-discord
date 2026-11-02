@@ -371,10 +371,10 @@ final class TuyaBle {
                 }
 
                 send(STATUS, new byte[0], 0);
-                var until = System.currentTimeMillis() + 1500;
+                var statusUntil = System.currentTimeMillis() + 1500;
 
-                while (System.currentTimeMillis() < until) {
-                    poll(until - System.currentTimeMillis());
+                while (System.currentTimeMillis() < statusUntil) {
+                    poll(statusUntil - System.currentTimeMillis());
                 }
             } catch (Exception e) {
                 close();

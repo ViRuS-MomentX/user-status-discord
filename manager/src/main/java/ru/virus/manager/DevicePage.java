@@ -645,6 +645,10 @@ final class DevicePage extends Ui.Card {
             menu.show(sleepButton, 0, sleepButton.getHeight());
         });
         powerRow.add(sleepButton);
+        darkButton.setToolTipText("Выключить подсветку и погасить экраны корпуса; ещё раз — включить всё обратно");
+        darkButton.addActionListener(e -> setDark(!settings.allDark));
+        showDark();
+        powerRow.add(darkButton);
         powerRow.add(Box.createHorizontalStrut(12));
         var arrows = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 6, 0));
         arrows.add(previous);
@@ -1392,6 +1396,9 @@ final class DevicePage extends Ui.Card {
         var power = new java.awt.MenuItem(glow.on ? "Выключить" : "Включить");
         power.addActionListener(e -> SwingUtilities.invokeLater(() -> setLighting(!glow.on)));
         trayMenu.add(power);
+        var dark = new java.awt.MenuItem(settings.allDark ? "Включить подсветку и экраны" : "Погасить всё (подсветка и экраны)");
+        dark.addActionListener(e -> SwingUtilities.invokeLater(() -> setDark(!settings.allDark)));
+        trayMenu.add(dark);
 
         var sleep = new java.awt.Menu(sleepUntil > 0 ? "Таймер сна: погаснет в " + sleepTime() : "Таймер сна");
 
@@ -1832,7 +1839,7 @@ final class DevicePage extends Ui.Card {
         body.add(screenRows, BorderLayout.CENTER);
         body.add(boardStatus, BorderLayout.SOUTH);
 
-        if (settings.screenBoard && !settings.screenId.isBlank()) {
+        if (settings.screenBoard && !settings.screenId.isBlank() && !settings.allDark) {
             startBoard();
         }
 
@@ -1857,6 +1864,69 @@ final class DevicePage extends Ui.Card {
         board = new Thread(this::runBoard, "virus-case-board");
         board.setDaemon(true);
         board.start();
+    }
+
+    /** «Погасить всё»: подсветка и экраны корпуса. */
+    private final JButton darkButton = Ui.button("Погасить всё");
+
+    private void showDark() {
+        darkButton.setText(settings.allDark ? "Включить всё" : "Погасить всё");
+        darkButton.setIcon(Icons.of(Icons.Kind.POWER, settings.allDark ? Theme.ACCENT : Theme.TEXT));
+    }
+
+    /**
+     * Погасить или включить всё: подсветку и экраны корпуса (табло — тоже).
+     * Экраны гаснут по-настоящему: подсветка экрана в ноль и чёрный кадр.
+     */
+    void setDark(boolean dark) {
+        settings.allDark = dark;
+        settings.save();
+        showDark();
+        fillTrayMenu();
+        setLighting(!dark);
+
+        if (dark) {
+            worker.submit(() -> {
+                pauseBoard();
+                var problem = darkenScreens();
+                SwingUtilities.invokeLater(() -> {
+                    boardStatus.setText(problem == null ? "Экраны погашены." : "Экраны: " + problem);
+                    toast.accept("Подсветка выключена" + (problem == null ? ", экраны погашены." : ". Экраны: " + problem));
+                });
+            });
+        } else {
+            if (settings.screenBoard && !settings.screenId.isBlank()) {
+                startBoard();
+            } else {
+                boardStatus.setText("Экраны: включи «живое табло» или открой программу JONSBO — они покажут своё.");
+            }
+
+            toast.accept("Подсветка и экраны включены.");
+        }
+    }
+
+    /** Погасить экраны TURZX, которые понимают V.I.R.U.S.; null — получилось (или гасить нечего). */
+    private String darkenScreens() {
+        String problem = null;
+
+        for (var screen : CaseScreens.probe()) {
+            if (!screen.answers()) {
+                continue;
+            }
+
+            var size = settings.screenSize.split("×");
+            var black = new java.awt.image.BufferedImage(Integer.parseInt(size[0]), Integer.parseInt(size[1]),
+                    java.awt.image.BufferedImage.TYPE_INT_RGB);
+
+            try (var session = new CaseScreens.Session(screen, 0)) {
+                session.show(black);
+                session.brightness(0);
+            } catch (Exception e) {
+                problem = e.getMessage();
+            }
+        }
+
+        return problem;
     }
 
     /** Остановить табло и дождаться, пока оно отпустит экран; true — оно работало. */
@@ -1894,14 +1964,14 @@ final class DevicePage extends Ui.Card {
     private void runBoard() {
         var me = Thread.currentThread();
 
-        while (board == me && settings.screenBoard) {
+        while (board == me && settings.screenBoard && !settings.allDark) {
             var id = settings.screenId.split(":");
             var screen = new CaseScreens.Screen(0, 0, Integer.parseInt(id[0], 16), Integer.parseInt(id[1], 16), "", "", null);
 
             try (var session = new CaseScreens.Session(screen, Math.max(30, glow.brightness))) {
                 SwingUtilities.invokeLater(() -> boardStatus.setText("Табло: работает на экране " + settings.screenId + "."));
 
-                while (board == me && settings.screenBoard) {
+                while (board == me && settings.screenBoard && !settings.allDark) {
                     var size = settings.screenSize.split("×");
                     var width = Integer.parseInt(size[0]);
                     var height = Integer.parseInt(size[1]);
@@ -3526,6 +3596,8 @@ final class DevicePage extends Ui.Card {
         int rotateMinutes = 0;
         boolean bleLamps;
         boolean screenBoard;
+        /** «Погасить всё» нажато — подсветка и экраны выключены, и после перезапуска тоже. */
+        boolean allDark;
         String screenId = "";
         String screenSize = "320×480";
         int screenRotation;
@@ -3596,6 +3668,7 @@ final class DevicePage extends Ui.Card {
                     settings.rotateMinutes = json.get("rotateMinutes") instanceof Number n ? n.intValue() : 0;
                     settings.bleLamps = Boolean.TRUE.equals(json.get("bleLamps"));
                     settings.screenBoard = Boolean.TRUE.equals(json.get("screenBoard"));
+                    settings.allDark = Boolean.TRUE.equals(json.get("allDark"));
                     settings.screenId = json.get("screenId") instanceof String id && id.matches("[0-9a-f]{4}:[0-9a-f]{4}") ? id : "";
                     settings.screenSize = json.get("screenSize") instanceof String size && size.matches("\\d+×\\d+") ? size : "320×480";
                     settings.screenRotation = json.get("screenRotation") instanceof Number n ? ((n.intValue() / 90) % 4) * 90 : 0;
@@ -3697,6 +3770,7 @@ final class DevicePage extends Ui.Card {
             json.put("rotateMinutes", rotateMinutes);
             json.put("bleLamps", bleLamps);
             json.put("screenBoard", screenBoard);
+            json.put("allDark", allDark);
             json.put("screenId", screenId);
             json.put("screenSize", screenSize);
             json.put("screenRotation", screenRotation);

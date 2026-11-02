@@ -314,7 +314,11 @@ final class TuyaBle {
                     String line;
 
                     while ((line = in.readLine()) != null) {
-                        lines.add(line.strip());
+                        var clean = cleanLine(line);
+
+                        if (clean != null) {
+                            lines.add(clean);
+                        }
                     }
                 } catch (IOException ignored) {
                     // помощник закрылся
@@ -326,10 +330,26 @@ final class TuyaBle {
             reader.start();
 
             try {
-                var ready = next(30_000);
+                // Ждём «ready»; ошибки PowerShell запоминаем и показываем, если помощник так и не поднялся
+                var until = System.currentTimeMillis() + 40_000;
+                String problem = null;
 
-                if (!"ready".equals(ready)) {
-                    throw new IOException(helperError(ready));
+                while (true) {
+                    var line = next(until - System.currentTimeMillis());
+
+                    if ("ready".equals(line)) {
+                        break;
+                    }
+
+                    if (line == null || line.equals("closed") || line.equals("none") || line.equals("nobt")
+                            || line.equals("nochar")) {
+                        throw new IOException(helperError(problem != null && (line == null || line.equals("closed"))
+                                ? "error " + problem : line));
+                    }
+
+                    if (line.startsWith("error ")) {
+                        problem = line.substring(6);
+                    }
                 }
 
                 send(DEVICE_INFO, new byte[0], 0);
@@ -364,6 +384,33 @@ final class TuyaBle {
 
         int protocol() {
             return protocol;
+        }
+
+        /**
+         * Строка помощника: служебный мусор PowerShell («#< CLIXML») — null,
+         * ошибки из CLIXML — «error текст».
+         */
+        static String cleanLine(String line) {
+            var text = line.strip();
+
+            if (text.isEmpty() || text.startsWith("#< CLIXML")) {
+                return null;
+            }
+
+            if (text.startsWith("<Objs")) {
+                var errors = new StringBuilder();
+                var matcher = java.util.regex.Pattern.compile("<S S=\"Error\">(.*?)</S>").matcher(text);
+
+                while (matcher.find()) {
+                    errors.append(matcher.group(1).replace("_x000D_", "").replace("_x000A_", " ")
+                            .replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")).append(' ');
+                }
+
+                var message = errors.toString().strip().replaceAll("\\s+", " ");
+                return message.isEmpty() ? null : "error " + (message.length() > 200 ? message.substring(0, 200) + "…" : message);
+            }
+
+            return text;
         }
 
         private static String helperError(String line) {
@@ -499,6 +546,8 @@ final class TuyaBle {
     static String script(long address) {
         return """
                 $ErrorActionPreference = 'Stop'
+                $ProgressPreference = 'SilentlyContinue'
+                trap { [Console]::WriteLine('error ' + $_.Exception.Message); exit }
                 try {
                   Add-Type -AssemblyName System.Runtime.WindowsRuntime
                   $null = [Windows.Devices.Bluetooth.BluetoothLEDevice, Windows.Devices.Bluetooth, ContentType = WindowsRuntime]

@@ -1179,6 +1179,10 @@ class DeviceTest {
         assertEquals(java.util.Map.of(20, TuyaBle.BOOL), TuyaBle.dpTypes(TuyaBle.colour(Color.BLACK, java.util.Map.of()), 0));
         assertEquals(0xdc23aabbccddL, TuyaBle.address("dc:23:aa:bb:cc:dd"));
         assertTrue(TuyaBle.script(1).contains("00002b11") && TuyaBle.script(1).contains("[uint64]1"));
+        assertNull(TuyaBle.Link.cleanLine("#< CLIXML"));
+        assertEquals("error Нет доступа", TuyaBle.Link.cleanLine("<Objs Version=\"1.1.0.1\"><S S=\"Error\">Нет доступа_x000D__x000A_</S></Objs>"));
+        assertNull(TuyaBle.Link.cleanLine("<Objs Version=\"1.1.0.1\"><Obj S=\"progress\"></Obj></Objs>"));
+        assertEquals("ready", TuyaBle.Link.cleanLine("ready "));
         var lamp = new TuyaLamps.Lamp("bf1", "Лампа", "0123456789abcdef", "", "3.3", false, "u", "dc23aabbccdd", true);
         assertEquals(lamp, TuyaLamps.Lamp.fromJson(lamp.toJson()));
     }

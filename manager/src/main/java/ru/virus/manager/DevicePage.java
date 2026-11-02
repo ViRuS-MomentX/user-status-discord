@@ -577,6 +577,13 @@ final class DevicePage extends Ui.Card {
 
         signalOn.onChange(on -> {
             SwingUtilities.invokeLater(this::fillTrayMenu);
+
+            // Включил подсветку руками — «Погасить всё» снято целиком, экраны тоже возвращаются
+            if (on && settings.allDark && !signalQuiet) {
+                SwingUtilities.invokeLater(() -> setDark(false));
+                return;
+            }
+
             if (openRgbEngine()) {
                 glow.on = on;
                 settings.glowOn = on;

@@ -126,4 +126,9 @@ final class TuyaCloud {
     static boolean light(String category) {
         return List.of("dj", "dd", "fwd", "dc", "xdd", "gyd", "fsd", "tgq", "tgkg", "sxd").contains(category);
     }
+
+    /** По имени: «Smart LED», «Lamp», «Лампа», «Лента» — тоже свет, даже если категория непривычная. */
+    static boolean lightName(String name) {
+        return name.matches("(?iu).*(led|lamp|light|bulb|strip|ламп|свет|лент|подсвет).*");
+    }
 }

@@ -1907,7 +1907,7 @@ final class DevicePage extends Ui.Card {
                 var skipped = new java.util.ArrayList<String>();
 
                 for (var device : devices) {
-                    if (!TuyaCloud.light(device.category()) || device.key().isBlank() || device.key().equals("null")) {
+                    if (!(TuyaCloud.light(device.category()) || TuyaCloud.lightName(device.name() + " " + device.product())) || device.key().isBlank() || device.key().equals("null")) {
                         skipped.add(device.name());
                         continue;
                     }

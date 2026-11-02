@@ -1110,6 +1110,7 @@ class DeviceTest {
         assertEquals("9AF3E82AD68E6CCD4AD861F718E75D445CE0298F9CD4C2D87E265CD17FC187CA",
                 TuyaCloud.sign("secret", "abc", null, 1700000000000L, "/v1.0/token?grant_type=1"));
         assertTrue(TuyaCloud.light("dj") && TuyaCloud.light("dd") && !TuyaCloud.light("cz"));
+        assertTrue(TuyaCloud.lightName("Smart LED 16 Smart LED") && !TuyaCloud.lightName("Розетка"));
 
         // Кадр 3.3: туда и обратно
         var key = "0123456789abcdef".getBytes(java.nio.charset.StandardCharsets.US_ASCII);

@@ -396,7 +396,7 @@ final class Zapret {
                 "  }",
                 // Пользователям — запуск, остановка и опрос; менять настройки службы — только администраторам
                 "  sc.exe sdset $name 'D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWRPWPDTLOCRRC;;;AU)' | Out-Null",
-                start ? "  Start-Service $name" : "",
+                start ? startOrExplain(args) : "",
                 "  Set-Content -Path $log -Value 'ok' -Encoding UTF8",
                 "} catch {",
                 "  Set-Content -Path $log -Value ('error: ' + $_.Exception.Message) -Encoding UTF8",
@@ -439,6 +439,28 @@ final class Zapret {
         } catch (Exception e) {
             return e.getMessage();
         }
+    }
+
+    /**
+     * Запуск службы в скрипте установки, а если Windows её не запускает —
+     * выяснить почему, раз права администратора уже есть: на месте ли файлы
+     * (их часто удаляет антивирус) и что говорит сам winws.exe за 5 секунд.
+     */
+    static String startOrExplain(String args) {
+        return String.join("\n",
+                "  try { Start-Service $name -ErrorAction Stop } catch {",
+                "    $missing = @('winws.exe', 'WinDivert.dll', 'WinDivert64.sys', 'cygwin1.dll') | Where-Object { -not (Test-Path (Join-Path $app (Join-Path 'bin' $_))) }",
+                "    if ($missing) { throw ('нет файлов ' + ($missing -join ', ') + ' — их удалил антивирус. Восстанови их в «Безопасность Windows → Журнал защиты», добавь папку ' + $app + ' в исключения и нажми «Применить».') }",
+                "    $exe = Join-Path $app 'bin\\winws.exe'",
+                "    $out = Join-Path $PSScriptRoot 'winws-out.txt'",
+                "    $err = Join-Path $PSScriptRoot 'winws-err.txt'",
+                "    $p = Start-Process -FilePath $exe -ArgumentList '" + ps(args) + "' -WorkingDirectory (Split-Path $exe) -PassThru -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err",
+                "    Start-Sleep -Seconds 5",
+                "    $said = ((Get-Content $out -Raw -ErrorAction SilentlyContinue) + ' ' + (Get-Content $err -Raw -ErrorAction SilentlyContinue)).Trim()",
+                "    if ($p.HasExited) { throw ('служба не запускается: winws.exe сразу завершился (код ' + $p.ExitCode + '): ' + $said) }",
+                "    Stop-Process -Id $p.Id -Force",
+                "    throw ('служба не запускается, хотя сам winws.exe работает (' + $_.Exception.Message + '). ' + $said)",
+                "  }");
     }
 
     /** Удаление службы и папки — тоже с правами. */

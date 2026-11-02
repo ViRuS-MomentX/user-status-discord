@@ -1199,6 +1199,8 @@ class DeviceTest {
                 + "{\"name\":\"zapret-discord-youtube-1.10.4.zip\",\"browser_download_url\":\"https://x/z.zip\"}]}");
         assertEquals("https://x/z.zip", release.zip());
         assertTrue(Zapret.keeperScript().contains("Start-Service"));
+        var explain = Zapret.startOrExplain("--wf-tcp=80 --hostlist=\"C:\\x it's.txt\"");
+        assertTrue(explain.contains("WinDivert64.sys") && explain.contains("it''s"), "кавычка в аргументах экранирована для PowerShell");
         assertTrue(Zapret.defaultSpec().supervised(), "останавливается словом stop — смотритель гасит службу");
     }
 }

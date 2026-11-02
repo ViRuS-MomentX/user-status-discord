@@ -1118,4 +1118,26 @@ class DeviceTest {
         assertNull(BleLamps.describe("какая-то служебная строка"));
         assertTrue(BleLamps.script().contains("0000fff3") && !BleLamps.script().contains("%NAMES%"));
     }
+
+    @Test
+    void caseScreenCommandsFollowTheTurzxProtocol() throws Exception {
+        var packet = CaseScreens.header(CaseScreens.SHOW_JPEG, CaseScreens.be32(123456), 0x01020304);
+        assertEquals(512, packet.length);
+        assertEquals((byte) 0xa1, packet[510]);
+        assertEquals((byte) 0x1a, packet[511]);
+
+        var plain = CaseScreens.open(packet);
+        assertEquals(101, plain[0] & 0xff, "команда");
+        assertEquals(0x1a, plain[2] & 0xff);
+        assertEquals(0x6d, plain[3] & 0xff);
+        assertEquals(0x04, plain[4] & 0xff, "время — младшим байтом вперёд");
+        assertEquals(123456, java.nio.ByteBuffer.wrap(plain, 8, 4).getInt(), "размер картинки — старшим вперёд");
+
+        var reply = new byte[64];
+        System.arraycopy("turzx_0001_0015".getBytes(), 0, reply, 8, 15);
+        assertEquals("turzx_0001_0015", CaseScreens.firmware(reply));
+
+        var pattern = CaseScreens.testPattern(320, 480, "1cbe:0035");
+        assertTrue(CaseScreens.jpeg(pattern).length < 1024 * 1024);
+    }
 }

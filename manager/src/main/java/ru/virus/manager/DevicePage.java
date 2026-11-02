@@ -510,7 +510,7 @@ final class DevicePage extends Ui.Card {
         var page = new Ui.FitWidth();
         page.setLayout(new BoxLayout(page, BoxLayout.Y_AXIS));
 
-        for (var card : List.of(signalCard(), rgb, apps(), lighting(), vendors)) {
+        for (var card : List.of(signalCard(), rgb, screensCard(), apps(), lighting(), vendors)) {
             card.setAlignmentX(LEFT_ALIGNMENT);
             page.add(card);
             page.add(Box.createVerticalStrut(14));
@@ -1780,6 +1780,96 @@ final class DevicePage extends Ui.Card {
                 glow.color2, glow.cpu(), glow.effective(), glow.on, 300)[0];
         lamps.color(RgbAnimator.overlay(new Color[] {color}, glow.flashColor,
                 glow.flashLevel(System.currentTimeMillis()))[0]);
+    }
+
+    /** Экраны корпуса (TURZX/JONSBO): найденные и что они ответили. */
+    private final JPanel screenRows = Ui.transparent(null);
+
+    /**
+     * Экраны в корпусе — проба: найти, поздороваться, показать тестовую
+     * картинку. Пока программа JONSBO работает, она держит экраны — её надо закрыть.
+     */
+    private JComponent screensCard() {
+        screenRows.setLayout(new BoxLayout(screenRows, BoxLayout.Y_AXIS));
+        var find = Ui.button("Найти экраны");
+        find.addActionListener(e -> {
+            find.setEnabled(false);
+            screenRows.removeAll();
+            screenRows.add(left(Ui.muted("Ищу… (программа JONSBO должна быть закрыта, и в трее тоже)", 13f)));
+            screenRows.revalidate();
+            worker.submit(() -> {
+                List<CaseScreens.Screen> found;
+
+                try {
+                    found = CaseScreens.probe();
+                } catch (Throwable t) {
+                    found = List.of(new CaseScreens.Screen(0, 0, 0, 0, "USB", "", "не запустился USB: " + t.getMessage()));
+                }
+
+                var result = found;
+                SwingUtilities.invokeLater(() -> {
+                    find.setEnabled(true);
+                    showScreens(result);
+                });
+            });
+        });
+
+        var head = Ui.transparent(new BorderLayout(10, 0));
+        head.add(Ui.muted("<html><body style='width:560px'>Экраны TURZX, которые JONSBO ставит в корпус и на кулер. "
+                + "V.I.R.U.S. говорит с ними напрямую по их открытому протоколу. Перед поиском закрой программу "
+                + "JONSBO: экраном может управлять только кто-то один. Сейчас это проба: найти экраны и вывести "
+                + "тестовую картинку, чтобы подобрать разрешение.</body></html>", 12.5f), BorderLayout.CENTER);
+        head.add(find, BorderLayout.EAST);
+
+        var body = Ui.transparent(new BorderLayout(0, 10));
+        body.add(head, BorderLayout.NORTH);
+        body.add(screenRows, BorderLayout.CENTER);
+        return inner("Экраны корпуса", body);
+    }
+
+    private void showScreens(List<CaseScreens.Screen> found) {
+        screenRows.removeAll();
+
+        if (found.isEmpty()) {
+            screenRows.add(left(Ui.muted("Экранов TURZX не нашлось. Проверь, что они подключены, и что программа "
+                    + "JONSBO закрыта.", 13f)));
+        }
+
+        for (var screen : found) {
+            var row = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 4));
+            var title = (screen.name().isBlank() ? "Экран" : screen.name()) + " · " + screen.id();
+            row.add(Ui.label("<html><b>" + ConfigPage.escape(title) + "</b> <font color='#7C8C84'>· "
+                    + ConfigPage.escape(screen.answers() ? "ответил, прошивка " + screen.firmware() : screen.error())
+                    + "</font></html>", Theme.ui, Theme.TEXT));
+
+            if (screen.answers()) {
+                var sizes = new javax.swing.JComboBox<>(CaseScreens.SIZES.stream().map(size -> size[0] + "×" + size[1])
+                        .toArray(String[]::new));
+                var test = Ui.button("Тестовая картинка");
+                test.addActionListener(e -> {
+                    var size = CaseScreens.SIZES.get(sizes.getSelectedIndex());
+                    test.setEnabled(false);
+                    worker.submit(() -> {
+                        var problem = CaseScreens.show(screen, CaseScreens.testPattern(size[0], size[1], screen.id()),
+                                Math.max(30, glow.brightness));
+                        SwingUtilities.invokeLater(() -> {
+                            test.setEnabled(true);
+                            toast.accept(problem == null ? "Картинка " + size[0] + "×" + size[1] + " ушла на экран. "
+                                    + "Рамка видна со всех сторон и надпись ровная — значит, разрешение то."
+                                    : "Экран: " + problem);
+                        });
+                    });
+                });
+                row.add(sizes);
+                row.add(test);
+            }
+
+            row.setAlignmentX(LEFT_ALIGNMENT);
+            screenRows.add(row);
+        }
+
+        screenRows.revalidate();
+        screenRows.repaint();
     }
 
     /** Переключатель «как в Windows». */

@@ -83,6 +83,11 @@ final class TuyaCloud {
             throw new IOException("облако Tuya ответило непонятно (" + response.statusCode() + ")");
         }
 
+        if (!Boolean.TRUE.equals(map.get("success")) && String.valueOf(map.get("code")).startsWith("2884100")) {
+            throw new IOException("в проекте не подключён IoT Core: на iot.tuya.com открой Cloud → Cloud Services → "
+                    + "IoT Core → бесплатный Trial, затем в проекте Service API → Go to Authorize → IoT Core");
+        }
+
         if (!Boolean.TRUE.equals(map.get("success"))) {
             throw new IOException("облако Tuya: " + map.get("msg") + " (код " + map.get("code") + ")");
         }

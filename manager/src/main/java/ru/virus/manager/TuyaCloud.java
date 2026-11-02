@@ -39,7 +39,7 @@ final class TuyaCloud {
     }
 
     /** Устройство из облака. */
-    record Device(String id, String name, String key, String category, String product) {
+    record Device(String id, String name, String key, String category, String product, boolean online) {
     }
 
     private final String host;
@@ -112,7 +112,8 @@ final class TuyaCloud {
                     if (item instanceof Map<?, ?> device) {
                         devices.add(new Device(String.valueOf(device.get("id")), String.valueOf(device.get("name")),
                                 String.valueOf(device.get("local_key")), String.valueOf(device.get("category")),
-                                String.valueOf(device.get("product_name"))));
+                                String.valueOf(device.get("product_name")),
+                                Boolean.TRUE.equals(device.get("online"))));
                     }
                 }
             }

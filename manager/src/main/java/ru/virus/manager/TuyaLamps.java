@@ -15,7 +15,11 @@ import java.util.function.Consumer;
 final class TuyaLamps {
 
     /** Лампа: id, имя, локальный ключ (не показываем), адрес и версия протокола. */
-    record Lamp(String id, String name, String key, String ip, String version) {
+    record Lamp(String id, String name, String key, String ip, String version, boolean online) {
+
+        Lamp(String id, String name, String key, String ip, String version) {
+            this(id, name, key, ip, version, true);
+        }
 
         Map<String, Object> toJson() {
             var json = new java.util.LinkedHashMap<String, Object>();
@@ -47,6 +51,20 @@ final class TuyaLamps {
 
     TuyaLamps(Consumer<String> status) {
         this.status = status;
+    }
+
+    /** Нашли адрес лампы — запомнить, чтобы в следующий раз не искать. */
+    volatile Consumer<List<Lamp>> learned = lamps -> { };
+
+    private void learn(Lamp lamp, String ip, String version) {
+        var updated = new ArrayList<Lamp>();
+
+        for (var item : lamps) {
+            updated.add(item.id().equals(lamp.id()) ? new Lamp(item.id(), item.name(), item.key(), ip, version, true) : item);
+        }
+
+        lamps = List.copyOf(updated);
+        learned.accept(lamps);
     }
 
     void lamps(List<Lamp> lamps) {
@@ -108,17 +126,37 @@ final class TuyaLamps {
                         if (session == null) {
                             var ip = lamp.ip();
 
+                            var version = lamp.version();
+
                             if (ip.isBlank()) {
+                                status.accept("Smart Life: ищу " + lamp.name() + " в домашней сети…");
                                 var found = Tuya.discover(6000).stream().filter(f -> f.id().equals(lamp.id())).findFirst();
 
-                                if (found.isEmpty()) {
-                                    throw new java.io.IOException("не видна в сети (включена? тот же Wi-Fi?)");
+                                if (found.isPresent()) {
+                                    ip = found.get().ip();
+                                    version = found.get().version();
+                                } else {
+                                    // Объявления не дошли — перебираем сеть и пробуем ключ лампы на каждом устройстве Tuya
+                                    for (var host : Tuya.scanHosts()) {
+                                        var probed = Tuya.probe(host, lamp.id(), lamp.key());
+
+                                        if (probed != null) {
+                                            ip = host;
+                                            version = probed;
+                                            break;
+                                        }
+                                    }
                                 }
 
-                                ip = found.get().ip();
+                                if (ip.isBlank()) {
+                                    throw new java.io.IOException("не видна в домашней сети — она подключена к Wi-Fi? "
+                                            + "(в облаке: " + (lamp.online() ? "в сети" : "не в сети") + ")");
+                                }
+
+                                learn(lamp, ip, version);
                             }
 
-                            session = new Tuya.Session(ip, lamp.id(), lamp.key(), lamp.version());
+                            session = new Tuya.Session(ip, lamp.id(), lamp.key(), version);
                             sessions.put(lamp.id(), session);
 
                             if (!styles.containsKey(lamp.id())) {
@@ -140,7 +178,14 @@ final class TuyaLamps {
                         }
 
                         sent.remove(lamp.id());
-                        retryAt.put(lamp.id(), now + 8000);
+                        // Сохранённый адрес не отвечает — лампа могла получить новый, в следующий раз ищем заново
+                        var lost = !lamp.ip().isBlank() && e instanceof java.net.ConnectException;
+
+                        if (lost) {
+                            learn(lamp, "", lamp.version());
+                        }
+
+                        retryAt.put(lamp.id(), now + (lamp.ip().isBlank() ? 30_000 : 8000));
                         problems.put(lamp.id(), lamp.name() + ": " + (e.getMessage() == null ? e.getClass().getSimpleName()
                                 : e.getMessage()));
                     }

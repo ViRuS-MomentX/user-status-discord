@@ -266,6 +266,10 @@ final class DevicePage extends Ui.Card {
             }
 
             tuya.lamps(settings.tuya);
+            tuya.learned = found -> SwingUtilities.invokeLater(() -> {
+                settings.tuya = found;
+                settings.save();
+            });
 
             if (settings.tuyaLamps) {
                 tuya.start();
@@ -1859,11 +1863,13 @@ final class DevicePage extends Ui.Card {
                 + "2. В проекте: Devices → Link App Account → Add App Account — отсканируй QR-код в Smart Life "
                 + "(Профиль → значок сканера).<br>"
                 + "3. Overview: скопируй сюда Access ID и Access Secret.<br>"
-                + "Секрет V.I.R.U.S. не сохраняет; лампы и компьютер должны быть в одной сети.</body></html>"));
+                + "Данные сохраняются только на этом компьютере (в отчёты не попадают); лампы и компьютер "
+                + "должны быть в одной сети.</body></html>"));
         panel.add(Box.createVerticalStrut(8));
         var region = new javax.swing.JComboBox<>(TuyaCloud.REGIONS.keySet().toArray(String[]::new));
-        var accessId = new javax.swing.JTextField(28);
-        var secret = new javax.swing.JPasswordField(28);
+        region.setSelectedItem(TuyaCloud.REGIONS.containsKey(settings.tuyaRegion) ? settings.tuyaRegion : "Европа (центр)");
+        var accessId = new javax.swing.JTextField(settings.tuyaAccessId, 28);
+        var secret = new javax.swing.JPasswordField(settings.tuyaSecret, 28);
         var form = Ui.transparent(new java.awt.GridLayout(0, 2, 8, 6));
         form.add(new JLabel("Регион (Data Center)"));
         form.add(region);
@@ -1896,6 +1902,11 @@ final class DevicePage extends Ui.Card {
             return;
         }
 
+        settings.tuyaRegion = (String) region.getSelectedItem();
+        settings.tuyaAccessId = id;
+        settings.tuyaSecret = key;
+        settings.save();
+
         tuyaStatus.setText("Smart Life: спрашиваю облако Tuya и ищу лампы в сети…");
         worker.submit(() -> {
             String text;
@@ -1914,14 +1925,15 @@ final class DevicePage extends Ui.Card {
 
                     var net = found.stream().filter(f -> f.id().equals(device.id())).findFirst();
                     chosen.add(new TuyaLamps.Lamp(device.id(), device.name(), device.key(),
-                            net.map(Tuya.Found::ip).orElse(""), net.map(Tuya.Found::version).orElse("3.3")));
+                            net.map(Tuya.Found::ip).orElse(""), net.map(Tuya.Found::version).orElse("3.3"), device.online()));
                 }
 
                 text = chosen.isEmpty() ? "Smart Life: в аккаунте нет ламп" + (devices.isEmpty()
                         ? " — привязан ли аккаунт Smart Life к проекту (Devices → Link App Account)?"
                         : " (есть: " + String.join(", ", skipped) + ")")
                         : "Smart Life: добавлены " + String.join(", ", chosen.stream().map(lamp -> lamp.name()
-                        + (lamp.ip().isBlank() ? " (пока не видна в сети)" : "")).toList());
+                        + (!lamp.online() ? " (облако Tuya тоже не видит её в сети: не подключена к Wi-Fi или она Bluetooth-лампа)"
+                        : lamp.ip().isBlank() ? " (ищу её в домашней сети…)" : "")).toList());
                 var lamps = List.copyOf(chosen);
                 SwingUtilities.invokeLater(() -> {
                     if (!lamps.isEmpty()) {
@@ -3979,6 +3991,10 @@ final class DevicePage extends Ui.Card {
         /** Лампы Smart Life (Tuya) по Wi-Fi: включены и какие (с локальными ключами — их не показываем). */
         boolean tuyaLamps;
         List<TuyaLamps.Lamp> tuya = List.of();
+        /** Проект iot.tuya.com: регион, Access ID и Secret — по просьбе хозяина хранятся здесь, в отчёты не идут. */
+        String tuyaRegion = "";
+        String tuyaAccessId = "";
+        String tuyaSecret = "";
         /** Размер экрана уже подставлен по модели — дальше не трогаем, вдруг поправили руками. */
         boolean screenSized;
         /** «Погасить всё» нажато — подсветка и экраны выключены, и после перезапуска тоже. */
@@ -4058,6 +4074,9 @@ final class DevicePage extends Ui.Card {
                     settings.screenBoard = Boolean.TRUE.equals(json.get("screenBoard"));
                     settings.screenAuto = Boolean.TRUE.equals(json.get("screenAuto"));
                     settings.tuyaLamps = Boolean.TRUE.equals(json.get("tuyaLamps"));
+                    settings.tuyaRegion = json.get("tuyaRegion") instanceof String text ? text : "";
+                    settings.tuyaAccessId = json.get("tuyaAccessId") instanceof String text ? text : "";
+                    settings.tuyaSecret = json.get("tuyaSecret") instanceof String text ? text : "";
                     settings.tuya = json.get("tuya") instanceof List<?> lamps ? lamps.stream().map(TuyaLamps.Lamp::fromJson)
                             .filter(java.util.Objects::nonNull).toList() : List.of();
                     settings.screenSized = Boolean.TRUE.equals(json.get("screenSized"));
@@ -4167,6 +4186,9 @@ final class DevicePage extends Ui.Card {
             json.put("screenBoard", screenBoard);
             json.put("screenAuto", screenAuto);
             json.put("tuyaLamps", tuyaLamps);
+            json.put("tuyaRegion", tuyaRegion);
+            json.put("tuyaAccessId", tuyaAccessId);
+            json.put("tuyaSecret", tuyaSecret);
             json.put("tuya", tuya.stream().map(TuyaLamps.Lamp::toJson).toList());
             json.put("screenSized", screenSized);
             json.put("allDark", allDark);

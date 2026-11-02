@@ -269,6 +269,68 @@ final class Tuya {
         }
     }
 
+    /**
+     * Перебор домашней сети: у кого открыт порт 6668 — это устройства Tuya.
+     * Нужен, когда объявления устройств не доходят (их режет брандмауэр
+     * Windows или лампа новой версии молчит, пока её не спросят).
+     */
+    static List<String> scanHosts() {
+        var hosts = new java.util.LinkedHashSet<String>();
+
+        try {
+            for (var nic : java.util.Collections.list(java.net.NetworkInterface.getNetworkInterfaces())) {
+                if (!nic.isUp() || nic.isLoopback() || nic.isVirtual()) {
+                    continue;
+                }
+
+                for (var address : nic.getInterfaceAddresses()) {
+                    if (address.getAddress() instanceof java.net.Inet4Address ip && address.getNetworkPrefixLength() >= 16
+                            && ip.isSiteLocalAddress()) {
+                        var bytes = ip.getAddress();
+
+                        for (var last = 1; last < 255; last++) {
+                            hosts.add((bytes[0] & 255) + "." + (bytes[1] & 255) + "." + (bytes[2] & 255) + "." + last);
+                        }
+                    }
+                }
+            }
+        } catch (IOException ignored) {
+            // сетевых карт не видно
+        }
+
+        var open = java.util.Collections.synchronizedList(new ArrayList<String>());
+
+        try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            for (var host : hosts) {
+                pool.submit(() -> {
+                    try (var socket = new Socket()) {
+                        socket.connect(new InetSocketAddress(host, PORT), 700);
+                        open.add(host);
+                    } catch (IOException ignored) {
+                        // не Tuya
+                    }
+                });
+            }
+        }
+
+        return List.copyOf(open);
+    }
+
+    /** Подходит ли ключ лампы устройству по этому адресу; если да — версия протокола, иначе null. */
+    static String probe(String ip, String id, String localKey) {
+        for (var version : List.of("3.3", "3.4", "3.5")) {
+            try (var session = new Session(ip, id, localKey, version)) {
+                if (!session.query().isEmpty()) {
+                    return version;
+                }
+            } catch (Exception ignored) {
+                // не та версия или не та лампа
+            }
+        }
+
+        return null;
+    }
+
     // ---- Подключение и команды ----
 
     /**

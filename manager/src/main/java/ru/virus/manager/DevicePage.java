@@ -1824,7 +1824,82 @@ final class DevicePage extends Ui.Card {
         var body = Ui.transparent(new BorderLayout(0, 10));
         body.add(head, BorderLayout.NORTH);
         body.add(screenRows, BorderLayout.CENTER);
+        body.add(boardStatus, BorderLayout.SOUTH);
+
+        if (settings.screenBoard && !settings.screenId.isBlank()) {
+            startBoard();
+        }
+
         return inner("Экраны корпуса", body);
+    }
+
+    /** Живое табло на экране корпуса: свой поток, раз в 2 секунды кадр. */
+    private volatile Thread board;
+    private final JLabel boardStatus = Ui.muted("", 12.5f);
+    /** Состояние процессов для табло: имя → состояние; присылает главное окно. */
+    private volatile Map<String, String> processes = Map.of();
+
+    void processStates(Map<String, String> states) {
+        processes = Map.copyOf(states);
+    }
+
+    private synchronized void startBoard() {
+        if (board != null && board.isAlive()) {
+            return;
+        }
+
+        board = new Thread(this::runBoard, "virus-case-board");
+        board.setDaemon(true);
+        board.start();
+    }
+
+    private synchronized void stopBoard() {
+        if (board != null) {
+            board.interrupt();
+            board = null;
+        }
+
+        SwingUtilities.invokeLater(() -> boardStatus.setText(""));
+    }
+
+    private void runBoard() {
+        var me = Thread.currentThread();
+
+        while (board == me && settings.screenBoard) {
+            var id = settings.screenId.split(":");
+            var screen = new CaseScreens.Screen(0, 0, Integer.parseInt(id[0], 16), Integer.parseInt(id[1], 16), "", "", null);
+
+            try (var session = new CaseScreens.Session(screen, Math.max(30, glow.brightness))) {
+                SwingUtilities.invokeLater(() -> boardStatus.setText("Табло: работает на экране " + settings.screenId + "."));
+
+                while (board == me && settings.screenBoard) {
+                    var size = settings.screenSize.split("×");
+                    var width = Integer.parseInt(size[0]);
+                    var height = Integer.parseInt(size[1]);
+                    var turned = settings.screenRotation % 180 != 0;
+                    var data = new ScreenBoard.Data(java.time.LocalTime.now(), glow.cpu(), GpuSensor.celsius(),
+                            SignalRgb.mode(glow.mode).name() + (glow.on ? "" : " (выкл)"), processes);
+                    var frame = ScreenBoard.render(turned ? height : width, turned ? width : height, data);
+
+                    if (!session.show(CaseScreens.rotate(frame, settings.screenRotation))) {
+                        throw new IOException("экран перестал принимать кадры");
+                    }
+
+                    Thread.sleep(2000);
+                }
+            } catch (InterruptedException e) {
+                return;
+            } catch (Exception e) {
+                SwingUtilities.invokeLater(() -> boardStatus.setText("Табло: " + e.getMessage()
+                        + ". Пробую снова через 10 секунд (программа JONSBO должна быть закрыта)."));
+
+                try {
+                    Thread.sleep(10_000);
+                } catch (InterruptedException stop) {
+                    return;
+                }
+            }
+        }
     }
 
     private void showScreens(List<CaseScreens.Screen> found) {
@@ -1862,6 +1937,38 @@ final class DevicePage extends Ui.Card {
                 });
                 row.add(sizes);
                 row.add(test);
+
+                // Живое табло: разрешение и поворот запоминаются, табло само стартует с V.I.R.U.S.
+                var savedSize = CaseScreens.SIZES.stream().map(size -> size[0] + "×" + size[1]).toList()
+                        .indexOf(settings.screenSize);
+                sizes.setSelectedIndex(Math.max(0, savedSize));
+                var rotation = new javax.swing.JComboBox<>(new String[] {"0°", "90°", "180°", "270°"});
+                rotation.setSelectedIndex(Math.max(0, Math.min(3, settings.screenRotation / 90)));
+                rotation.setToolTipText("Если табло лежит боком или вверх ногами — поверни");
+                var live = new Ui.Switch(settings.screenBoard && screen.id().equals(settings.screenId));
+                Runnable save = () -> {
+                    settings.screenSize = (String) sizes.getSelectedItem();
+                    settings.screenRotation = rotation.getSelectedIndex() * 90;
+                    settings.save();
+                };
+                sizes.addActionListener(e -> save.run());
+                rotation.addActionListener(e -> save.run());
+                live.onChange(on -> {
+                    save.run();
+                    settings.screenBoard = on;
+                    settings.screenId = screen.id();
+                    settings.save();
+
+                    if (on) {
+                        startBoard();
+                    } else {
+                        stopBoard();
+                    }
+                });
+                row.add(Ui.muted("поворот", 12.5f));
+                row.add(rotation);
+                row.add(live);
+                row.add(Ui.muted("живое табло", 12.5f));
             }
 
             row.setAlignmentX(LEFT_ALIGNMENT);
@@ -3385,6 +3492,10 @@ final class DevicePage extends Ui.Card {
         int idleLevel = 0;
         int rotateMinutes = 0;
         boolean bleLamps;
+        boolean screenBoard;
+        String screenId = "";
+        String screenSize = "320×480";
+        int screenRotation;
         boolean offWhenLocked = true;
         String exitLight = "ровный цвет";
         int screenMonitor = -1;
@@ -3451,6 +3562,10 @@ final class DevicePage extends Ui.Card {
                     settings.idleLevel = json.get("idleLevel") instanceof Number n ? n.intValue() : 0;
                     settings.rotateMinutes = json.get("rotateMinutes") instanceof Number n ? n.intValue() : 0;
                     settings.bleLamps = Boolean.TRUE.equals(json.get("bleLamps"));
+                    settings.screenBoard = Boolean.TRUE.equals(json.get("screenBoard"));
+                    settings.screenId = json.get("screenId") instanceof String id && id.matches("[0-9a-f]{4}:[0-9a-f]{4}") ? id : "";
+                    settings.screenSize = json.get("screenSize") instanceof String size && size.matches("\\d+×\\d+") ? size : "320×480";
+                    settings.screenRotation = json.get("screenRotation") instanceof Number n ? ((n.intValue() / 90) % 4) * 90 : 0;
                     settings.offWhenLocked = !Boolean.FALSE.equals(json.get("offWhenLocked"));
                     settings.screenMonitor = json.get("screenMonitor") instanceof Number n ? n.intValue() : -1;
                     settings.exitLight = json.get("exitLight") instanceof String exit && EXIT_CHOICES.contains(exit)
@@ -3548,6 +3663,10 @@ final class DevicePage extends Ui.Card {
             json.put("idleLevel", idleLevel);
             json.put("rotateMinutes", rotateMinutes);
             json.put("bleLamps", bleLamps);
+            json.put("screenBoard", screenBoard);
+            json.put("screenId", screenId);
+            json.put("screenSize", screenSize);
+            json.put("screenRotation", screenRotation);
             json.put("offWhenLocked", offWhenLocked);
             json.put("exitLight", exitLight);
             json.put("screenMonitor", screenMonitor);

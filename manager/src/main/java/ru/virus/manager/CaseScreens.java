@@ -342,6 +342,124 @@ final class CaseScreens {
         }
     }
 
+    /**
+     * Постоянное подключение к одному экрану — для живого табло: открыли
+     * один раз, остановили его собственный ролик и дальше только шлём кадры.
+     */
+    static final class Session implements AutoCloseable {
+
+        private final Context context = new Context();
+        private final DeviceList list = new DeviceList();
+        private DeviceHandle handle;
+
+        Session(Screen screen, int brightness) throws IOException {
+            if (LibUsb.init(context) != LibUsb.SUCCESS) {
+                throw new IOException("libusb не запустилась");
+            }
+
+            LibUsb.getDeviceList(context, list);
+
+            for (var device : list) {
+                var descriptor = new DeviceDescriptor();
+
+                if (LibUsb.getDeviceDescriptor(device, descriptor) != LibUsb.SUCCESS
+                        || (descriptor.idVendor() & 0xffff) != screen.vendor()
+                        || (descriptor.idProduct() & 0xffff) != screen.product()) {
+                    continue;
+                }
+
+                var candidate = new DeviceHandle();
+                var opened = LibUsb.open(device, candidate);
+
+                if (opened != LibUsb.SUCCESS) {
+                    close();
+                    throw new IOException(explain(opened));
+                }
+
+                var claimed = LibUsb.claimInterface(candidate, 0);
+
+                if (claimed != LibUsb.SUCCESS) {
+                    LibUsb.close(candidate);
+                    close();
+                    throw new IOException(explain(claimed));
+                }
+
+                handle = candidate;
+                break;
+            }
+
+            if (handle == null) {
+                close();
+                throw new IOException("экран не найден — отключён?");
+            }
+
+            drain(handle);
+            command(handle, SYNC, new byte[0], null);
+            command(handle, STOP_PLAYBACK, new byte[0], null);
+
+            for (var i = 0; i < 10; i++) {
+                var busy = command(handle, PLAYBACK_BUSY, new byte[0], null);
+
+                if (busy == null || busy.length < 9 || busy[8] == 0) {
+                    break;
+                }
+
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+
+            brightness(brightness);
+        }
+
+        void brightness(int percent) {
+            command(handle, BRIGHTNESS, new byte[] {(byte) Math.round(Math.max(0, Math.min(100, percent)) * 102 / 100.0)},
+                    null);
+        }
+
+        /** Кадр на экран; false — экран не принял (отключили или сбой). */
+        boolean show(BufferedImage image) throws IOException {
+            var data = jpeg(image);
+            var reply = command(handle, SHOW_JPEG, be32(data.length), data);
+            return reply != null && (reply[1] & 0xff) == 0xc8;
+        }
+
+        @Override
+        public void close() {
+            if (handle != null) {
+                LibUsb.releaseInterface(handle, 0);
+                LibUsb.close(handle);
+                handle = null;
+            }
+
+            LibUsb.freeDeviceList(list, true);
+            LibUsb.exit(context);
+        }
+    }
+
+    /** Повернуть картинку на 90/180/270° по часовой — экран бывает поставлен боком. */
+    static BufferedImage rotate(BufferedImage image, int degrees) {
+        var turns = ((degrees / 90) % 4 + 4) % 4;
+
+        if (turns == 0) {
+            return image;
+        }
+
+        var width = turns % 2 == 0 ? image.getWidth() : image.getHeight();
+        var height = turns % 2 == 0 ? image.getHeight() : image.getWidth();
+        var out = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        var g = out.createGraphics();
+        g.translate(width / 2.0, height / 2.0);
+        g.rotate(Math.toRadians(turns * 90));
+        g.translate(-image.getWidth() / 2.0, -image.getHeight() / 2.0);
+        g.drawImage(image, 0, 0, null);
+        g.dispose();
+        return out;
+    }
+
     /** Прочитать накопившиеся старые ответы, чтобы не путать их с новыми. */
     private static void drain(DeviceHandle handle) {
         for (var i = 0; i < 16; i++) {

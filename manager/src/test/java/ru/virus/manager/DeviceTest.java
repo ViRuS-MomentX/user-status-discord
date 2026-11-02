@@ -1140,4 +1140,16 @@ class DeviceTest {
         var pattern = CaseScreens.testPattern(320, 480, "1cbe:0035");
         assertTrue(CaseScreens.jpeg(pattern).length < 1024 * 1024);
     }
+
+    @Test
+    void caseBoardDrawsAndTurns() {
+        var data = new ScreenBoard.Data(java.time.LocalTime.of(16, 30), 0.42, 61, "Альтрон",
+                java.util.Map.of("Тестовый сервер", "RUNNING", "Discord-бот", "FAILED"));
+        var landscape = ScreenBoard.render(480, 320, data);
+        var portrait = CaseScreens.rotate(landscape, 90);
+        assertEquals(320, portrait.getWidth(), "повернули под экран, стоящий боком");
+        assertEquals(480, portrait.getHeight());
+        assertEquals(landscape.getWidth(), CaseScreens.rotate(landscape, 180).getWidth());
+        assertEquals("упал", ScreenBoard.label("FAILED"));
+    }
 }

@@ -776,6 +776,11 @@ final class MainWindow extends JFrame {
             watch(process);
         }
 
+        // Состояние процессов — на табло экрана в корпусе
+        var states = new java.util.LinkedHashMap<String, String>();
+        all.forEach(process -> states.put(process.spec().name(), process.state().name()));
+        devicePage.processStates(states);
+
         rows.forEach((id, row) -> row.setSelected(view.equals("process:" + id)));
 
         if (view.startsWith("process:")) {

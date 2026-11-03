@@ -281,10 +281,11 @@ final class MaonoMic {
                   public static SafeFileHandle Open() {
                     Guid g; HidD_GetHidGuid(out g);
                     IntPtr set = SetupDiGetClassDevsW(ref g, IntPtr.Zero, IntPtr.Zero, 0x12);
+                    SafeFileHandle spare = null; int spareOut = 0, spareFeature = 0;
                     try {
                       for (int i = 0; ; i++) {
                         DID d = new DID(); d.cbSize = Marshal.SizeOf(typeof(DID));
-                        if (!SetupDiEnumDeviceInterfaces(set, IntPtr.Zero, ref g, i, ref d)) return null;
+                        if (!SetupDiEnumDeviceInterfaces(set, IntPtr.Zero, ref g, i, ref d)) { OutLength = spareOut; FeatureLength = spareFeature; return spare; }
                         int need; SetupDiGetDeviceInterfaceDetailW(set, ref d, IntPtr.Zero, 0, out need, IntPtr.Zero);
                         IntPtr buf = Marshal.AllocHGlobal(need);
                         try {
@@ -297,7 +298,10 @@ final class MaonoMic {
                           IntPtr pre;
                           if (HidD_GetAttributes(h, ref a) && a.Vid == 0x352F && a.Pid == 0x0104 && HidD_GetPreparsedData(h, out pre)) {
                             CAPS c = new CAPS(); HidP_GetCaps(pre, ref c); HidD_FreePreparsedData(pre);
-                            if (c.UsagePage == 0xFF01) { OutLength = c.Out; FeatureLength = c.Feature; return h; }
+                            // Обычно своя страница 0xFF01; у части прошивок отчёт 0x4B живёт в том же HID, что кнопки
+                            // (Consumer Control) — берём любой, куда можно писать, но 0xFF01 в приоритете
+                            if (c.UsagePage == 0xFF01) { if (spare != null) spare.Dispose(); OutLength = c.Out; FeatureLength = c.Feature; return h; }
+                            if (spare == null && (c.Out > 0 || c.Feature > 0)) { spare = h; spareOut = c.Out; spareFeature = c.Feature; continue; }
                           }
                           h.Dispose();
                         } finally { Marshal.FreeHGlobal(buf); }

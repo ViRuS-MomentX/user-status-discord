@@ -342,7 +342,7 @@ final class TuyaBle {
                     }
 
                     if (line == null || line.equals("closed") || line.equals("none") || line.equals("nobt")
-                            || line.equals("nochar") || line.equals("unheard")) {
+                            || line.equals("nochar") || line.startsWith("unheard")) {
                         throw new IOException(helperError(problem != null && (line == null || line.equals("closed"))
                                 ? "error " + problem : line));
                     }
@@ -416,6 +416,11 @@ final class TuyaBle {
         private static String helperError(String line) {
             if (line == null || line.equals("closed")) {
                 return "помощник Bluetooth закрылся";
+            }
+
+            if (line.startsWith("unheard ") && line.length() > 8) {
+                return "лампы нет среди Bluetooth-устройств рядом (видны: " + line.substring(8) + "). Она включена и не "
+                        + "подключена к телефону? Выключи Bluetooth на телефоне";
             }
 
             return switch (line) {
@@ -563,45 +568,37 @@ final class TuyaBle {
                   $null = $task.Wait(20000)
                   $task.Result
                 }
-                # Сначала слушаем эфир: Windows подключается по адресу, только если недавно видела устройство.
-                # Заодно ищем лампы Tuya (производитель 0x07D0, служба a201) — вдруг облако дало другой адрес
+                # Сначала поиск устройств Bluetooth LE (как «Добавить устройство» в Windows): так Windows узнаёт
+                # лампу, и к ней можно подключиться. Ищем по MAC из облака среди найденных
                 $target = [uint64]%ADDR%
-                $tuya = @{}
-                $heard = $false
-                try {
-                  $null = [Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementWatcher, Windows.Devices.Bluetooth, ContentType = WindowsRuntime]
-                  $watcher = New-Object Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementWatcher
-                  $watcher.ScanningMode = [Windows.Devices.Bluetooth.Advertisement.BluetoothLEScanningMode]::Active
-                  Register-ObjectEvent -InputObject $watcher -EventName Received -SourceIdentifier adv | Out-Null
-                  $watcher.Start()
-                  $deadline = (Get-Date).AddSeconds(12)
-                  while ((Get-Date) -lt $deadline -and -not $heard) {
-                    foreach ($e in @(Get-Event -SourceIdentifier adv -ErrorAction SilentlyContinue)) {
-                      $a = $e.SourceEventArgs
-                      if ($a.BluetoothAddress -eq $target) { $heard = $true }
-                      $isTuya = $false
-                      foreach ($m in $a.Advertisement.ManufacturerData) { if ($m.CompanyId -eq 0x07D0) { $isTuya = $true } }
-                      foreach ($u in $a.Advertisement.ServiceUuids) { if ($u.ToString().StartsWith('0000a201')) { $isTuya = $true } }
-                      if ($isTuya) { $tuya[$a.BluetoothAddress] = $a.Advertisement.LocalName }
-                      Remove-Event -EventIdentifier $e.EventIdentifier
+                $mac = (($target.ToString('x12')) -split '(..)' | Where-Object { $_ }) -join ':'
+                $null = [Windows.Devices.Enumeration.DeviceInformation, Windows.Devices.Enumeration, ContentType = WindowsRuntime]
+                $infoType = [Windows.Devices.Enumeration.DeviceInformationCollection]
+                $kind = [Windows.Devices.Enumeration.DeviceInformationKind]::AssociationEndpoint
+                $found = $null
+                $names = @()
+                foreach ($paired in @($false, $true)) {
+                  try {
+                    $aqs = [Windows.Devices.Bluetooth.BluetoothLEDevice]::GetDeviceSelectorFromPairingState($paired)
+                    $list = Await ([Windows.Devices.Enumeration.DeviceInformation]::FindAllAsync($aqs, $null, $kind)) $infoType
+                    foreach ($d in $list) {
+                      if ($d.Id.ToLower().EndsWith($mac)) { $found = $d }
+                      if ($d.Name) { $names += $d.Name }
                     }
-                    Start-Sleep -Milliseconds 50
-                  }
-                  $watcher.Stop()
-                  Unregister-Event -SourceIdentifier adv
-                } catch { }
-                if (-not $heard) {
-                  if ($tuya.Count -ge 1) {
-                    $target = @($tuya.Keys)[0]
-                    [Console]::WriteLine('moved ' + $target.ToString('x12') + ' ' + $tuya[$target])
-                  } else {
-                    [Console]::WriteLine('unheard'); exit
-                  }
+                  } catch { }
                 }
+                $dev = $null
                 try {
-                  $dev = Await ([Windows.Devices.Bluetooth.BluetoothLEDevice]::FromBluetoothAddressAsync($target)) ([Windows.Devices.Bluetooth.BluetoothLEDevice])
+                  if ($found -ne $null) {
+                    $dev = Await ([Windows.Devices.Bluetooth.BluetoothLEDevice]::FromIdAsync($found.Id)) ([Windows.Devices.Bluetooth.BluetoothLEDevice])
+                  } else {
+                    $dev = Await ([Windows.Devices.Bluetooth.BluetoothLEDevice]::FromBluetoothAddressAsync($target)) ([Windows.Devices.Bluetooth.BluetoothLEDevice])
+                  }
                 } catch { $dev = $null }
-                if ($dev -eq $null) { [Console]::WriteLine('none'); exit }
+                if ($dev -eq $null) {
+                  [Console]::WriteLine('unheard ' + (($names | Select-Object -Unique) -join ', '))
+                  exit
+                }
                 $notify = $null; $write = $null
                 try {
                   $services = Await ($dev.GetGattServicesAsync([Windows.Devices.Bluetooth.BluetoothCacheMode]::Uncached)) ([Windows.Devices.Bluetooth.GenericAttributeProfile.GattDeviceServicesResult])

@@ -54,33 +54,25 @@ final class Diagnostics {
                   ForEach-Object { $_.Status + ' | ' + $_.FriendlyName }
                 try {
                   Add-Type -AssemblyName System.Runtime.WindowsRuntime
-                  $null = [Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementWatcher, Windows.Devices.Bluetooth, ContentType = WindowsRuntime]
-                  $w = New-Object Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementWatcher
-                  $w.ScanningMode = [Windows.Devices.Bluetooth.Advertisement.BluetoothLEScanningMode]::Active
-                  Register-ObjectEvent -InputObject $w -EventName Received -SourceIdentifier adv | Out-Null
-                  $w.Start()
-                  $seen = @{}
-                  $end = (Get-Date).AddSeconds(12)
-                  while ((Get-Date) -lt $end) {
-                    foreach ($e in @(Get-Event -SourceIdentifier adv -ErrorAction SilentlyContinue)) {
-                      $a = $e.SourceEventArgs
-                      $tuya = $false
-                      foreach ($m in $a.Advertisement.ManufacturerData) { if ($m.CompanyId -eq 0x07D0) { $tuya = $true } }
-                      foreach ($u in $a.Advertisement.ServiceUuids) { if ($u.ToString().StartsWith('0000a201')) { $tuya = $true } }
-                      $key = $a.BluetoothAddress
-                      $old = $seen[$key]
-                      $name = $a.Advertisement.LocalName
-                      if (-not $old -or ($name -and -not $old.n)) { $seen[$key] = @{ n = $name; r = $a.RawSignalStrengthInDBm; t = ($tuya -or ($old -and $old.t)) } }
-                      Remove-Event -EventIdentifier $e.EventIdentifier
+                  $null = [Windows.Devices.Bluetooth.BluetoothLEDevice, Windows.Devices.Bluetooth, ContentType = WindowsRuntime]
+                  $null = [Windows.Devices.Enumeration.DeviceInformation, Windows.Devices.Enumeration, ContentType = WindowsRuntime]
+                  $asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+                    $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and
+                    $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
+                  $kind = [Windows.Devices.Enumeration.DeviceInformationKind]::AssociationEndpoint
+                  $count = 0
+                  foreach ($paired in @($false, $true)) {
+                    $aqs = [Windows.Devices.Bluetooth.BluetoothLEDevice]::GetDeviceSelectorFromPairingState($paired)
+                    $task = $asTask.MakeGenericMethod([Windows.Devices.Enumeration.DeviceInformationCollection]).Invoke($null,
+                      @([Windows.Devices.Enumeration.DeviceInformation]::FindAllAsync($aqs, $null, $kind)))
+                    $null = $task.Wait(30000)
+                    foreach ($d in $task.Result) {
+                      $count++
+                      $addr = if ($d.Id -match '([0-9a-f]{2}(:[0-9a-f]{2}){5})$') { $Matches[1] } else { '?' }
+                      '  ' + $(if ($paired) { '[сопряжено] ' } else { '' }) + $addr + ' ' + $d.Name
                     }
-                    Start-Sleep -Milliseconds 50
                   }
-                  $w.Stop()
-                  'в эфире Bluetooth LE за 12 секунд: ' + $seen.Count
-                  foreach ($k in $seen.Keys) {
-                    $v = $seen[$k]
-                    if ($v.t -or $v.n) { '  ' + $k.ToString('x12') + ' ' + $v.r + ' дБм ' + $(if ($v.t) { '[Tuya] ' } else { '' }) + $v.n }
-                  }
+                  'Bluetooth LE рядом: ' + $count
                 } catch { 'эфир Bluetooth: ' + $_.Exception.Message }
                 """;
     }

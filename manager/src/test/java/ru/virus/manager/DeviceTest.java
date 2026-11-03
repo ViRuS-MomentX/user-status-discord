@@ -1209,6 +1209,8 @@ class DeviceTest {
         assertEquals("# мои\n", Zapret.withBlock("# мои\n" + Zapret.BEGIN + "\nx\n" + Zapret.END + "\n", List.of()));
         var props = new java.util.Properties();
         assertEquals(List.of("Discord", "YouTube", "Telegram"), Zapret.chosen(props).stream().map(Zapret.Target::title).toList());
+        assertEquals(List.of("--wf-tcp=80,443", "--hostlist=C:\\Program Files\\VIRUS-zapret\\lists\\a b.txt", "--new"),
+                Zapret.split("--wf-tcp=80,443  --hostlist=\"C:\\Program Files\\VIRUS-zapret\\lists\\a b.txt\" --new"));
         props.setProperty("targets", "telegram");
         assertTrue(Zapret.chosen(props).getFirst().ips().contains("149.154.160.0/20"));
     }

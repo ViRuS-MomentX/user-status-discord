@@ -77,6 +77,11 @@ final class ZapretPanel extends JPanel {
                     + "если файлы удалены), потом «Применить»." : "Не получилось: " + problem;
         }));
         head.add(defender);
+        var pick = Ui.primary("Подобрать стратегию");
+        pick.setToolTipText("Перепробовать все стратегии и выбрать ту, с которой открываются отмеченные сервисы (2–4 минуты)");
+        pick.addActionListener(e -> run("Подбираю стратегию — проверяю Discord, YouTube и Telegram с каждой…",
+                () -> zapret.pick(text -> SwingUtilities.invokeLater(() -> status.setText(text)))));
+        head.add(pick);
 
         var options = row();
         options.add(Ui.muted("Стратегия", 12.5f));

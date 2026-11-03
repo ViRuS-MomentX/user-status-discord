@@ -733,6 +733,184 @@ final class Zapret {
                 "}");
     }
 
+    // ---- Подбор стратегии ----
+
+    /** Проверки: сервис → адреса. Тело читаем целиком — блокировка «зависанием после 16 КБ» так видна. */
+    static final Map<String, List<String>> CHECKS = new java.util.LinkedHashMap<>();
+
+    static {
+        CHECKS.put("discord", List.of("https://discord.com/", "https://gateway.discord.gg/", "https://cdn.discordapp.com/"));
+        CHECKS.put("youtube", List.of("https://www.youtube.com/", "https://redirector.googlevideo.com/report_mapping"));
+        CHECKS.put("telegram", List.of("https://web.telegram.org/", "https://api.telegram.org/"));
+    }
+
+    /** Строка аргументов → список: пробелы вне кавычек делят, кавычки убираются. */
+    static List<String> split(String args) {
+        var result = new ArrayList<String>();
+        var current = new StringBuilder();
+        var quoted = false;
+        var any = false;
+
+        for (var c : args.toCharArray()) {
+            if (c == '"') {
+                quoted = !quoted;
+                any = true;
+            } else if (c == ' ' && !quoted) {
+                if (any || !current.isEmpty()) {
+                    result.add(current.toString());
+                }
+
+                current.setLength(0);
+                any = false;
+            } else {
+                current.append(c);
+            }
+        }
+
+        if (any || !current.isEmpty()) {
+            result.add(current.toString());
+        }
+
+        return result;
+    }
+
+    /** Открывается ли адрес целиком за 8 секунд. */
+    static boolean opens(HttpClient client, String url) {
+        try {
+            var response = client.send(HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(8))
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)").build(),
+                    HttpResponse.BodyHandlers.ofByteArray());
+            return response.statusCode() > 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Сколько адресов каждого выбранного сервиса открылось. */
+    static Map<String, Integer> check(List<String> services) {
+        var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5))
+                .followRedirects(HttpClient.Redirect.NORMAL).proxy(java.net.ProxySelector.of(null)).build();
+        var result = new java.util.LinkedHashMap<String, Integer>();
+
+        try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var futures = new java.util.LinkedHashMap<String, List<java.util.concurrent.Future<Boolean>>>();
+
+            for (var service : services) {
+                futures.put(service, CHECKS.getOrDefault(service, List.of()).stream()
+                        .map(url -> pool.submit(() -> opens(client, url))).toList());
+            }
+
+            futures.forEach((service, list) -> result.put(service, (int) list.stream().filter(future -> {
+                try {
+                    return future.get();
+                } catch (Exception e) {
+                    return false;
+                }
+            }).count()));
+        }
+
+        return result;
+    }
+
+    static String describe(Map<String, Integer> score) {
+        var parts = new ArrayList<String>();
+        score.forEach((service, ok) -> parts.add(TARGETS.get(service).title() + " " + ok + "/"
+                + CHECKS.getOrDefault(service, List.of()).size()));
+        return String.join(", ", parts);
+    }
+
+    /**
+     * Перебрать стратегии: для каждой запустить winws.exe напрямую на несколько
+     * секунд и проверить выбранные сервисы; лучшую сохранить и поставить службой.
+     * Нужны права администратора (V.I.R.U.S. их уже имеет).
+     *
+     * @return итог для окна
+     */
+    String pick(java.util.function.Consumer<String> progress) throws Exception {
+        if (!Admin.is()) {
+            return "для подбора нужны права администратора — перезапусти V.I.R.U.S. и разреши их";
+        }
+
+        var props = settings();
+        var services = List.of(props.getProperty("targets", String.join(",", TARGETS.keySet())).split(","));
+        // Файлы и списки — на место (без запуска службы), саму службу на время остановить
+        var problem = apply(false);
+
+        if (problem != null) {
+            return "не поставился: " + problem;
+        }
+
+        new ProcessBuilder("sc.exe", "stop", SERVICE).start().waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
+        killWinws();
+        Thread.sleep(1500);
+        progress.accept("Без zapret: " + describe(check(services)) + ". Перебираю стратегии…");
+
+        String best = null;
+        var bestScore = -1;
+        var report = new ArrayList<String>();
+        var total = services.stream().mapToInt(service -> CHECKS.getOrDefault(service, List.of()).size()).sum();
+        var all = strategies();
+
+        for (var i = 0; i < all.size(); i++) {
+            var name = all.get(i);
+            progress.accept("Стратегия " + (i + 1) + " из " + all.size() + ": " + name + "…");
+            var args = arguments(Files.readString(stage().resolve(name), StandardCharsets.ISO_8859_1), app(),
+                    props.getProperty("game", "disabled"));
+            var command = new ArrayList<String>();
+            command.add(app().resolve("bin").resolve("winws.exe").toString());
+            command.addAll(split(args));
+            var winws = new ProcessBuilder(command).directory(app().resolve("bin").toFile()).redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+
+            try {
+                Thread.sleep(2500);
+
+                if (!winws.isAlive()) {
+                    report.add(name + ": не запустилась");
+                    continue;
+                }
+
+                var score = check(services);
+                var sum = score.values().stream().mapToInt(Integer::intValue).sum();
+                report.add(name + ": " + describe(score));
+
+                if (sum > bestScore) {
+                    bestScore = sum;
+                    best = name;
+                }
+
+                if (sum == total) {
+                    break;
+                }
+            } finally {
+                winws.destroyForcibly();
+                killWinws();
+                Thread.sleep(800);
+            }
+        }
+
+        if (best == null || bestScore <= 0) {
+            apply(true);
+            return "ни одна стратегия не открыла сервисы. " + String.join("; ", report)
+                    + ". Возможно, провайдер блокирует ещё и DNS — включи «Безопасный DNS» (DNS по HTTPS) в Windows.";
+        }
+
+        props.setProperty("strategy", best);
+        save(props);
+        var installed = apply(true);
+        return (installed == null ? "Выбрана " + best : "Лучшая " + best + ", но служба не встала: " + installed)
+                + " — открылось " + bestScore + " из " + total + ". " + String.join("; ", report);
+    }
+
+    private static void killWinws() {
+        try {
+            new ProcessBuilder("taskkill", "/F", "/IM", "winws.exe").redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).start().waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception ignored) {
+            // и так не запущен
+        }
+    }
+
     /** Свежее ли — сравнение тегов вида 1.10.4. */
     static boolean newer(String latest, String current) {
         if (current.isBlank()) {

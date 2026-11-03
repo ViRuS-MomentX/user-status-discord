@@ -473,22 +473,13 @@ final class CaseScreens {
      */
     static String stripPush(Link link, BufferedImage image, int brightness) {
         var frame = stripFrame(image, brightness);
-        var sent = IntBuffer.allocate(1);
-
-        for (var at = 0; at < frame.length; at += 4096) {
-            var chunk = ByteBuffer.allocateDirect(Math.min(4096, frame.length - at));
-            chunk.put(frame, at, chunk.capacity());
-            chunk.flip();
-            var result = link.transfer(link.out(), chunk, sent, 3000);
-
-            if (result != LibUsb.SUCCESS) {
-                return "кадр не ушёл: " + explain(result);
-            }
-        }
-
-        // Подтверждение не ждём (полоска отвечает не всегда) — только забираем, если уже пришло
-        stripReply(link, 1);
-        return null;
+        // Весь кадр — одной передачей: в проводе это те же пакеты по 512 байт, что у JONSBO кусками по 4096,
+        // но без 90 отдельных запросов к драйверу (каждый — миллисекунды)
+        var buffer = ByteBuffer.allocateDirect(frame.length);
+        buffer.put(frame);
+        buffer.flip();
+        var result = link.transfer(link.out(), buffer, IntBuffer.allocate(1), 3000);
+        return result == LibUsb.SUCCESS ? null : "кадр не ушёл: " + explain(result);
     }
 
     static boolean stripSend(Link link, BufferedImage image, int brightness) {
@@ -680,7 +671,10 @@ final class CaseScreens {
         private Link link;
 
         private final boolean strip;
-        private int level;
+        private volatile int level;
+        private Thread acks;
+        /** Поток подтверждений работает, пока true; закрываем устройство только после него. */
+        private volatile boolean acksRunning = true;
 
         Session(Screen screen, int brightness) throws IOException {
             this(screen, brightness, 0);
@@ -742,6 +736,15 @@ final class CaseScreens {
 
             if (strip) {
                 stripHello(link);
+                // Подтверждения кадров забирает свой поток — кадры их не ждут
+                var reading = link;
+                acks = new Thread(() -> {
+                    while (acksRunning) {
+                        stripReply(reading, 300);
+                    }
+                }, "virus-strip-acks");
+                acks.setDaemon(true);
+                acks.start();
                 return;
             }
 
@@ -789,6 +792,16 @@ final class CaseScreens {
 
         @Override
         public void close() {
+            acksRunning = false;
+
+            if (acks != null) {
+                try {
+                    acks.join(1500);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+
             if (handle != null) {
                 LibUsb.releaseInterface(handle, link.iface());
                 LibUsb.close(handle);

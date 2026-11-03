@@ -2332,6 +2332,8 @@ final class DevicePage extends Ui.Card {
 
                 media.start();
                 var lastGamePoll = 0L;
+                var frames = 0;
+                var countedAt = System.currentTimeMillis();
 
                 while (strips == me && settings.stripBoard && !settings.allDark) {
                     var now = System.currentTimeMillis();
@@ -2373,8 +2375,19 @@ final class DevicePage extends Ui.Card {
                         }
                     }
 
+                    // Сколько кадров в секунду на самом деле — в строку состояния
+                    frames++;
+
+                    if (now - countedAt >= 2000) {
+                        var fps = frames * 1000 / (now - countedAt);
+                        var shown = sessions.size();
+                        SwingUtilities.invokeLater(() -> stripStatus.setText("Полоски: " + shown + " шт., " + fps + " кадр/с"));
+                        frames = 0;
+                        countedAt = now;
+                    }
+
                     var spent = System.currentTimeMillis() - now;
-                    Thread.sleep(Math.max(5, 50 - spent));
+                    Thread.sleep(Math.max(2, 50 - spent));
                 }
             } catch (InterruptedException e) {
                 return;
@@ -2477,7 +2490,7 @@ final class DevicePage extends Ui.Card {
                         throw new IOException("экран перестал принимать кадры");
                     }
 
-                    Thread.sleep(2000);
+                    Thread.sleep(1000);
                 }
             } catch (InterruptedException e) {
                 return;

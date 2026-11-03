@@ -238,6 +238,49 @@ final class Glow {
                 yield scale(a, behind < 0.03 ? 1 : tail * sparkle);
             }
             case 21 -> mix(scale(b, 0.18), a, InputPulse.wave(InputPulse.presses(), x, System.currentTimeMillis()));
+            case 26 -> {
+                // Бегущие линии: короткие полосы первого цвета ползут по второму, края мягкие
+                var p = fract(x * 4 - t * 0.6);
+                var edge = p < 0.22 ? Math.min(1, Math.min(p, 0.22 - p) * 30) : 0;
+                yield mix(scale(b, 0.55), a, edge);
+            }
+            case 27 -> scale(a, 0.12 + 0.88 * Math.pow(0.5 + 0.5 * Math.sin(2 * Math.PI * (x * 1.5 - t * 0.4)), 2));
+            case 28 -> {
+                var w = 0.5 + 0.25 * Math.sin(x * 9 - t * 1.1) + 0.25 * Math.sin(x * 4 + t * 0.6);
+                yield mix(new Color(0, 25, 140), new Color(0, 220, 255), w);
+            }
+            case 29 -> {
+                var w = 0.5 + 0.3 * Math.sin(x * 5 + t * 0.35) + 0.2 * Math.sin(x * 13 - t * 0.5);
+                yield mix(new Color(120, 0, 0), new Color(255, 140, 0), Math.pow(Math.max(0, w), 1.6));
+            }
+            case 30 -> {
+                var k = Math.pow(Math.max(0, Math.sin(hash(i) * 6.28 + t * (0.7 + hash(i + 3) * 0.8))), 10);
+                yield mix(new Color(4, 8, 2), new Color(210, 255, 60), k);
+            }
+            case 31 -> {
+                var beat = t % 1.0;
+                yield beat < 0.06 || beat > 0.12 && beat < 0.18 ? a : scale(a, 0.03);
+            }
+            case 32 -> {
+                var head = 0.5 - 0.5 * Math.cos(t * 1.4);
+                var one = Math.max(0, 1 - Math.abs(x - head) * 10);
+                var two = Math.max(0, 1 - Math.abs(x - (1 - head)) * 10);
+                yield one >= two ? scale(a, one) : scale(b, two);
+            }
+            case 33 -> {
+                var piece = (int) Math.floor(x * 8);
+                var r = hash(piece * 17 + (int) Math.floor(t * 9) * 31);
+                yield r > 0.88 ? mix(b, Color.WHITE, 0.25) : r > 0.8 ? Color.BLACK : a;
+            }
+            case 34 -> {
+                var p = fract(t * 0.22);
+                var filled = p < 0.5 ? x < p * 2.2 : x >= (p - 0.5) * 2.2;
+                yield filled ? a : scale(b, 0.08);
+            }
+            case 35 -> {
+                var head = 0.5 - 0.5 * Math.cos(t * 1.6);
+                yield scale(hue(t * 60), Math.max(0, 1 - Math.abs(x - head) * 7));
+            }
             default -> a;
         };
     }

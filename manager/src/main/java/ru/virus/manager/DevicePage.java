@@ -103,6 +103,8 @@ final class DevicePage extends Ui.Card {
     private final Ui.Switch reverseSwitch = new Ui.Switch(false);
     private final JSlider scaleSlider = new JSlider(10, 40, 10);
     private final JPanel modeTiles = Ui.transparent(null);
+    /** Лампы, микрофон и диагностика — своей карточкой. */
+    private final JPanel extras = Ui.transparent(null);
     /** Кнопки режимов по номеру — чтобы профиль мог подсветить свою. */
     private final Map<Integer, JToggleButton> tileById = new LinkedHashMap<>();
 
@@ -147,8 +149,8 @@ final class DevicePage extends Ui.Card {
 
     private static Map<String, List<Integer>> groups() {
         var groups = new LinkedHashMap<String, List<Integer>>();
-        groups.put("Спокойные", List.of(0, 19, 20, 1, 23, 4, 8, 11));
-        groups.put("Динамичные", List.of(22, 2, 3, 24, 5, 6, 7, 9, 14, 25, 15, 16, 17));
+        groups.put("Спокойные", List.of(0, 19, 20, 1, 23, 4, 27, 8, 28, 29, 11, 30));
+        groups.put("Динамичные", List.of(22, 26, 2, 3, 24, 5, 6, 7, 9, 14, 25, 15, 35, 32, 16, 17, 31, 33, 34));
         groups.put("Реагируют", List.of(12, 13, 21, 10, 18));
         return java.util.Collections.unmodifiableMap(groups);
     }
@@ -523,7 +525,9 @@ final class DevicePage extends Ui.Card {
         var page = new Ui.FitWidth();
         page.setLayout(new BoxLayout(page, BoxLayout.Y_AXIS));
 
-        for (var card : List.of(signalCard(), rgb, screensCard())) {
+        var lighting = signalCard();
+
+        for (var card : List.of(lighting, inner("Лампы и микрофон", extras), rgb, screensCard())) {
             card.setAlignmentX(LEFT_ALIGNMENT);
             page.add(card);
             page.add(Box.createVerticalStrut(14));
@@ -577,6 +581,7 @@ final class DevicePage extends Ui.Card {
      * эффекты SignalRGB, яркость и вкл/выкл через его локальный API.
      */
     private JComponent signalCard() {
+        extras.setLayout(new BoxLayout(extras, BoxLayout.Y_AXIS));
         var connect = Ui.button("Подключиться");
         connect.setIcon(Icons.of(Icons.Kind.RESTART, Theme.TEXT));
         connect.addActionListener(e -> connectSignal(true));
@@ -674,47 +679,23 @@ final class DevicePage extends Ui.Card {
         arrows.add(previous);
         arrows.add(next);
         signalArrows = arrows;
-        powerRow.add(arrows);
 
         // Режимы V.I.R.U.S.
         preview = new GlowPreview(glow);
         var group = new ButtonGroup();
-        modeTiles.setLayout(new BoxLayout(modeTiles, BoxLayout.Y_AXIS));
+        // Режимы — живые кнопки без подписей: каждая играет свой режим на маленькой «ленте»
+        modeTiles.setLayout(new GridLayout(0, 6, 8, 8));
 
-        for (var entry : MODE_GROUPS.entrySet()) {
-            var caption = Ui.muted(entry.getKey(), 12f);
-            caption.setBorder(BorderFactory.createEmptyBorder(4, 2, 4, 0));
-            modeTiles.add(left(caption));
-            var grid = Ui.transparent(new GridLayout(0, 6, 8, 8));
-
-            for (var id : entry.getValue()) {
-                var mode = SignalRgb.mode(id);
-                var tile = new JToggleButton(mode.name());
-                tile.setFont(Theme.ui.deriveFont(13f));
-                tile.setFocusable(false);
-                // Узкие поля, чтобы длинные названия («Северное сияние») не обрезались многоточием
-                tile.setMargin(new java.awt.Insets(3, 4, 3, 4));
-                tile.setToolTipText("<html><body style='width:240px'><b>" + mode.name() + "</b><br>"
-                        + SignalRgb.describe(id) + "</body></html>");
-                tile.setSelected(mode.id() == glow.mode);
-                tile.addActionListener(e -> chooseMode(mode));
-                tile.addMouseListener(new MouseAdapter() {
-                    @Override
-                    public void mouseEntered(MouseEvent e) {
-                        preview.peek(mode.id());
-                    }
-
-                    @Override
-                    public void mouseExited(MouseEvent e) {
-                        preview.peek(-1);
-                    }
-                });
-                group.add(tile);
-                tileById.put(id, tile);
-                grid.add(tile);
-            }
-
-            modeTiles.add(left(grid));
+        for (var id : MODE_GROUPS.values().stream().flatMap(List::stream).toList()) {
+            var mode = SignalRgb.mode(id);
+            var tile = new ModeTile(id, glow);
+            tile.setToolTipText("<html><body style='width:240px'><b>" + mode.name() + "</b><br>"
+                    + SignalRgb.describe(id) + "</body></html>");
+            tile.setSelected(mode.id() == glow.mode);
+            tile.addActionListener(e -> chooseMode(mode));
+            group.add(tile);
+            tileById.put(id, tile);
+            modeTiles.add(tile);
         }
 
         glowColor.setColor(glow.color);
@@ -933,34 +914,52 @@ final class DevicePage extends Ui.Card {
         signalOnly.setLayout(new BoxLayout(signalOnly, BoxLayout.Y_AXIS));
         signalOnly.add(left(statusRow));
 
-        stack.add(left(openRgbOnly));
-        stack.add(Box.createVerticalStrut(12));
+        // Главное — сверху: питание и яркость, живые кнопки режимов, цвета и узор. Остальное — под «Ещё»
         stack.add(left(powerRow));
         stack.add(Box.createVerticalStrut(14));
-        stack.add(left(Ui.caption("Режимы V.I.R.U.S.")));
-        stack.add(Box.createVerticalStrut(6));
         stack.add(left(modeTiles));
-        stack.add(Box.createVerticalStrut(10));
-        stack.add(left(preview));
-        stack.add(Box.createVerticalStrut(10));
-        stack.add(left(profileRow));
+        stack.add(Box.createVerticalStrut(14));
+        stack.add(left(colorRow));
+        stack.add(Box.createVerticalStrut(8));
+        stack.add(left(patternRow));
+        stack.add(Box.createVerticalStrut(12));
+        var more = Ui.transparent(null);
+        more.setLayout(new BoxLayout(more, BoxLayout.Y_AXIS));
+        more.setVisible(settings.moreOpen);
+        var moreToggle = Ui.ghost(settings.moreOpen ? "Скрыть настройки" : "Ещё настройки…");
+        moreToggle.addActionListener(e -> {
+            settings.moreOpen = !more.isVisible();
+            settings.save();
+            more.setVisible(settings.moreOpen);
+            moreToggle.setText(settings.moreOpen ? "Скрыть настройки" : "Ещё настройки…");
+            stack.revalidate();
+        });
+        stack.add(left(moreToggle));
+        stack.add(Box.createVerticalStrut(8));
+        stack.add(left(more));
+        more.add(left(openRgbOnly));
+        more.add(Box.createVerticalStrut(10));
+        more.add(Box.createVerticalStrut(12));
+        more.add(Box.createVerticalStrut(14));
+        more.add(Box.createVerticalStrut(6));
+        more.add(Box.createVerticalStrut(10));
+        more.add(Box.createVerticalStrut(10));
+        more.add(left(profileRow));
         // Автосмена — своей строкой: с несколькими профилями в одну не помещается
         var rotateRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 6, 0));
         rotateRow.add(Ui.muted("Менять режим сам каждые", 13f));
         rotateRow.add(rotateSpinner);
         rotateRow.add(Ui.muted("мин (0 — нет), по кругу спокойные и динамичные", 13f));
-        stack.add(Box.createVerticalStrut(6));
-        stack.add(left(rotateRow));
+        more.add(Box.createVerticalStrut(6));
+        more.add(left(rotateRow));
         showProfiles();
-        stack.add(Box.createVerticalStrut(10));
-        stack.add(left(colorRow));
-        stack.add(Box.createVerticalStrut(10));
-        stack.add(left(patternRow));
-        stack.add(Box.createVerticalStrut(10));
-        stack.add(left(colorCorrection()));
-        stack.add(Box.createVerticalStrut(10));
-        stack.add(left(scheduleRow()));
-        stack.add(Box.createVerticalStrut(10));
+        more.add(Box.createVerticalStrut(10));
+        more.add(Box.createVerticalStrut(10));
+        more.add(Box.createVerticalStrut(10));
+        more.add(left(colorCorrection()));
+        more.add(Box.createVerticalStrut(10));
+        more.add(left(scheduleRow()));
+        more.add(Box.createVerticalStrut(10));
         var canvasSwitch = new Ui.Switch(settings.canvas);
         canvasSwitch.onChange(on -> {
             settings.canvas = on;
@@ -976,8 +975,8 @@ final class DevicePage extends Ui.Card {
         canvasRow.add(canvasSwitch);
         canvasRow.add(Ui.muted("единый холст: эффект перетекает с устройства на устройство (порядок — «Левее/Правее» "
                 + "в списке устройств)", 13f));
-        stack.add(left(canvasRow));
-        stack.add(Box.createVerticalStrut(10));
+        more.add(left(canvasRow));
+        more.add(Box.createVerticalStrut(10));
         var hardware = Ui.button("Записать цвет в устройства");
         hardware.setToolTipText("Основной цвет — в память самих устройств: будет гореть и при загрузке, и без V.I.R.U.S. "
                 + "с OpenRGB (если устройство умеет)");
@@ -985,8 +984,8 @@ final class DevicePage extends Ui.Card {
         var hardwareRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
         hardwareRow.add(hardware);
         hardwareRow.add(Ui.muted("как Hardware Lighting в iCUE: цвет остаётся, даже когда программы выключены", 12.5f));
-        stack.add(left(hardwareRow));
-        stack.add(Box.createVerticalStrut(10));
+        more.add(left(hardwareRow));
+        more.add(Box.createVerticalStrut(10));
         var signalsSwitch = new Ui.Switch(settings.signals);
         signalsSwitch.onChange(on -> {
             settings.signals = on;
@@ -1000,10 +999,9 @@ final class DevicePage extends Ui.Card {
         signalsRow.add(signalsSwitch);
         signalsRow.add(Ui.muted("мигать о событиях: красным — упал процесс, оранжевым — поломка, зелёным — встал плагин",
                 12.5f));
-        stack.add(left(signalsRow));
+        more.add(left(signalsRow));
 
         // Bluetooth-лампы (Lotus Lamp X и подобные) — повторяют режим, как устройства в OpenRGB
-        stack.add(Box.createVerticalStrut(10));
         var lampsSwitch = new Ui.Switch(settings.bleLamps);
         lampsSwitch.onChange(on -> {
             settings.bleLamps = on;
@@ -1034,11 +1032,11 @@ final class DevicePage extends Ui.Card {
             });
         });
         lampsRow.add(Ui.muted("Bluetooth-лампы и ленты (Lotus Lamp X, duoCo и подобные) повторяют режим", 12.5f));
-        stack.add(left(lampsRow));
-        stack.add(left(lampsStatus));
+        extras.add(left(lampsRow));
+        extras.add(left(lampsStatus));
 
         // Лампы из приложения Smart Life (Tuya) — по Wi-Fi, ключи один раз из облака Tuya
-        stack.add(Box.createVerticalStrut(10));
+        extras.add(Box.createVerticalStrut(10));
         var tuyaSwitch = new Ui.Switch(settings.tuyaLamps);
         tuyaSwitch.onChange(on -> {
             settings.tuyaLamps = on;
@@ -1059,11 +1057,11 @@ final class DevicePage extends Ui.Card {
         smartLife.addActionListener(e -> smartLife(tuyaSwitch));
         tuyaRow.add(smartLife);
         tuyaRow.add(Ui.muted("лампы Smart Life / Tuya (Wi-Fi и Bluetooth) повторяют режим", 12.5f));
-        stack.add(left(tuyaRow));
-        stack.add(left(tuyaStatus));
+        extras.add(left(tuyaRow));
+        extras.add(left(tuyaStatus));
 
         // Кольцо микрофона Maono PD200X/PD200XS — повторяет цвет режима (у него 8 цветов и радуга)
-        stack.add(Box.createVerticalStrut(10));
+        extras.add(Box.createVerticalStrut(10));
         var micSwitch = new Ui.Switch(settings.maonoMic);
         micSwitch.onChange(on -> {
             settings.maonoMic = on;
@@ -1080,11 +1078,11 @@ final class DevicePage extends Ui.Card {
         var micRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
         micRow.add(micSwitch);
         micRow.add(Ui.muted("подсветка микрофона Maono PD200X/PD200XS повторяет цвет (у него 8 цветов и радуга)", 12.5f));
-        stack.add(left(micRow));
-        stack.add(left(micStatus));
+        extras.add(left(micRow));
+        extras.add(left(micStatus));
 
         // Одна кнопка — весь текст про zapret, микрофон и лампы, чтобы прислать его целиком
-        stack.add(Box.createVerticalStrut(10));
+        extras.add(Box.createVerticalStrut(10));
         var diagnose = Ui.ghost("Диагностика (zapret, микрофон, лампы)");
         diagnose.setToolTipText("Собрать состояние zapret, микрофона и Bluetooth в текст и скопировать — без ключей и паролей");
         diagnose.addActionListener(e -> {
@@ -1118,15 +1116,13 @@ final class DevicePage extends Ui.Card {
                 });
             });
         });
-        stack.add(left(diagnose));
+        extras.add(left(diagnose));
         signalOnly.add(Box.createVerticalStrut(16));
         signalOnly.add(left(effectsHead));
         signalOnly.add(Box.createVerticalStrut(6));
         signalOnly.add(left(effectsScroll));
         showEngine();
-
-        worker.submit(this::installEffect);
-        return inner("Режимы подсветки V.I.R.U.S.", stack);
+        return inner("Подсветка", stack);
     }
 
     /** Положить эффект «VIRUS» в SignalRGB. @return true — положили только что */
@@ -4124,6 +4120,8 @@ final class DevicePage extends Ui.Card {
         List<String> bleNames = List.of();
         boolean maonoMic;
         boolean screenBoard;
+        /** Раскрыт ли блок «Ещё настройки» в подсветке. */
+        boolean moreOpen;
         /** Табло уже само включалось на найденном экране — второй раз не навязываем. */
         boolean screenAuto;
         /** Лампы Smart Life (Tuya) по Wi-Fi: включены и какие (с локальными ключами — их не показываем). */
@@ -4210,6 +4208,7 @@ final class DevicePage extends Ui.Card {
                             ? names.stream().map(String::valueOf).toList() : List.of();
                     settings.maonoMic = Boolean.TRUE.equals(json.get("maonoMic"));
                     settings.screenBoard = Boolean.TRUE.equals(json.get("screenBoard"));
+                    settings.moreOpen = Boolean.TRUE.equals(json.get("moreOpen"));
                     settings.screenAuto = Boolean.TRUE.equals(json.get("screenAuto"));
                     settings.tuyaLamps = Boolean.TRUE.equals(json.get("tuyaLamps"));
                     settings.tuyaRegion = json.get("tuyaRegion") instanceof String text ? text : "";
@@ -4322,6 +4321,7 @@ final class DevicePage extends Ui.Card {
             json.put("bleNames", bleNames);
             json.put("maonoMic", maonoMic);
             json.put("screenBoard", screenBoard);
+            json.put("moreOpen", moreOpen);
             json.put("screenAuto", screenAuto);
             json.put("tuyaLamps", tuyaLamps);
             json.put("tuyaRegion", tuyaRegion);

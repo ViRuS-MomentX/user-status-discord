@@ -76,6 +76,66 @@ final class Zapret {
         return Path.of(programFiles == null ? "C:\\Program Files" : programFiles, "VIRUS-zapret");
     }
 
+    // ---- Что обходить ----
+
+    /** Сервисы: домены для списка и (для Telegram) адреса — его приложение ходит по IP, а не по имени. */
+    record Target(String title, List<String> domains, List<String> ips) {
+    }
+
+    static final java.util.Map<String, Target> TARGETS = new java.util.LinkedHashMap<>();
+
+    static {
+        TARGETS.put("discord", new Target("Discord", List.of("discord.com", "discord.gg", "discordapp.com", "discordapp.net",
+                "discord.media", "discordcdn.com", "discord.dev", "discord.new", "discord.gift", "discord.co", "discordstatus.com",
+                "dis.gd", "discord-attachments-uploads-prd.storage.googleapis.com"), List.of()));
+        TARGETS.put("youtube", new Target("YouTube", List.of("youtube.com", "youtu.be", "googlevideo.com", "ytimg.com",
+                "ggpht.com", "youtube-nocookie.com", "youtubei.googleapis.com", "youtube.googleapis.com", "jnn-pa.googleapis.com",
+                "wide-youtube.l.google.com", "youtubekids.com", "yt.be"), List.of()));
+        // Адреса Telegram — из его официального списка core.telegram.org/resources/cidr.txt
+        TARGETS.put("telegram", new Target("Telegram", List.of("telegram.org", "t.me", "telegram.me", "telegra.ph",
+                "telesco.pe", "tdesktop.com", "telegram.dog", "cdn-telegram.org", "telegram-cdn.org", "tg.dev"),
+                List.of("91.105.192.0/23", "91.108.4.0/22", "91.108.8.0/22", "91.108.12.0/22", "91.108.16.0/22",
+                        "91.108.20.0/22", "91.108.56.0/22", "95.161.64.0/20", "149.154.160.0/20", "185.76.151.0/24",
+                        "2001:67c:4e8::/48", "2001:b28:f23c::/47", "2001:b28:f23f::/48", "2a0a:f280::/32")));
+    }
+
+    static final String BEGIN = "# >>> V.I.R.U.S.: сервисы (меняется галочками, правь выше или ниже)";
+    static final String END = "# <<< V.I.R.U.S.";
+
+    /** Выбранные сервисы из настроек. */
+    static List<Target> chosen(Properties props) {
+        var ids = List.of(props.getProperty("targets", String.join(",", TARGETS.keySet())).split(","));
+        return TARGETS.entrySet().stream().filter(entry -> ids.contains(entry.getKey())).map(java.util.Map.Entry::getValue).toList();
+    }
+
+    /** Текст файла со своим блоком V.I.R.U.S.: старый блок убран, новый в конце, строки пользователя целы. */
+    static String withBlock(String text, List<String> lines) {
+        var kept = new ArrayList<String>();
+        var inside = false;
+
+        for (var line : text.lines().toList()) {
+            if (line.equals(BEGIN)) {
+                inside = true;
+            } else if (line.equals(END)) {
+                inside = false;
+            } else if (!inside) {
+                kept.add(line);
+            }
+        }
+
+        while (!kept.isEmpty() && kept.getLast().isBlank()) {
+            kept.removeLast();
+        }
+
+        if (!lines.isEmpty()) {
+            kept.add(BEGIN);
+            kept.addAll(lines);
+            kept.add(END);
+        }
+
+        return String.join("\n", kept) + "\n";
+    }
+
     // ---- Настройки ----
 
     Properties settings() {
@@ -83,6 +143,7 @@ final class Zapret {
         props.setProperty("strategy", "general.bat");
         props.setProperty("game", "disabled");
         props.setProperty("ipset", "loaded");
+        props.setProperty("targets", String.join(",", TARGETS.keySet()));
         props.setProperty("withWindows", "false");
         props.setProperty("autoUpdate", "true");
 
@@ -342,6 +403,23 @@ final class Zapret {
                     Files.copy(backup, ipset, StandardCopyOption.REPLACE_EXISTING);
                 }
             }
+        }
+
+        // Выбранные сервисы: домены — в свой список, адреса Telegram — в IPSet (кроме «любые адреса», там и так всё)
+        var targets = chosen(props);
+        var domains = targets.stream().flatMap(target -> target.domains().stream()).distinct().toList();
+        var ips = targets.stream().flatMap(target -> target.ips().stream()).distinct().toList();
+        var user = lists.resolve("list-general-user.txt");
+        Files.writeString(user, withBlock(Files.readString(user, StandardCharsets.UTF_8), domains), StandardCharsets.UTF_8);
+
+        if (!props.getProperty("ipset", "loaded").equals("any") && !ips.isEmpty()) {
+            var current = Files.isRegularFile(ipset) ? Files.readString(ipset, StandardCharsets.UTF_8) : "";
+
+            if (props.getProperty("ipset", "loaded").equals("none")) {
+                current = "";
+            }
+
+            Files.writeString(ipset, withBlock(current, ips), StandardCharsets.UTF_8);
         }
 
         Files.writeString(folder().resolve("keeper.ps1"), "\uFEFF" + keeperScript(), StandardCharsets.UTF_8);

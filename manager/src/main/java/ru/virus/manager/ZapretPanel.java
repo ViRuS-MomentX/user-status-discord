@@ -44,6 +44,7 @@ final class ZapretPanel extends JPanel {
     private final JComboBox<String> ipset = new JComboBox<>(IPSET_NAMES.toArray(String[]::new));
     private final Ui.Switch withWindows = new Ui.Switch(false);
     private final Ui.Switch autoUpdate = new Ui.Switch(true);
+    private final java.util.Map<String, javax.swing.JCheckBox> targets = new java.util.LinkedHashMap<>();
     private final JButton update = Ui.button("Обновить");
     private final JButton apply = Ui.primary("Применить");
     private final JButton remove = Ui.ghost("Удалить службу");
@@ -89,6 +90,20 @@ final class ZapretPanel extends JPanel {
         ipset.setToolTipText("Обходить ещё и по списку IP-адресов (как пункт IPSet в service.bat)");
         options.add(ipset);
 
+        var services = row();
+        services.add(Ui.muted("Обходить", 12.5f));
+
+        for (var entry : Zapret.TARGETS.entrySet()) {
+            var box = new javax.swing.JCheckBox(entry.getValue().title(), true);
+            box.setOpaque(false);
+            box.setForeground(Theme.TEXT);
+            box.setToolTipText(entry.getKey().equals("telegram")
+                    ? "Сайты Telegram и его адреса (приложение ходит по IP) — в список обхода"
+                    : "Домены " + entry.getValue().title() + " — в список обхода");
+            targets.put(entry.getKey(), box);
+            services.add(box);
+        }
+
         var more = row();
         more.add(withWindows);
         more.add(Ui.muted("работать с запуска Windows", 12.5f));
@@ -109,6 +124,8 @@ final class ZapretPanel extends JPanel {
         add(Box.createVerticalStrut(6));
         add(options);
         add(Box.createVerticalStrut(6));
+        add(services);
+        add(Box.createVerticalStrut(6));
         add(more);
         add(Box.createVerticalStrut(4));
         var statusRow = row();
@@ -128,6 +145,8 @@ final class ZapretPanel extends JPanel {
             }
 
             props.setProperty("game", Zapret.GAME_MODES.get(game.getSelectedIndex()));
+            props.setProperty("targets", String.join(",", targets.entrySet().stream()
+                    .filter(entry -> entry.getValue().isSelected()).map(java.util.Map.Entry::getKey).toList()));
             props.setProperty("ipset", Zapret.IPSET_MODES.get(ipset.getSelectedIndex()));
             props.setProperty("withWindows", String.valueOf(withWindows.isOn()));
             props.setProperty("autoUpdate", String.valueOf(autoUpdate.isOn()));
@@ -142,6 +161,7 @@ final class ZapretPanel extends JPanel {
         };
         strategy.addActionListener(e -> save.run());
         game.addActionListener(e -> save.run());
+        targets.values().forEach(box -> box.addActionListener(e -> save.run()));
         ipset.addActionListener(e -> save.run());
         withWindows.onChange(on -> save.run());
         autoUpdate.onChange(on -> save.run());
@@ -200,6 +220,8 @@ final class ZapretPanel extends JPanel {
         zapret.strategies().forEach(strategy::addItem);
         strategy.setSelectedItem(props.getProperty("strategy"));
         game.setSelectedIndex(Math.max(0, Zapret.GAME_MODES.indexOf(props.getProperty("game"))));
+        var chosen = List.of(props.getProperty("targets", String.join(",", Zapret.TARGETS.keySet())).split(","));
+        targets.forEach((id, box) -> box.setSelected(chosen.contains(id)));
         ipset.setSelectedIndex(Math.max(0, Zapret.IPSET_MODES.indexOf(props.getProperty("ipset"))));
         withWindows.setOn(Boolean.parseBoolean(props.getProperty("withWindows")));
         autoUpdate.setOn(Boolean.parseBoolean(props.getProperty("autoUpdate", "true")));
@@ -279,10 +301,32 @@ final class ZapretPanel extends JPanel {
      * Автообновление: раз в несколько часов смотрим GitHub. Вышла новая
      * версия, а служба уже стоит — качаем и ставим (Windows спросит права).
      */
+    /** Версия набора сервисов: поменялась — применить заново. */
+    static final String TARGETS_APPLIED = "1";
+
     static String autoUpdate(Path home) {
         var zapret = new Zapret(home);
 
-        if (!Boolean.parseBoolean(zapret.settings().getProperty("autoUpdate", "true")) || zapret.installed().isBlank()) {
+        // Сервисы (Discord, YouTube, Telegram) ещё не применены к стоящей службе — применяем сами, раз есть права
+        var props = zapret.settings();
+
+        if (!zapret.installed().isBlank() && Admin.is() && !TARGETS_APPLIED.equals(props.getProperty("targetsApplied"))) {
+            var problem = zapret.apply(true);
+
+            if (problem == null) {
+                props.setProperty("targetsApplied", TARGETS_APPLIED);
+
+                try {
+                    zapret.save(props);
+                } catch (Exception ignored) {
+                    // применим ещё раз в следующий раз
+                }
+
+                return "zapret настроен на Discord, YouTube и Telegram.";
+            }
+        }
+
+        if (!Boolean.parseBoolean(props.getProperty("autoUpdate", "true")) || zapret.installed().isBlank()) {
             return null;
         }
 

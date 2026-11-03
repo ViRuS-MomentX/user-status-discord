@@ -1200,6 +1200,20 @@ class DeviceTest {
     }
 
     @Test
+    void zapretCoversDiscordYoutubeAndTelegram() {
+        var text = Zapret.withBlock("# мои\nexample.org\n", List.of("discord.com", "t.me"));
+        assertTrue(text.startsWith("# мои\nexample.org\n" + Zapret.BEGIN + "\ndiscord.com\nt.me\n" + Zapret.END));
+        // Повторно — блок заменяется, а не копится; свои строки целы
+        var again = Zapret.withBlock(text + "my.site\n", List.of("youtube.com"));
+        assertEquals("# мои\nexample.org\nmy.site\n" + Zapret.BEGIN + "\nyoutube.com\n" + Zapret.END + "\n", again);
+        assertEquals("# мои\n", Zapret.withBlock("# мои\n" + Zapret.BEGIN + "\nx\n" + Zapret.END + "\n", List.of()));
+        var props = new java.util.Properties();
+        assertEquals(List.of("Discord", "YouTube", "Telegram"), Zapret.chosen(props).stream().map(Zapret.Target::title).toList());
+        props.setProperty("targets", "telegram");
+        assertTrue(Zapret.chosen(props).getFirst().ips().contains("149.154.160.0/20"));
+    }
+
+    @Test
     void bluetoothLampsSpeakElkBledom() {
         assertArrayEquals(new byte[] {0x7e, 0x00, 0x05, 0x03, (byte) 0xff, 0x00, 0x00, 0x00, (byte) 0xef},
                 BleLamps.frame(255, 0, 0), "красный — как в открытом описании протокола");

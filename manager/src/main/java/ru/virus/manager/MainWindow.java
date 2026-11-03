@@ -788,7 +788,8 @@ final class MainWindow extends JFrame {
 
         // zapret упал — от администратора чиним сами: скачать, если нет, переставить службу и запустить снова
         all.stream().filter(process -> process.spec().id().equals(Zapret.ID)
-                && process.state() == ManagedProcess.State.FAILED).findFirst().ifPresent(this::healZapret);
+                && (process.state() == ManagedProcess.State.FAILED || process.state() == ManagedProcess.State.WAITING))
+                .findFirst().ifPresent(this::healZapret);
 
         // Состояние процессов — на табло экрана в корпусе: id → «off», «start», «run», «error»
         var states = new java.util.LinkedHashMap<String, String>();

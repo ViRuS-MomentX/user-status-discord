@@ -382,10 +382,15 @@ final class Zapret {
                 "  netsh interface tcp set global timestamps=enabled | Out-Null",
                 "  Start-Sleep -Milliseconds 800",
                 "  if (-not (Test-Path $app)) { New-Item -ItemType Directory -Path $app | Out-Null }",
+                // Прежние версии ставили права и на файлы — те оставались вовсе без прав («Отказано в доступе» даже
+                // администратору и службе). Сбрасываем всё к правам Program Files, потом задаём только папке
+                "  icacls $app /reset /T /C /Q | Out-Null",
                 "  robocopy $stage $app /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null",
                 "  if ($LASTEXITCODE -ge 8) { throw \"robocopy: код $LASTEXITCODE\" }",
-                // Только администраторы и SYSTEM пишут; пользователи — читают и запускают
-                "  icacls $app /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' /T /C /Q | Out-Null",
+                "  Get-ChildItem $app -Recurse -File | Unblock-File -ErrorAction SilentlyContinue",
+                // Только администраторы и SYSTEM пишут; пользователи — читают и запускают. Файлы наследуют от папки
+                "  icacls $app /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' /C /Q | Out-Null",
+                "  icacls (Join-Path $app '*') /reset /T /C /Q | Out-Null",
                 "  $bin = '" + ps(bin) + "'",
                 "  $type = '" + (withWindows ? "Automatic" : "Manual") + "'",
                 "  if (Get-Service $name -ErrorAction SilentlyContinue) {",

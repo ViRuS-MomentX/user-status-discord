@@ -1210,6 +1210,8 @@ class DeviceTest {
         media.accept("none");
         assertNull(media.now());
         assertEquals("1:02:05", ActivityBoard.time(3_725_000));
+        assertEquals("https://x/600x600bb.jpg", MediaNow.artwork("{\"results\":[{\"artworkUrl100\":\"https://x/100x100bb.jpg\"}]}"));
+        assertNull(MediaNow.artwork("{\"results\":[]}"));
         assertEquals("3:34", ActivityBoard.time(214_000));
 
         var games = GameNow.parse("[{\"id\":\"42\",\"name\":\"Игра\",\"icon\":\"abc\",\"executables\":["

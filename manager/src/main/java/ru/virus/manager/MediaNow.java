@@ -27,6 +27,13 @@ final class MediaNow {
     }
 
     private volatile Track track;
+    /** Почему нет обложки (для строки состояния); пусто — всё хорошо. */
+    private volatile String problem = "";
+
+    String problem() {
+        return problem;
+    }
+
     private volatile BufferedImage cover;
     private volatile boolean wanted;
     private Thread thread;
@@ -98,11 +105,18 @@ final class MediaNow {
             return;
         }
 
+        if (line.startsWith("coverr ")) {
+            problem = line.substring(7).strip();
+            return;
+        }
+
         if (line.startsWith("cover ")) {
             try {
                 cover = ImageIO.read(new ByteArrayInputStream(java.util.Base64.getDecoder().decode(line.substring(6))));
+                problem = cover == null ? "обложка в непонятном формате" : "";
             } catch (Exception e) {
                 cover = null;
+                problem = "обложка не прочиталась: " + e.getMessage();
             }
 
             var current = track;
@@ -119,14 +133,73 @@ final class MediaNow {
             var title = String.valueOf(map.get("title"));
             var previous = track;
 
-            if (previous != null && !previous.title().equals(title)) {
-                cover = null;
+            if (previous == null || !previous.title().equals(title)) {
+                if (previous != null) {
+                    cover = null;
+                }
+
+                lookup(title, text(map.get("artist")));
             }
 
             track = new Track(title, text(map.get("artist")), text(map.get("album")),
                     Boolean.TRUE.equals(map.get("playing")), number(map.get("position")), number(map.get("duration")),
                     System.currentTimeMillis(), cover);
         }
+    }
+
+    /**
+     * Запасная обложка: если Windows не отдала свою за 4 секунды — ищем трек
+     * в открытом каталоге iTunes по названию и исполнителю (без ключей).
+     */
+    private void lookup(String title, String artist) {
+        var thread = new Thread(() -> {
+            try {
+                Thread.sleep(4000);
+                var current = track;
+
+                if (current == null || !current.title().equals(title) || cover != null) {
+                    return;
+                }
+
+                var query = java.net.URLEncoder.encode(artist + " " + title, StandardCharsets.UTF_8);
+                var http = java.net.http.HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(10))
+                        .followRedirects(java.net.http.HttpClient.Redirect.NORMAL).build();
+                var response = http.send(java.net.http.HttpRequest.newBuilder(java.net.URI.create(
+                        "https://itunes.apple.com/search?entity=song&limit=1&term=" + query)).build(),
+                        java.net.http.HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                var url = artwork(response.body());
+
+                if (url == null) {
+                    return;
+                }
+
+                var image = http.send(java.net.http.HttpRequest.newBuilder(java.net.URI.create(url)).build(),
+                        java.net.http.HttpResponse.BodyHandlers.ofByteArray());
+                var picture = ImageIO.read(new ByteArrayInputStream(image.body()));
+                current = track;
+
+                if (picture != null && cover == null && current != null && current.title().equals(title)) {
+                    cover = picture;
+                    problem = "";
+                    track = new Track(current.title(), current.artist(), current.album(), current.playing(),
+                            current.positionMs(), current.durationMs(), current.at(), picture);
+                }
+            } catch (Exception ignored) {
+                // нет сети или трека в каталоге — останется значок
+            }
+        }, "virus-cover-lookup");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    /** Ссылка на обложку 600×600 из ответа поиска iTunes; null — не нашлось. */
+    static String artwork(String json) {
+        if (Json.parse(json) instanceof Map<?, ?> map && map.get("results") instanceof java.util.List<?> results
+                && !results.isEmpty() && results.get(0) instanceof Map<?, ?> first && first.get("artworkUrl100") instanceof String url) {
+            return url.replace("100x100bb", "600x600bb");
+        }
+
+        return null;
     }
 
     private static String text(Object value) {
@@ -178,13 +251,16 @@ final class MediaNow {
                       if ($key -ne $last -and $props.Thumbnail -ne $null) {
                         try {
                           $stream = Await ($props.Thumbnail.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType])
-                          $reader = New-Object Windows.Storage.Streams.DataReader($stream.GetInputStreamAt(0))
-                          $null = Await ($reader.LoadAsync([uint32]$stream.Size)) ([uint32])
-                          $bytes = New-Object byte[] ([int]$stream.Size)
-                          $reader.ReadBytes($bytes)
-                          [Console]::WriteLine('cover ' + [Convert]::ToBase64String($bytes))
-                          $last = $key
-                        } catch { }
+                          # Поток WinRT → обычный .NET-поток → байты (без DataReader: его LoadAsync в PowerShell капризничает)
+                          $net = [System.IO.WindowsRuntimeStreamExtensions]::AsStreamForRead($stream)
+                          $memory = New-Object System.IO.MemoryStream
+                          $net.CopyTo($memory)
+                          $bytes = $memory.ToArray()
+                          if ($bytes.Length -gt 0) {
+                            [Console]::WriteLine('cover ' + [Convert]::ToBase64String($bytes))
+                            $last = $key
+                          } else { [Console]::WriteLine('coverr пустая обложка') }
+                        } catch { [Console]::WriteLine('coverr ' + $_.Exception.Message) }
                       }
                     }
                   } catch { [Console]::WriteLine('none') }

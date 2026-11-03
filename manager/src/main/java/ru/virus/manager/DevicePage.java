@@ -2381,7 +2381,10 @@ final class DevicePage extends Ui.Card {
                     if (now - countedAt >= 2000) {
                         var fps = frames * 1000 / (now - countedAt);
                         var shown = sessions.size();
-                        SwingUtilities.invokeLater(() -> stripStatus.setText("Полоски: " + shown + " шт., " + fps + " кадр/с"));
+                        var coverProblem = track != null && track.cover() == null && !media.problem().isBlank()
+                                ? " · обложка: " + media.problem() : "";
+                        SwingUtilities.invokeLater(() -> stripStatus.setText("Полоски: " + shown + " шт., " + fps + " кадр/с"
+                                + coverProblem));
                         frames = 0;
                         countedAt = now;
                     }

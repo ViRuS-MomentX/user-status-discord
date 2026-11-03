@@ -864,10 +864,19 @@ final class MainWindow extends JFrame {
         var first = !java.nio.file.Files.exists(proxy.folder().resolve("linked.txt"));
 
         if (connect || first) {
-            java.awt.Desktop.getDesktop().browse(java.net.URI.create(proxy.link()));
+            // Ссылка — и в буфер: если Telegram не открылся сам, её можно вставить в «Избранное» и нажать
+            var link = proxy.link();
+            java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new java.awt.datatransfer.StringSelection(link), null);
+
+            try {
+                java.awt.Desktop.getDesktop().browse(java.net.URI.create(link));
+            } catch (Exception e) {
+                return "Ссылка на прокси скопирована. Вставь её в «Избранное» в Telegram и нажми по ней — «Подключиться».";
+            }
+
             java.nio.file.Files.writeString(proxy.folder().resolve("linked.txt"), "1");
             return "Telegram-прокси " + proxy.version() + " работает. В Telegram откроется окно «Прокси» — нажми "
-                    + "«Подключиться»: дальше Telegram ходит через него, и zapret ему больше не нужен.";
+                    + "«Подключиться». Не открылось — ссылка уже в буфере: вставь её в «Избранное» и нажми.";
         }
 
         return updated ? "Telegram-прокси обновлён до " + proxy.version() + "." : null;

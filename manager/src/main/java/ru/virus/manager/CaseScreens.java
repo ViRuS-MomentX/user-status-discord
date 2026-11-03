@@ -458,8 +458,13 @@ final class CaseScreens {
         return stripReply(link, 1500);
     }
 
-    /** Кадр на полоску; true — экран подтвердил. */
-    static boolean stripSend(Link link, BufferedImage image, int brightness) {
+    /**
+     * Кадр на полоску. Подтверждение (cc 55) читаем, но не требуем: часть
+     * прошивок отвечает не на каждый кадр. Ошибка — только если кадр не ушёл.
+     *
+     * @return null — ушёл, иначе причина
+     */
+    static String stripPush(Link link, BufferedImage image, int brightness) {
         var frame = stripFrame(image, brightness);
         var sent = IntBuffer.allocate(1);
 
@@ -467,13 +472,19 @@ final class CaseScreens {
             var chunk = ByteBuffer.allocateDirect(Math.min(4096, frame.length - at));
             chunk.put(frame, at, chunk.capacity());
             chunk.flip();
+            var result = link.transfer(link.out(), chunk, sent, 3000);
 
-            if (link.transfer(link.out(), chunk, sent, 3000) != LibUsb.SUCCESS) {
-                return false;
+            if (result != LibUsb.SUCCESS) {
+                return "кадр не ушёл: " + explain(result);
             }
         }
 
-        return stripReply(link, 1500) != null;
+        stripReply(link, 300);
+        return null;
+    }
+
+    static boolean stripSend(Link link, BufferedImage image, int brightness) {
+        return stripPush(link, image, brightness) == null;
     }
 
     private static boolean ours(DeviceDescriptor descriptor) {
@@ -531,12 +542,15 @@ final class CaseScreens {
                         drain(link);
 
                         if (strip(vendor, product)) {
+                            // «Кто ты» отвечают не все прошивки — тогда проверяем, принимает ли полоска кадр
                             var hello = stripHello(link);
-                            found.add(hello == null
-                                    ? new Screen(bus, address, vendor, product, name, "", "полоска не ответила — "
-                                    + "программа JONSBO закрыта?", link.text(), "")
-                                    : new Screen(bus, address, vendor, product, name, "полоска 640×180", null, link.text(),
-                                    hex(hello, 64)));
+                            var problem = hello != null ? null : stripPush(link,
+                                    new BufferedImage(STRIP_WIDTH, STRIP_HEIGHT, BufferedImage.TYPE_INT_RGB), 0);
+                            found.add(problem != null
+                                    ? new Screen(bus, address, vendor, product, name, "", "полоска не принимает данные: "
+                                    + problem, link.text(), "")
+                                    : new Screen(bus, address, vendor, product, name, hello != null ? "полоска 640×180"
+                                    : "полоска 640×180, кадры принимает", null, link.text(), hello == null ? "" : hex(hello, 64)));
                             continue;
                         }
 
@@ -604,7 +618,7 @@ final class CaseScreens {
 
                         if (strip(screen.vendor(), screen.product())) {
                             stripHello(link);
-                            return stripSend(link, image, brightness) ? null : "полоска не подтвердила картинку";
+                            return stripPush(link, image, brightness);
                         }
 
                         command(link, SYNC, new byte[0], null);

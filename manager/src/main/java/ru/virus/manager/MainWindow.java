@@ -786,6 +786,10 @@ final class MainWindow extends JFrame {
             watch(process);
         }
 
+        // zapret упал — от администратора чиним сами: скачать, если нет, переставить службу и запустить снова
+        all.stream().filter(process -> process.spec().id().equals(Zapret.ID)
+                && process.state() == ManagedProcess.State.FAILED).findFirst().ifPresent(this::healZapret);
+
         // Состояние процессов — на табло экрана в корпусе: id → «off», «start», «run», «error»
         var states = new java.util.LinkedHashMap<String, String>();
         var now = System.currentTimeMillis();
@@ -809,6 +813,44 @@ final class MainWindow extends JFrame {
     }
 
     /** Доктор процесса — слушает его консоль с первой строки. */
+    private long zapretHealedAt;
+
+    /** Не чаще раза в 10 минут: переустановить службу zapret и перезапустить смотрителя. */
+    private void healZapret(ManagedProcess process) {
+        var now = System.currentTimeMillis();
+
+        if (!Admin.is() || now - zapretHealedAt < 10 * 60_000) {
+            return;
+        }
+
+        zapretHealedAt = now;
+        toast("zapret упал — переставляю службу и запускаю снова…");
+        worker.submit(() -> {
+            var zapret = new Zapret(supervisor.home());
+            String problem;
+
+            try {
+                if (zapret.version().isEmpty()) {
+                    zapret.download(zapret.latest());
+                }
+
+                problem = zapret.apply(true);
+            } catch (Exception e) {
+                problem = e.getMessage();
+            }
+
+            var result = problem;
+            SwingUtilities.invokeLater(() -> {
+                if (result == null) {
+                    toast("zapret починен: служба переставлена и запущена.");
+                    process.restart();
+                } else {
+                    toast("zapret сам не починился: " + result);
+                }
+            });
+        });
+    }
+
     private Doctor doctor(ManagedProcess process) {
         return doctors.computeIfAbsent(process.spec().id(), id -> {
             var doctor = new Doctor();

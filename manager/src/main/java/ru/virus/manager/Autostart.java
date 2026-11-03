@@ -46,8 +46,16 @@ final class Autostart {
         return startupFolder != null && jar != null;
     }
 
+    /** Задача Планировщика: запуск при входе сразу от администратора, без вопроса Windows. */
+    static final String TASK = "V.I.R.U.S.";
+
     boolean isEnabled() {
-        return isSupported() && Files.isRegularFile(startupFolder.resolve(FILE));
+        return isSupported() && (Files.isRegularFile(startupFolder.resolve(FILE)) || taskExists());
+    }
+
+    /** Скрипт для задачи лежит рядом с virus.jar. */
+    private Path taskScript() {
+        return jar.getParent().resolve("autostart.vbs");
     }
 
     void enable() throws IOException {
@@ -55,13 +63,57 @@ final class Autostart {
             throw new IOException("автозапуск умею ставить только на Windows и только из virus.jar");
         }
 
+        // От администратора — через Планировщик с высшими правами: тогда и при входе Windows ничего не спросит
+        if (SystemInfo.isWindows() && Admin.is()) {
+            Files.writeString(taskScript(), script(), StandardCharsets.UTF_16LE);
+
+            if (run("schtasks", "/Create", "/F", "/TN", TASK, "/SC", "ONLOGON", "/RL", "HIGHEST", "/DELAY", "0000:15",
+                    "/TR", "wscript.exe \"" + taskScript() + "\"") == 0) {
+                Files.deleteIfExists(startupFolder.resolve(FILE));
+                return;
+            }
+        }
+
         Files.createDirectories(startupFolder);
         Files.writeString(startupFolder.resolve(FILE), script(), StandardCharsets.UTF_16LE);
+    }
+
+    /** Был обычный автозапуск, а теперь есть права — переставить на задачу с правами администратора. */
+    void upgrade() {
+        try {
+            if (isSupported() && SystemInfo.isWindows() && Admin.is() && Files.isRegularFile(startupFolder.resolve(FILE)) && !taskExists()) {
+                enable();
+            }
+        } catch (IOException ignored) {
+            // останется как было
+        }
     }
 
     void disable() throws IOException {
         if (startupFolder != null) {
             Files.deleteIfExists(startupFolder.resolve(FILE));
+        }
+
+        if (taskExists()) {
+            run("schtasks", "/Delete", "/F", "/TN", TASK);
+        }
+    }
+
+    private static boolean taskExists() {
+        return SystemInfo.isWindows() && run("schtasks", "/Query", "/TN", TASK) == 0;
+    }
+
+    private static int run(String... command) {
+        try {
+            var process = new ProcessBuilder(command).redirectErrorStream(true).start();
+            process.getOutputStream().close();
+            process.getInputStream().readAllBytes();
+            return process.waitFor(15, TimeUnit.SECONDS) ? process.exitValue() : -1;
+        } catch (IOException e) {
+            return -1;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return -1;
         }
     }
 

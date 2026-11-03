@@ -1190,6 +1190,16 @@ class DeviceTest {
     }
 
     @Test
+    void adminClosesOnlyProgramsThatHoldScreensAndLighting() {
+        var running = Admin.names("\"JONSBO.exe\",\"1\"\r\n\"TURZX Tray.exe\",\"2\"\n\"OpenRGB.exe\",\"3\"\n"
+                + "\"SignalRgb.exe\",\"4\"\n\"MSI.CentralServer.exe\",\"5\"\n\"LightingService.exe\",\"6\"\n"
+                + "\"javaw.exe\",\"7\"\n\"Discord.exe\",\"8\"\n\"msedge.exe\",\"9\"\n");
+        assertEquals(List.of("JONSBO.exe", "TURZX Tray.exe"), Admin.matching(Admin.SCREEN_HOGS, running));
+        assertEquals(List.of("SignalRgb.exe", "MSI.CentralServer.exe", "LightingService.exe"),
+                Admin.matching(Admin.RGB_HOGS, running));
+    }
+
+    @Test
     void bluetoothLampsSpeakElkBledom() {
         assertArrayEquals(new byte[] {0x7e, 0x00, 0x05, 0x03, (byte) 0xff, 0x00, 0x00, 0x00, (byte) 0xef},
                 BleLamps.frame(255, 0, 0), "красный — как в открытом описании протокола");

@@ -41,18 +41,41 @@ public final class Virus {
         }
 
         var port = Integer.parseInt(System.getenv().getOrDefault("VIRUS_PORT", String.valueOf(PORT)));
-        var instance = SingleInstance.acquire(port);
+        var acquired = SingleInstance.acquire(port);
 
-        if (instance == null) {
+        if (acquired == null) {
             // Уже работает — он сам покажет окно по нашей просьбе
             return;
         }
+
+        // От администратора: служба zapret, OpenRGB с доступом к плате, закрытие программ, которые держат
+        // экраны и подсветку. Windows спросит один раз; отказались — работаем как есть.
+        var argList = Arrays.asList(args);
+
+        if (SystemInfo.isWindows() && !argList.contains("--elevated") && !argList.contains("--no-admin")
+                && System.getenv("VIRUS_NO_ADMIN") == null && ownJar() != null && !Admin.is()) {
+            acquired.release();
+
+            if (Admin.relaunch(Supervisor.findJavaw(), ownJar(), argList)) {
+                System.exit(0);
+                return;
+            }
+
+            acquired = SingleInstance.acquire(port);
+
+            if (acquired == null) {
+                return;
+            }
+        }
+
+        var instance = acquired;
 
         Theme.install();
 
         var home = home();
         var supervisor = new Supervisor(home, Supervisor.findJava());
         var autostart = new Autostart(Autostart.windowsStartupFolder(), Supervisor.findJavaw(), ownJar());
+        autostart.upgrade();
 
         try {
             supervisor.load();

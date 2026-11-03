@@ -253,6 +253,9 @@ final class DevicePage extends Ui.Card {
                 rotate();
             }).start();
             new Timer(10_000, e -> followAccent()).start();
+            // Чужие программы подсветки — сразу и раз в 30 секунд
+            freeLighting();
+            new Timer(30_000, e -> freeLighting()).start();
             new Timer((int) BleLamps.PERIOD_MS, e -> feedLamps()).start();
 
             lamps.chosen = settings.bleNames;
@@ -2057,6 +2060,7 @@ final class DevicePage extends Ui.Card {
                 var resume = pauseBoard();
 
                 try {
+                    freeScreens();
                     found = CaseScreens.probe();
                 } catch (Throwable t) {
                     found = List.of(new CaseScreens.Screen(0, 0, 0, 0, "USB", "", "не запустился USB: " + t.getMessage()));
@@ -2093,6 +2097,7 @@ final class DevicePage extends Ui.Card {
             // Первый запуск: сами находим экран и включаем на нём табло с процессами
             worker.submit(() -> {
                 try {
+                    freeScreens();
                     var found = CaseScreens.probe();
                     SwingUtilities.invokeLater(() -> {
                         showScreens(found);
@@ -2222,6 +2227,49 @@ final class DevicePage extends Ui.Card {
         SwingUtilities.invokeLater(() -> boardStatus.setText(""));
     }
 
+    /**
+     * Закрыть программы JONSBO/TURZX, которые держат экраны (и в трее тоже).
+     *
+     * @return кого-то закрыли
+     */
+    private boolean freeScreens() {
+        var closed = Admin.close(Admin.SCREEN_HOGS);
+
+        if (closed.isEmpty()) {
+            return false;
+        }
+
+        SwingUtilities.invokeLater(() -> toast.accept("Экраны держала программа " + String.join(", ", closed)
+                + " — закрыл её."));
+
+        try {
+            Thread.sleep(1500);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        return true;
+    }
+
+    /** Чужие программы подсветки — закрыть, чтобы не спорили с OpenRGB. Сообщаем о каждой один раз. */
+    private final java.util.Set<String> rgbClosed = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    private void freeLighting() {
+        if (!SystemInfo.isWindows() || settings.allDark) {
+            return;
+        }
+
+        worker.submit(() -> {
+            Admin.stopRgbServices();
+            var closed = Admin.close(Admin.RGB_HOGS).stream().filter(rgbClosed::add).toList();
+
+            if (!closed.isEmpty()) {
+                SwingUtilities.invokeLater(() -> toast.accept("Подсветку перебивала программа " + String.join(", ", closed)
+                        + " — закрыл её."));
+            }
+        });
+    }
+
     private void runBoard() {
         var me = Thread.currentThread();
 
@@ -2248,8 +2296,10 @@ final class DevicePage extends Ui.Card {
             } catch (InterruptedException e) {
                 return;
             } catch (Exception e) {
-                SwingUtilities.invokeLater(() -> boardStatus.setText("Табло: " + e.getMessage()
-                        + ". Пробую снова через 10 секунд (программа JONSBO должна быть закрыта)."));
+                // Экран занят программой JONSBO — закрываем её и пробуем снова
+                var closed = freeScreens();
+                SwingUtilities.invokeLater(() -> boardStatus.setText("Табло: " + e.getMessage() + (closed
+                        ? ". Закрыл программу JONSBO, пробую снова." : ". Пробую снова через 10 секунд.")));
 
                 try {
                     Thread.sleep(10_000);
@@ -3153,6 +3203,7 @@ final class DevicePage extends Ui.Card {
 
     private void connectRgb() {
         rgbStatus.setText("Подключаюсь…");
+        freeLighting();
         worker.submit(() -> {
             try (var rgb = new OpenRgb(settings.host, OpenRgb.PORT)) {
                 var listed = rgb.devices();

@@ -170,9 +170,66 @@ final class Supervisor {
             // нет списка — запустим только автозапуск
         }
 
+        // И то, что работало, когда V.I.R.U.S. закрылся в прошлый раз (выключение компьютера тоже)
+        again.addAll(lastRunning());
+
         for (var process : all()) {
             if (process.spec().autostart() || again.contains(process.spec().id())) {
                 process.start();
+            }
+        }
+
+        tracking = true;
+    }
+
+    /** Что было запущено в прошлый раз — запускается при следующем старте V.I.R.U.S. */
+    static final String LAST = "last-running.txt";
+    private volatile boolean tracking;
+    private java.util.Set<String> last;
+
+    private java.util.Set<String> lastRunning() {
+        try {
+            var file = home.resolve(LAST);
+            return Files.isRegularFile(file) ? new HashSet<>(Files.readAllLines(file, StandardCharsets.UTF_8)) : new HashSet<>();
+        } catch (IOException e) {
+            return new HashSet<>();
+        }
+    }
+
+    /**
+     * Запомнить, что работает. Убираем из списка только то, что остановили
+     * руками (STOPPED): упавшее при выключении компьютера остаётся — после
+     * включения поднимется снова.
+     */
+    synchronized void track() {
+        if (!tracking) {
+            return;
+        }
+
+        if (last == null) {
+            last = lastRunning();
+        }
+
+        var next = new HashSet<>(last);
+
+        for (var process : processes.values()) {
+            switch (process.state()) {
+                case RUNNING, WAITING -> next.add(process.spec().id());
+                case STOPPED -> next.remove(process.spec().id());
+                default -> {
+                    // упал — не трогаем
+                }
+            }
+        }
+
+        next.retainAll(processes.keySet());
+
+        if (!next.equals(last)) {
+            try {
+                Files.write(home.resolve(LAST), next.stream().sorted().toList(), StandardCharsets.UTF_8);
+                last = next;
+            } catch (IOException ignored) {
+                // попробуем на следующем шаге
             }
         }
     }

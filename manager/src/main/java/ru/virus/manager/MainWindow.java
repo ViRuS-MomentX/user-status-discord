@@ -812,6 +812,9 @@ final class MainWindow extends JFrame {
                 && !java.nio.file.Files.isRegularFile(new TgProxy(supervisor.home()).exe()))
                 .findFirst().ifPresent(process -> healTelegram());
 
+        // Что запущено — запомнить: после перезагрузки компьютера V.I.R.U.S. запустит это сам
+        supervisor.track();
+
         // Состояние процессов — на табло экрана в корпусе: id → «off», «start», «run», «error»
         var states = new java.util.LinkedHashMap<String, String>();
         var now = System.currentTimeMillis();

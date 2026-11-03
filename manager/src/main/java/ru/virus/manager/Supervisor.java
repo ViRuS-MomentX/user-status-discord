@@ -87,6 +87,18 @@ final class Supervisor {
             seeded.add(Zapret.ID);
             Files.write(memo, seeded, StandardCharsets.UTF_8);
         }
+
+        // Telegram-прокси Flowseal (TG WS Proxy): Telegram при zapret ходит через него
+        if (!seeded.contains(TgProxy.ID)) {
+            if (!processes.containsKey(TgProxy.ID)) {
+                var spec = TgProxy.defaultSpec();
+                processes.put(spec.id(), create(spec));
+                Files.createDirectories(home.resolve(spec.workdir()));
+            }
+
+            seeded.add(TgProxy.ID);
+            Files.write(memo, seeded, StandardCharsets.UTF_8);
+        }
     }
 
     private ManagedProcess create(ProcessSpec spec) {

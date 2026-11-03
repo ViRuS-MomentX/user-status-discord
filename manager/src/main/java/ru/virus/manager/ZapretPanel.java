@@ -29,6 +29,9 @@ final class ZapretPanel extends JPanel {
     private static final List<String> GAME_NAMES = List.of("выключен", "TCP и UDP", "только TCP", "только UDP");
     private static final List<String> IPSET_NAMES = List.of("обычный список", "ничего (только домены)", "любые адреса");
 
+    /** Поставить и подключить Telegram-прокси — делает главное окно (оно знает процессы). */
+    static volatile java.util.concurrent.Callable<String> telegramHook;
+
     private final ExecutorService worker;
     private final JLabel version = Ui.label("", Theme.ui.deriveFont(13f), Theme.TEXT);
     private final JLabel status = new JLabel() {
@@ -82,6 +85,14 @@ final class ZapretPanel extends JPanel {
         pick.addActionListener(e -> run("Подбираю стратегию — проверяю Discord, YouTube и Telegram с каждой…",
                 () -> zapret.pick(text -> SwingUtilities.invokeLater(() -> status.setText(text)))));
         head.add(pick);
+        var telegram = Ui.button("Telegram");
+        telegram.setToolTipText("zapret не помогает приложению Telegram (его режут по IP). Поставить прокси Flowseal "
+                + "TG WS Proxy и подключить к нему Telegram");
+        telegram.addActionListener(e -> run("Ставлю Telegram-прокси Flowseal и подключаю Telegram…", () -> {
+            var hook = telegramHook;
+            return hook == null ? "Не готово — открой окно V.I.R.U.S. ещё раз." : hook.call();
+        }));
+        head.add(telegram);
 
         var options = row();
         options.add(Ui.muted("Стратегия", 12.5f));

@@ -1200,6 +1200,21 @@ class DeviceTest {
     }
 
     @Test
+    void telegramProxyFromFlowsealRelease(@org.junit.jupiter.api.io.TempDir java.nio.file.Path home) throws Exception {
+        var json = "{\"tag_name\":\"v1.6.2\",\"assets\":[{\"name\":\"TgWsProxy_windows_7_64bit.exe\",\"browser_download_url\":\"a\"},"
+                + "{\"name\":\"TgWsProxy_windows.exe\",\"browser_download_url\":\"b\"},"
+                + "{\"name\":\"TgWsProxy_windows_arm64.exe\",\"browser_download_url\":\"c\"}]}";
+        assertEquals("b", TgProxy.parseRelease(json, false).url());
+        assertEquals("c", TgProxy.parseRelease(json, true).url());
+        assertEquals("tg://proxy?server=127.0.0.1&port=1443&secret=dd00ff", TgProxy.link("0.0.0.0", 1443, "00ff"));
+        var proxy = new TgProxy(home);
+        var link = proxy.link();
+        assertTrue(link.matches("tg://proxy\\?server=127\\.0\\.0\\.1&port=1443&secret=dd[0-9a-f]{32}"), link);
+        assertEquals(link, proxy.link(), "секрет не меняется от раза к разу");
+        assertTrue(java.nio.file.Files.exists(proxy.data().resolve(".first_run_done_mtproto")));
+    }
+
+    @Test
     void zapretCoversDiscordYoutubeAndTelegram() {
         var text = Zapret.withBlock("# мои\nexample.org\n", List.of("discord.com", "t.me"));
         assertTrue(text.startsWith("# мои\nexample.org\n" + Zapret.BEGIN + "\ndiscord.com\nt.me\n" + Zapret.END));

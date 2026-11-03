@@ -327,6 +327,21 @@ final class MainWindow extends JFrame {
             }
         });
         new Timer(60_000, e -> zapretUpdate.run()) {{ setRepeats(false); }}.start();
+        // Telegram-прокси: скачать/обновить и держать запущенным (через полторы минуты и раз в 6 часов)
+        ZapretPanel.telegramHook = () -> telegram(true);
+        Runnable telegramUpdate = () -> worker.submit(() -> {
+            try {
+                var result = telegram(false);
+
+                if (result != null) {
+                    SwingUtilities.invokeLater(() -> toast(result));
+                }
+            } catch (Exception e) {
+                // GitHub недоступен — попробуем в следующий раз
+            }
+        });
+        new Timer(90_000, e -> telegramUpdate.run()) {{ setRepeats(false); }}.start();
+        new Timer(6 * 60 * 60_000, e -> telegramUpdate.run()).start();
         new Timer(6 * 60 * 60_000, e -> zapretUpdate.run()).start();
 
         // Лишние копии ботов — когда наши уже запустились, чтобы не принять их за чужие
@@ -814,6 +829,44 @@ final class MainWindow extends JFrame {
     }
 
     /** Доктор процесса — слушает его консоль с первой строки. */
+    /**
+     * Telegram-прокси: скачать или обновить, запустить, а в первый раз (или по
+     * кнопке) — отдать Telegram ссылку на прокси. null — ничего нового.
+     */
+    private String telegram(boolean connect) throws Exception {
+        if (!SystemInfo.isWindows()) {
+            return "Telegram-прокси — только для Windows.";
+        }
+
+        var proxy = new TgProxy(supervisor.home());
+        var process = supervisor.get(TgProxy.ID);
+
+        if (process == null) {
+            supervisor.put(TgProxy.defaultSpec());
+            process = supervisor.get(TgProxy.ID);
+        }
+
+        var target = process;
+        var updated = proxy.ensure(target::stop);
+        var running = target.state() == ManagedProcess.State.RUNNING || target.state() == ManagedProcess.State.WAITING;
+
+        if (!running || updated) {
+            target.start();
+            Thread.sleep(3000);
+        }
+
+        var first = !java.nio.file.Files.exists(proxy.folder().resolve("linked.txt"));
+
+        if (connect || first) {
+            java.awt.Desktop.getDesktop().browse(java.net.URI.create(proxy.link()));
+            java.nio.file.Files.writeString(proxy.folder().resolve("linked.txt"), "1");
+            return "Telegram-прокси " + proxy.version() + " работает. В Telegram откроется окно «Прокси» — нажми "
+                    + "«Подключиться»: дальше Telegram ходит через него, и zapret ему больше не нужен.";
+        }
+
+        return updated ? "Telegram-прокси обновлён до " + proxy.version() + "." : null;
+    }
+
     private long zapretHealedAt;
 
     /** Не чаще раза в 10 минут: переустановить службу zapret и перезапустить смотрителя. */

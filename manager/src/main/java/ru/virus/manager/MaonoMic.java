@@ -229,7 +229,7 @@ final class MaonoMic {
     static String describe(String line) {
         var text = line.strip();
 
-        if (text.equals("found")) {
+        if (text.equals("found") || text.startsWith("found ")) {
             return "Микрофон Maono: подключён — кольцо повторяет цвет подсветки.";
         }
 
@@ -275,6 +275,9 @@ final class MaonoMic {
                     [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)] public ushort[] Counts;
                   }
                   [DllImport("hid.dll")] static extern int HidP_GetCaps(IntPtr p, ref CAPS c);
+                  [DllImport("hid.dll", SetLastError = true)] static extern bool HidD_SetOutputReport(SafeFileHandle h, byte[] b, int n);
+                  [DllImport("hid.dll", SetLastError = true)] static extern bool HidD_SetFeature(SafeFileHandle h, byte[] b, int n);
+                  public static int OutLength; public static int FeatureLength; public static string Problem = "";
                   public static SafeFileHandle Open() {
                     Guid g; HidD_GetHidGuid(out g);
                     IntPtr set = SetupDiGetClassDevsW(ref g, IntPtr.Zero, IntPtr.Zero, 0x12);
@@ -294,29 +297,43 @@ final class MaonoMic {
                           IntPtr pre;
                           if (HidD_GetAttributes(h, ref a) && a.Vid == 0x352F && a.Pid == 0x0104 && HidD_GetPreparsedData(h, out pre)) {
                             CAPS c = new CAPS(); HidP_GetCaps(pre, ref c); HidD_FreePreparsedData(pre);
-                            if (c.UsagePage == 0xFF01) return h;
+                            if (c.UsagePage == 0xFF01) { OutLength = c.Out; FeatureLength = c.Feature; return h; }
                           }
                           h.Dispose();
                         } finally { Marshal.FreeHGlobal(buf); }
                       }
                     } finally { SetupDiDestroyDeviceInfoList(set); }
                   }
+                  // Длина отчёта должна быть ровно как у устройства (часто 65: номер отчёта + 64), иначе Windows отказывает
+                  static byte[] Fit(byte[] report, int length) {
+                    if (length <= 0) return report;
+                    byte[] b = new byte[length]; Array.Copy(report, b, Math.Min(report.Length, length)); return b;
+                  }
                   public static bool Send(SafeFileHandle h, byte[] report) {
-                    int done; return WriteFile(h, report, report.Length, out done, IntPtr.Zero);
+                    int done;
+                    byte[] o = Fit(report, OutLength);
+                    if (OutLength > 0 && WriteFile(h, o, o.Length, out done, IntPtr.Zero)) return true;
+                    int e1 = Marshal.GetLastWin32Error();
+                    if (OutLength > 0 && HidD_SetOutputReport(h, o, o.Length)) return true;
+                    int e2 = Marshal.GetLastWin32Error();
+                    byte[] f = Fit(report, FeatureLength);
+                    if (FeatureLength > 0 && HidD_SetFeature(h, f, f.Length)) return true;
+                    Problem = "out " + OutLength + " (код " + e1 + "/" + e2 + "), feature " + FeatureLength + " (код " + Marshal.GetLastWin32Error() + ")";
+                    return false;
                   }
                 }
                 '@
                 [Console]::OutputEncoding = [Text.Encoding]::UTF8
                 $mic = [VirusMic]::Open()
                 if ($mic -eq $null) { [Console]::WriteLine('none'); exit }
-                [Console]::WriteLine('found')
+                [Console]::WriteLine('found ' + [VirusMic]::OutLength + ' ' + [VirusMic]::FeatureLength)
                 $reader = New-Object System.IO.StreamReader([Console]::OpenStandardInput())
                 while ($true) {
                   $line = $reader.ReadLine()
                   if ($line -eq $null -or $line -eq 'quit') { break }
                   $bytes = New-Object byte[] ($line.Length / 2)
                   for ($i = 0; $i -lt $bytes.Length; $i++) { $bytes[$i] = [Convert]::ToByte($line.Substring($i * 2, 2), 16) }
-                  if (-not [VirusMic]::Send($mic, $bytes)) { [Console]::WriteLine('error микрофон отключили или он занят — переподключаюсь'); exit }
+                  if (-not [VirusMic]::Send($mic, $bytes)) { [Console]::WriteLine('error микрофон не принял команду: ' + [VirusMic]::Problem); Start-Sleep -Seconds 20; exit }
                 }
                 """;
     }

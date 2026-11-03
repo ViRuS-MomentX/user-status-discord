@@ -185,6 +185,8 @@ final class DevicePage extends Ui.Card {
      */
     static final boolean LIGHTING = true;
 
+    private final Path home;
+
     DevicePage(MatrixBackground background, Path home, Consumer<String> toast, Supplier<String> bridgeApi) {
         super(new BorderLayout(0, 14));
         // Свои потоки: замер скорости идёт полминуты и не должен держать кнопки процессов
@@ -195,6 +197,7 @@ final class DevicePage extends Ui.Card {
         });
         this.toast = toast;
         this.bridgeApi = bridgeApi;
+        this.home = home;
         this.settings = Settings.load(home.resolve("device.json"));
         rotateSpinner.setValue(settings.rotateMinutes);
         this.glow = new SignalRgb.Live(DevicePage::cpuLoad);
@@ -1079,6 +1082,43 @@ final class DevicePage extends Ui.Card {
         micRow.add(Ui.muted("подсветка микрофона Maono PD200X/PD200XS повторяет цвет (у него 8 цветов и радуга)", 12.5f));
         stack.add(left(micRow));
         stack.add(left(micStatus));
+
+        // Одна кнопка — весь текст про zapret, микрофон и лампы, чтобы прислать его целиком
+        stack.add(Box.createVerticalStrut(10));
+        var diagnose = Ui.ghost("Диагностика (zapret, микрофон, лампы)");
+        diagnose.setToolTipText("Собрать состояние zapret, микрофона и Bluetooth в текст и скопировать — без ключей и паролей");
+        diagnose.addActionListener(e -> {
+            diagnose.setEnabled(false);
+            toast.accept("Собираю диагностику… (около 20 секунд)");
+            var statuses = new java.util.LinkedHashMap<String, String>();
+            statuses.put("Bluetooth-лампы", lampsStatus.getText());
+            statuses.put("Smart Life", tuyaStatus.getText());
+            statuses.put("Микрофон", micStatus.getText());
+            statuses.put("OpenRGB", rgbStatus.getText());
+            statuses.put("Smart Life лампы", String.join(", ", settings.tuya.stream().map(lamp -> lamp.name()
+                    + (lamp.ble() ? " [Bluetooth" : " [Wi-Fi") + (lamp.mac().isBlank() ? ", без MAC" : ", MAC " + lamp.mac())
+                    + (lamp.uuid().isBlank() ? ", без uuid" : "") + "]").toList()));
+            worker.submit(() -> {
+                String text;
+
+                try {
+                    var file = Diagnostics.collect(home, statuses);
+                    var content = Files.readString(file);
+                    java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()
+                            .setContents(new java.awt.datatransfer.StringSelection(content), null);
+                    text = "Диагностика скопирована — вставь её в чат (Ctrl+V). Файл: " + file;
+                } catch (Exception ex) {
+                    text = "Диагностика не собралась: " + ex.getMessage();
+                }
+
+                var result = text;
+                SwingUtilities.invokeLater(() -> {
+                    diagnose.setEnabled(true);
+                    toast.accept(result);
+                });
+            });
+        });
+        stack.add(left(diagnose));
         signalOnly.add(Box.createVerticalStrut(16));
         signalOnly.add(left(effectsHead));
         signalOnly.add(Box.createVerticalStrut(6));

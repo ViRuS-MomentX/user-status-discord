@@ -76,6 +76,10 @@ final class CaseScreens {
 
     /** Модель по коду; null — не знаем и не угадать. */
     static Model model(int vendor, int product) {
+        if (strip(vendor, product)) {
+            return new Model("TURZX 3.38″ полоса", 640, 180, true);
+        }
+
         if (vendor != (VID_TURZX & 0xffff)) {
             return null;
         }
@@ -364,6 +368,114 @@ final class CaseScreens {
         return (int) (LocalTime.now().toNanoOfDay() / 1_000_000);
     }
 
+    // ---- Полоски TURZX-338 (43a8:0e61) ----
+    //
+    // Протокол разобран по записи USB программы JONSBO: экран 640×180, кадр —
+    // 720 блоков по 512 байт в bulk 0x02 (по 8 блоков в передаче). Блок:
+    // aa 55, 8 байт нуля, 02, номер блока с 1 (2 байта, старший первым),
+    // нули, bb на 31-м байте и 480 байт = 160 точек BGR. Точки идут столбцами
+    // по 180 снизу вверх, столбцы слева направо. После кадра экран отвечает
+    // 32 байтами cc 55 … 00 dd в 0x82. Команда 01 с 8 случайными байтами —
+    // «кто ты» (так делает JONSBO при подключении), ответ тоже cc 55.
+
+    static final int STRIP_WIDTH = 640;
+    static final int STRIP_HEIGHT = 180;
+    static final int STRIP_BLOCKS = STRIP_WIDTH * STRIP_HEIGHT / 160;
+
+    static boolean strip(int vendor, int product) {
+        return vendor == (VID_TURZX_R & 0xffff) && product == 0x0e61;
+    }
+
+    /** Заголовок блока или служебной команды (32 байта). */
+    static byte[] stripHeader(byte[] nonce, int command, int index) {
+        var header = new byte[32];
+        header[0] = (byte) 0xaa;
+        header[1] = 0x55;
+        System.arraycopy(nonce, 0, header, 2, Math.min(8, nonce.length));
+        header[10] = (byte) command;
+        header[11] = (byte) (index >> 8);
+        header[12] = (byte) index;
+        header[31] = (byte) 0xbb;
+        return header;
+    }
+
+    /** Кадр для полоски: 720 блоков по 512 байт; яркость — программно (команды яркости у полоски не знаем). */
+    static byte[] stripFrame(BufferedImage source, int brightness) {
+        var image = new BufferedImage(STRIP_WIDTH, STRIP_HEIGHT, BufferedImage.TYPE_INT_RGB);
+        var g = image.createGraphics();
+        g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g.drawImage(source, 0, 0, STRIP_WIDTH, STRIP_HEIGHT, null);
+        g.dispose();
+        var level = Math.max(0, Math.min(100, brightness)) / 100.0;
+        var frame = new byte[STRIP_BLOCKS * 512];
+        var zero = new byte[8];
+        var k = 0;
+
+        for (var block = 0; block < STRIP_BLOCKS; block++) {
+            var base = block * 512;
+            System.arraycopy(stripHeader(zero, 2, block + 1), 0, frame, base, 32);
+
+            for (var i = 0; i < 160; i++, k++) {
+                var x = k / STRIP_HEIGHT;
+                var y = STRIP_HEIGHT - 1 - k % STRIP_HEIGHT;
+                var rgb = image.getRGB(x, y);
+                var at = base + 32 + i * 3;
+                frame[at] = (byte) Math.round((rgb & 0xff) * level);
+                frame[at + 1] = (byte) Math.round(((rgb >> 8) & 0xff) * level);
+                frame[at + 2] = (byte) Math.round(((rgb >> 16) & 0xff) * level);
+            }
+        }
+
+        return frame;
+    }
+
+    /** Ответ полоски: 32 байта cc 55 … dd; null — не ответила. */
+    private static byte[] stripReply(Link link, long timeout) {
+        var in = ByteBuffer.allocateDirect(512);
+        var got = IntBuffer.allocate(1);
+
+        if (link.transfer(link.in(), in, got, timeout) != LibUsb.SUCCESS || got.get(0) < 2) {
+            return null;
+        }
+
+        var reply = new byte[got.get(0)];
+        in.get(reply);
+        return (reply[0] & 0xff) == 0xcc && reply[1] == 0x55 ? reply : null;
+    }
+
+    /** «Кто ты» — как JONSBO при подключении. */
+    static byte[] stripHello(Link link) {
+        var nonce = new byte[8];
+        new java.security.SecureRandom().nextBytes(nonce);
+        var packet = ByteBuffer.allocateDirect(32);
+        packet.put(stripHeader(nonce, 1, 0));
+        packet.flip();
+
+        if (link.transfer(link.out(), packet, IntBuffer.allocate(1), 2000) != LibUsb.SUCCESS) {
+            return null;
+        }
+
+        return stripReply(link, 1500);
+    }
+
+    /** Кадр на полоску; true — экран подтвердил. */
+    static boolean stripSend(Link link, BufferedImage image, int brightness) {
+        var frame = stripFrame(image, brightness);
+        var sent = IntBuffer.allocate(1);
+
+        for (var at = 0; at < frame.length; at += 4096) {
+            var chunk = ByteBuffer.allocateDirect(Math.min(4096, frame.length - at));
+            chunk.put(frame, at, chunk.capacity());
+            chunk.flip();
+
+            if (link.transfer(link.out(), chunk, sent, 3000) != LibUsb.SUCCESS) {
+                return false;
+            }
+        }
+
+        return stripReply(link, 1500) != null;
+    }
+
     private static boolean ours(DeviceDescriptor descriptor) {
         return descriptor.idVendor() == VID_TURZX || descriptor.idVendor() == VID_TURZX_R;
     }
@@ -417,6 +529,17 @@ final class CaseScreens {
 
                     try {
                         drain(link);
+
+                        if (strip(vendor, product)) {
+                            var hello = stripHello(link);
+                            found.add(hello == null
+                                    ? new Screen(bus, address, vendor, product, name, "", "полоска не ответила — "
+                                    + "программа JONSBO закрыта?", link.text(), "")
+                                    : new Screen(bus, address, vendor, product, name, "полоска 640×180", null, link.text(),
+                                    hex(hello, 64)));
+                            continue;
+                        }
+
                         var reply = command(link, SYNC, new byte[0], null);
                         // Непонятный ответ тоже ценен: по сырым байтам видно, на что похож их протокол
                         var raw = reply == null ? rawRead(link) : null;
@@ -478,6 +601,12 @@ final class CaseScreens {
 
                     try {
                         drain(link);
+
+                        if (strip(screen.vendor(), screen.product())) {
+                            stripHello(link);
+                            return stripSend(link, image, brightness) ? null : "полоска не подтвердила картинку";
+                        }
+
                         command(link, SYNC, new byte[0], null);
                         // Свой ролик или обои экрана — остановить, иначе он перерисует нашу картинку
                         command(link, STOP_PLAYBACK, new byte[0], null);
@@ -528,7 +657,19 @@ final class CaseScreens {
         private DeviceHandle handle;
         private Link link;
 
+        private final boolean strip;
+        private int level;
+
         Session(Screen screen, int brightness) throws IOException {
+            this(screen, brightness, 0);
+        }
+
+        /** @param nth какой по счёту из одинаковых экранов (две полоски — одна модель) */
+        Session(Screen screen, int brightness, int nth) throws IOException {
+            strip = strip(screen.vendor(), screen.product());
+            level = brightness;
+            var skip = nth;
+
             if (LibUsb.init(context) != LibUsb.SUCCESS) {
                 throw new IOException("libusb не запустилась");
             }
@@ -541,6 +682,10 @@ final class CaseScreens {
                 if (LibUsb.getDeviceDescriptor(device, descriptor) != LibUsb.SUCCESS
                         || (descriptor.idVendor() & 0xffff) != screen.vendor()
                         || (descriptor.idProduct() & 0xffff) != screen.product()) {
+                    continue;
+                }
+
+                if (skip-- > 0) {
                     continue;
                 }
 
@@ -572,6 +717,12 @@ final class CaseScreens {
             }
 
             drain(link);
+
+            if (strip) {
+                stripHello(link);
+                return;
+            }
+
             command(link, SYNC, new byte[0], null);
             command(link, STOP_PLAYBACK, new byte[0], null);
 
@@ -594,12 +745,22 @@ final class CaseScreens {
         }
 
         void brightness(int percent) {
+            level = percent;
+
+            if (strip) {
+                return;
+            }
+
             command(link, BRIGHTNESS, new byte[] {(byte) Math.round(Math.max(0, Math.min(100, percent)) * 102 / 100.0)},
                     null);
         }
 
         /** Кадр на экран; false — экран не принял (отключили или сбой). */
         boolean show(BufferedImage image) throws IOException {
+            if (strip) {
+                return stripSend(link, image, level);
+            }
+
             var reply = send(link, image);
             return reply != null && (reply[1] & 0xff) == 0xc8;
         }

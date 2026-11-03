@@ -1200,6 +1200,26 @@ class DeviceTest {
     }
 
     @Test
+    void turzxStripFrameMatchesJonsbo() {
+        // Как в записи USB программы JONSBO: 720 блоков по 512 байт, номер блока с 1 старшим байтом вперёд
+        var image = new java.awt.image.BufferedImage(640, 180, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        image.setRGB(0, 179, 0x112233);
+        image.setRGB(1, 179, 0xAABBCC);
+        var frame = CaseScreens.stripFrame(image, 100);
+        assertEquals(720 * 512, frame.length);
+        assertEquals("aa550000000000000000020001000000000000000000000000000000000000bb",
+                Tuya.hex(java.util.Arrays.copyOfRange(frame, 0, 32)).toLowerCase());
+        assertEquals("aa550000000000000000020100000000000000000000000000000000000000bb",
+                Tuya.hex(java.util.Arrays.copyOfRange(frame, 255 * 512, 255 * 512 + 32)).toLowerCase());
+        // Первая точка — левый нижний угол, байты BGR; столбец 180 точек снизу вверх, потом следующий
+        assertEquals("332211", Tuya.hex(java.util.Arrays.copyOfRange(frame, 32, 35)).toLowerCase());
+        var second = 32 + 180 * 3 - 160 * 3 + 512 + 0;
+        assertEquals("ccbbaa", Tuya.hex(java.util.Arrays.copyOfRange(frame, second, second + 3)).toLowerCase());
+        assertEquals("TURZX 3.38″ полоса", CaseScreens.model(0x43a8, 0x0e61).name());
+        assertTrue(CaseScreens.strip(0x43a8, 0x0e61) && !CaseScreens.strip(0x1cbe, 0x0035));
+    }
+
+    @Test
     void telegramProxyFromFlowsealRelease(@org.junit.jupiter.api.io.TempDir java.nio.file.Path home) throws Exception {
         var json = "{\"tag_name\":\"v1.6.2\",\"assets\":[{\"name\":\"TgWsProxy_windows_7_64bit.exe\",\"browser_download_url\":\"a\"},"
                 + "{\"name\":\"TgWsProxy_windows.exe\",\"browser_download_url\":\"b\"},"
@@ -1389,7 +1409,7 @@ class DeviceTest {
         assertEquals(640, guess.width(), "по фото: 320×480 заняла левую половину");
         assertEquals(480, guess.height());
         assertFalse(guess.exact(), "3,5″ — по коду, не проверено");
-        assertNull(CaseScreens.model(0x43a8, 0x0e61), "чужой производитель — не угадываем");
+        assertNull(CaseScreens.model(0x43a8, 0x0e62), "чужой производитель — не угадываем");
 
         // PNG с прозрачностью и подписью PNG
         var png = CaseScreens.png(CaseScreens.testPattern(320, 480, "x"));

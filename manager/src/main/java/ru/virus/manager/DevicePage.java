@@ -2125,7 +2125,15 @@ final class DevicePage extends Ui.Card {
         var body = Ui.transparent(new BorderLayout(0, 10));
         body.add(head, BorderLayout.NORTH);
         body.add(screenRows, BorderLayout.CENTER);
-        body.add(boardStatus, BorderLayout.SOUTH);
+        var statuses = Ui.transparent(null);
+        statuses.setLayout(new BoxLayout(statuses, BoxLayout.Y_AXIS));
+        statuses.add(left(boardStatus));
+        statuses.add(left(stripStatus));
+        body.add(statuses, BorderLayout.SOUTH);
+
+        if (settings.stripBoard && !settings.allDark) {
+            startStrips();
+        }
 
         if (settings.screenBoard && !settings.screenId.isBlank() && !settings.allDark) {
             startBoard();
@@ -2159,6 +2167,10 @@ final class DevicePage extends Ui.Card {
     }
 
     private synchronized void startBoard() {
+        if (settings.stripBoard && !settings.allDark) {
+            startStrips();
+        }
+
         if (board != null && board.isAlive()) {
             return;
         }
@@ -2197,6 +2209,10 @@ final class DevicePage extends Ui.Card {
                 });
             });
         } else {
+            if (settings.stripBoard) {
+                startStrips();
+            }
+
             if (settings.screenBoard && !settings.screenId.isBlank()) {
                 startBoard();
             } else {
@@ -2211,16 +2227,20 @@ final class DevicePage extends Ui.Card {
     private String darkenScreens() {
         String problem = null;
 
+        var seen = new java.util.HashMap<String, Integer>();
+
         for (var screen : CaseScreens.probe()) {
             if (!screen.answers()) {
                 continue;
             }
 
+            var nth = seen.merge(screen.id(), 1, Integer::sum) - 1;
+
             var size = settings.screenSize.split("×");
             var black = new java.awt.image.BufferedImage(Integer.parseInt(size[0]), Integer.parseInt(size[1]),
                     java.awt.image.BufferedImage.TYPE_INT_RGB);
 
-            try (var session = new CaseScreens.Session(screen, 0)) {
+            try (var session = new CaseScreens.Session(screen, 0, nth)) {
                 session.show(black);
                 session.brightness(0);
             } catch (Exception e) {
@@ -2234,25 +2254,113 @@ final class DevicePage extends Ui.Card {
     /** Остановить табло и дождаться, пока оно отпустит экран; true — оно работало. */
     private boolean pauseBoard() {
         Thread running;
+        Thread stripsRunning;
 
         synchronized (this) {
             running = board;
+            stripsRunning = strips;
         }
 
-        if (running == null || !running.isAlive()) {
+        var main = running != null && running.isAlive();
+        var side = stripsRunning != null && stripsRunning.isAlive();
+
+        if (!main && !side) {
             return false;
         }
 
         stopBoard();
+        stopStrips();
 
         try {
-            running.join(4000);
+            if (main) {
+                running.join(4000);
+            }
+
+            if (side) {
+                stripsRunning.join(4000);
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
 
         return true;
     }
+
+    /** Табло на полосках TURZX-338: свой поток, обе полоски сразу. */
+    private volatile Thread strips;
+
+    private synchronized void startStrips() {
+        if (strips != null && strips.isAlive()) {
+            return;
+        }
+
+        strips = new Thread(this::runStrips, "virus-case-strips");
+        strips.setDaemon(true);
+        strips.start();
+    }
+
+    private synchronized void stopStrips() {
+        if (strips != null) {
+            strips.interrupt();
+            strips = null;
+        }
+    }
+
+    private void runStrips() {
+        var me = Thread.currentThread();
+        var screen = new CaseScreens.Screen(0, 0, CaseScreens.VID_TURZX_R & 0xffff, 0x0e61, "", "", null);
+
+        while (strips == me && settings.stripBoard && !settings.allDark) {
+            var sessions = new java.util.ArrayList<CaseScreens.Session>();
+
+            try {
+                for (var n = 0; n < 4; n++) {
+                    try {
+                        sessions.add(new CaseScreens.Session(screen, Math.max(30, glow.brightness), n));
+                    } catch (IOException e) {
+                        if (n == 0) {
+                            throw e;
+                        }
+
+                        break;
+                    }
+                }
+
+                var count = sessions.size();
+                SwingUtilities.invokeLater(() -> stripStatus.setText("Полоски: табло на " + count + " шт."));
+
+                while (strips == me && settings.stripBoard && !settings.allDark) {
+                    var frame = ScreenBoard.render(CaseScreens.STRIP_WIDTH, CaseScreens.STRIP_HEIGHT, processes);
+
+                    for (var session : sessions) {
+                        session.brightness(Math.max(30, glow.brightness));
+
+                        if (!session.show(frame)) {
+                            throw new IOException("полоска перестала принимать кадры");
+                        }
+                    }
+
+                    Thread.sleep(2000);
+                }
+            } catch (InterruptedException e) {
+                return;
+            } catch (Exception e) {
+                var closed = freeScreens();
+                SwingUtilities.invokeLater(() -> stripStatus.setText("Полоски: " + e.getMessage() + (closed
+                        ? ". Закрыл программу JONSBO, пробую снова." : ". Пробую снова через 10 секунд.")));
+
+                try {
+                    Thread.sleep(10_000);
+                } catch (InterruptedException stop) {
+                    return;
+                }
+            } finally {
+                sessions.forEach(CaseScreens.Session::close);
+            }
+        }
+    }
+
+    private final JLabel stripStatus = Ui.muted("", 12.5f);
 
     private synchronized void stopBoard() {
         if (board != null) {
@@ -2351,6 +2459,16 @@ final class DevicePage extends Ui.Card {
      * (3,5″ на материнке — 640×480). Один раз: дальше решает переключатель.
      */
     private void autoBoard(List<CaseScreens.Screen> found) {
+        // Полоски TURZX-338 — табло на них само, один раз
+        if (!settings.allDark && !settings.stripAuto
+                && found.stream().anyMatch(screen -> screen.answers() && CaseScreens.strip(screen.vendor(), screen.product()))) {
+            settings.stripAuto = true;
+            settings.stripBoard = true;
+            settings.save();
+            startStrips();
+            toast.accept("На верхние полоски выведено табло с процессами (640×180).");
+        }
+
         if (settings.allDark || settings.screenAuto || (settings.screenBoard && !settings.screenId.isBlank())) {
             return;
         }
@@ -2407,6 +2525,48 @@ final class DevicePage extends Ui.Card {
             }
 
             if (!screen.answers()) {
+                continue;
+            }
+
+            // Полоски TURZX-338: размер известен (640×180), обе ведёт одно табло
+            if (CaseScreens.strip(screen.vendor(), screen.product())) {
+                row = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 4));
+                row.setBorder(BorderFactory.createEmptyBorder(0, 6, 0, 0));
+                var stripLive = new Ui.Switch(settings.stripBoard);
+                stripLive.onChange(on -> {
+                    settings.stripBoard = on;
+                    settings.save();
+
+                    if (on) {
+                        startStrips();
+                    } else {
+                        stopStrips();
+                        stripStatus.setText("");
+                    }
+                });
+                row.add(stripLive);
+                row.add(Ui.muted("табло с процессами на полосках (640×180, обе сразу)", 12.5f));
+                var stripTest = Ui.button("Тестовая картинка");
+                stripTest.addActionListener(e -> {
+                    stripTest.setEnabled(false);
+                    worker.submit(() -> {
+                        var resume = pauseBoard();
+                        var problem = CaseScreens.show(screen, CaseScreens.testPattern(CaseScreens.STRIP_WIDTH,
+                                CaseScreens.STRIP_HEIGHT, screen.id()), Math.max(30, glow.brightness));
+
+                        if (resume) {
+                            new Timer(15_000, t -> startBoard()) {{ setRepeats(false); }}.start();
+                        }
+
+                        SwingUtilities.invokeLater(() -> {
+                            stripTest.setEnabled(true);
+                            toast.accept(problem == null ? "Тестовая картинка ушла на полоску." : "Полоска: " + problem);
+                        });
+                    });
+                });
+                row.add(stripTest);
+                row.setAlignmentX(LEFT_ALIGNMENT);
+                screenRows.add(row);
                 continue;
             }
 
@@ -4124,6 +4284,9 @@ final class DevicePage extends Ui.Card {
         boolean moreOpen;
         /** Табло уже само включалось на найденном экране — второй раз не навязываем. */
         boolean screenAuto;
+        /** Табло на полосках TURZX-338 (их две, одна модель) и включалось ли оно само. */
+        boolean stripBoard;
+        boolean stripAuto;
         /** Лампы Smart Life (Tuya) по Wi-Fi: включены и какие (с локальными ключами — их не показываем). */
         boolean tuyaLamps;
         List<TuyaLamps.Lamp> tuya = List.of();
@@ -4210,6 +4373,8 @@ final class DevicePage extends Ui.Card {
                     settings.screenBoard = Boolean.TRUE.equals(json.get("screenBoard"));
                     settings.moreOpen = Boolean.TRUE.equals(json.get("moreOpen"));
                     settings.screenAuto = Boolean.TRUE.equals(json.get("screenAuto"));
+                    settings.stripBoard = Boolean.TRUE.equals(json.get("stripBoard"));
+                    settings.stripAuto = Boolean.TRUE.equals(json.get("stripAuto"));
                     settings.tuyaLamps = Boolean.TRUE.equals(json.get("tuyaLamps"));
                     settings.tuyaRegion = json.get("tuyaRegion") instanceof String text ? text : "";
                     settings.tuyaAccessId = json.get("tuyaAccessId") instanceof String text ? text : "";
@@ -4323,6 +4488,8 @@ final class DevicePage extends Ui.Card {
             json.put("screenBoard", screenBoard);
             json.put("moreOpen", moreOpen);
             json.put("screenAuto", screenAuto);
+            json.put("stripBoard", stripBoard);
+            json.put("stripAuto", stripAuto);
             json.put("tuyaLamps", tuyaLamps);
             json.put("tuyaRegion", tuyaRegion);
             json.put("tuyaAccessId", tuyaAccessId);

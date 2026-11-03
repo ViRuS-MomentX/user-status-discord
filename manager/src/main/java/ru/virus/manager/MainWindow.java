@@ -806,6 +806,12 @@ final class MainWindow extends JFrame {
                 && (process.state() == ManagedProcess.State.FAILED || process.state() == ManagedProcess.State.WAITING))
                 .findFirst().ifPresent(this::healZapret);
 
+        // Telegram-прокси запустили, а файла нет (ещё не скачан или удалён антивирусом) — скачать и запустить
+        all.stream().filter(process -> process.spec().id().equals(TgProxy.ID)
+                && (process.state() == ManagedProcess.State.FAILED || process.state() == ManagedProcess.State.WAITING)
+                && !java.nio.file.Files.isRegularFile(new TgProxy(supervisor.home()).exe()))
+                .findFirst().ifPresent(process -> healTelegram());
+
         // Состояние процессов — на табло экрана в корпусе: id → «off», «start», «run», «error»
         var states = new java.util.LinkedHashMap<String, String>();
         var now = System.currentTimeMillis();
@@ -865,6 +871,38 @@ final class MainWindow extends JFrame {
         }
 
         return updated ? "Telegram-прокси обновлён до " + proxy.version() + "." : null;
+    }
+
+    private long telegramHealedAt;
+
+    private void healTelegram() {
+        var now = System.currentTimeMillis();
+
+        if (now - telegramHealedAt < 10 * 60_000) {
+            return;
+        }
+
+        telegramHealedAt = now;
+        var process = supervisor.get(TgProxy.ID);
+
+        if (process != null) {
+            process.stop();
+        }
+
+        toast("Telegram-прокси ещё не скачан — скачиваю с GitHub Flowseal…");
+        worker.submit(() -> {
+            String result;
+
+            try {
+                result = telegram(false);
+                result = result == null ? "Telegram-прокси скачан и запущен." : result;
+            } catch (Exception e) {
+                result = "Telegram-прокси: " + e.getMessage();
+            }
+
+            var text = result;
+            SwingUtilities.invokeLater(() -> toast(text));
+        });
     }
 
     private long zapretHealedAt;

@@ -127,7 +127,37 @@ final class TgProxy {
 
         Files.move(part, exe(), StandardCopyOption.REPLACE_EXISTING);
         Files.writeString(folder().resolve("version.txt"), release.tag(), StandardCharsets.UTF_8);
+        Thread.sleep(3000);
+
+        if (!Files.isRegularFile(exe())) {
+            throw new IOException(removedBy());
+        }
+
         return true;
+    }
+
+    /** Почему файл пропал: спросить Защитника. */
+    static String removedBy() {
+        try {
+            var process = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                    "Get-MpThreatDetection -ErrorAction Stop | Where-Object { ($_.Resources -join ' ') -match 'TgWsProxy' } | "
+                            + "Select-Object -First 1 | ForEach-Object { (Get-MpThreat -ThreatID $_.ThreatID).ThreatName }")
+                    .redirectErrorStream(true).start();
+            process.getOutputStream().close();
+            var name = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
+            process.waitFor(20, java.util.concurrent.TimeUnit.SECONDS);
+
+            if (!name.isEmpty() && !name.contains("Exception") && !name.startsWith("Get-")) {
+                return "Защитник Windows удалил TgWsProxy.exe (" + name + "). Flowseal пишет, что это ложная тревога из-за "
+                        + "упаковщика. Если доверяешь — «Безопасность Windows → Журнал защиты» → «Разрешить», потом нажми "
+                        + "«Telegram» в zapret ещё раз";
+            }
+        } catch (Exception ignored) {
+            // не узнали
+        }
+
+        return "TgWsProxy.exe пропал сразу после скачивания — похоже, его удалил антивирус. Проверь журнал защиты и "
+                + "нажми «Telegram» в zapret ещё раз";
     }
 
     /**

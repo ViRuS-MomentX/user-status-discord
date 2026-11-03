@@ -711,7 +711,7 @@ final class Zapret {
                 "  }",
                 "}",
                 "$info = Join-Path $PSScriptRoot 'installed.txt'",
-                "Write-Output ('zapret работает: ' + (Get-Content $info -ErrorAction SilentlyContinue))",
+                "Write-Output ('zapret работает: ' + (Get-Content $info -Encoding UTF8 -ErrorAction SilentlyContinue))",
                 // Не [Console]::In: его ReadLineAsync в PowerShell 5.1 на деле ждёт строку и не даёт следить за службой
                 "$reader = New-Object System.IO.StreamReader([Console]::OpenStandardInput())",
                 "$next = $reader.ReadLineAsync()",

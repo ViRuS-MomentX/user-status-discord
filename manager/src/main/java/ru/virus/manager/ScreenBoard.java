@@ -145,13 +145,13 @@ final class ScreenBoard {
         }
     }
 
-    private static double hash(int n) {
+    static double hash(int n) {
         var x = Math.sin(n * 12.9898 + 78.233) * 43758.5453;
         return x - Math.floor(x);
     }
 
     /** Лёгкие строки развёртки — для вида старого монитора. */
-    private static void scanlines(Graphics2D g, int width, int height) {
+    static void scanlines(Graphics2D g, int width, int height) {
         g.setColor(new Color(0, 0, 0, 34));
 
         for (var y = 0; y < height; y += 3) {
@@ -160,7 +160,7 @@ final class ScreenBoard {
     }
 
     /** Эмблема V.I.R.U.S. в центре между плитками — только для красоты. */
-    private static void emblem(Graphics2D g, float cx, float cy, float r) {
+    static void emblem(Graphics2D g, float cx, float cy, float r) {
         g.setColor(BG);
         g.fill(new Ellipse2D.Float(cx - r, cy - r, r * 2, r * 2));
         g.setPaint(new RadialGradientPaint(cx, cy, r * 1.6f, new float[] {0f, 1f},
@@ -178,7 +178,7 @@ final class ScreenBoard {
     }
 
     /** Уголки-скобки по краям плитки, как прицел HUD. */
-    private static void brackets(Graphics2D g, int x, int y, int w, int h, Color color) {
+    static void brackets(Graphics2D g, int x, int y, int w, int h, Color color) {
         var len = Math.min(w, h) * 0.12f;
         var inset = Math.min(w, h) * 0.07f;
         g.setStroke(new BasicStroke(Math.max(1.5f, Math.min(w, h) / 90f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));

@@ -200,6 +200,7 @@ final class DevicePage extends Ui.Card {
         this.toast = toast;
         this.bridgeApi = bridgeApi;
         this.home = home;
+        this.games = new GameNow(home);
         this.settings = Settings.load(home.resolve("device.json"));
         rotateSpinner.setValue(settings.rotateMinutes);
         this.glow = new SignalRgb.Live(DevicePage::cpuLoad);
@@ -2329,18 +2330,43 @@ final class DevicePage extends Ui.Card {
                 var count = sessions.size();
                 SwingUtilities.invokeLater(() -> stripStatus.setText("Полоски: табло на " + count + " шт."));
 
-                while (strips == me && settings.stripBoard && !settings.allDark) {
-                    var frame = ScreenBoard.render(CaseScreens.STRIP_WIDTH, CaseScreens.STRIP_HEIGHT, processes);
+                media.start();
+                var lastGamePoll = 0L;
 
-                    for (var session : sessions) {
+                while (strips == me && settings.stripBoard && !settings.allDark) {
+                    var now = System.currentTimeMillis();
+
+                    if (now - lastGamePoll > 10_000) {
+                        lastGamePoll = now;
+                        games.poll();
+                    }
+
+                    // Музыка и игра занимают свободные полоски по очереди, остальные — живой фон
+                    var activities = new java.util.ArrayList<java.awt.image.BufferedImage>();
+                    var track = media.now();
+                    var game = games.now();
+
+                    if (track != null) {
+                        activities.add(ActivityBoard.music(CaseScreens.STRIP_WIDTH, CaseScreens.STRIP_HEIGHT, track, now));
+                    }
+
+                    if (game != null) {
+                        activities.add(ActivityBoard.game(CaseScreens.STRIP_WIDTH, CaseScreens.STRIP_HEIGHT, game,
+                                games.icon(game), now));
+                    }
+
+                    var idle = ActivityBoard.idle(CaseScreens.STRIP_WIDTH, CaseScreens.STRIP_HEIGHT, now);
+
+                    for (var i = 0; i < sessions.size(); i++) {
+                        var session = sessions.get(i);
                         session.brightness(Math.max(30, glow.brightness));
 
-                        if (!session.show(frame)) {
+                        if (!session.show(i < activities.size() ? activities.get(i) : idle)) {
                             throw new IOException("полоска перестала принимать кадры");
                         }
                     }
 
-                    Thread.sleep(2000);
+                    Thread.sleep(400);
                 }
             } catch (InterruptedException e) {
                 return;
@@ -2361,6 +2387,9 @@ final class DevicePage extends Ui.Card {
     }
 
     private final JLabel stripStatus = Ui.muted("", 12.5f);
+    /** Что играет в Spotify и какая игра запущена — для полосок. */
+    private final MediaNow media = new MediaNow();
+    private final GameNow games;
 
     private synchronized void stopBoard() {
         if (board != null) {
@@ -2545,7 +2574,7 @@ final class DevicePage extends Ui.Card {
                     }
                 });
                 row.add(stripLive);
-                row.add(Ui.muted("табло с процессами на полосках (640×180, обе сразу)", 12.5f));
+                row.add(Ui.muted("полоски: музыка из Spotify и запущенная игра, в простое — живой фон (640×180)", 12.5f));
                 var stripTest = Ui.button("Тестовая картинка");
                 stripTest.addActionListener(e -> {
                     stripTest.setEnabled(false);

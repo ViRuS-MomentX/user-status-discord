@@ -1200,6 +1200,34 @@ class DeviceTest {
     }
 
     @Test
+    void stripsShowMusicGameOrIdle() {
+        var media = new MediaNow();
+        assertNull(media.now());
+        media.accept("{\"title\":\"Песня\",\"artist\":\"Группа\",\"album\":\"Альбом\",\"playing\":true,\"position\":1000,\"duration\":200000}");
+        var track = media.now();
+        assertEquals("Песня", track.title());
+        assertTrue(track.position(track.at() + 5000) >= 6000, "позиция тикает, пока играет");
+        media.accept("none");
+        assertNull(media.now());
+        assertEquals("1:02:05", ActivityBoard.time(3_725_000));
+        assertEquals("3:34", ActivityBoard.time(214_000));
+
+        var games = GameNow.parse("[{\"id\":\"42\",\"name\":\"Игра\",\"icon\":\"abc\",\"executables\":["
+                + "{\"is_launcher\":false,\"name\":\"bin/MyGame.exe\",\"os\":\"win32\"},"
+                + "{\"is_launcher\":true,\"name\":\"mylauncher.exe\",\"os\":\"win32\"},"
+                + "{\"is_launcher\":false,\"name\":\"game.exe\",\"os\":\"win32\"}]}]");
+        assertEquals("Игра", games.get("mygame.exe").name());
+        assertNull(games.get("mylauncher.exe"), "лаунчер — не игра");
+        assertNull(games.get("game.exe"), "слишком общее имя");
+
+        for (var image : List.of(ActivityBoard.idle(640, 180, 0), ActivityBoard.music(640, 180, track, 0),
+                ActivityBoard.game(640, 180, new GameNow.Game("42", "Игра", "", 0), null, 1000))) {
+            assertEquals(640, image.getWidth());
+            assertEquals(180, image.getHeight());
+        }
+    }
+
+    @Test
     void turzxStripFrameMatchesJonsbo() {
         // Как в записи USB программы JONSBO: 720 блоков по 512 байт, номер блока с 1 старшим байтом вперёд
         var image = new java.awt.image.BufferedImage(640, 180, java.awt.image.BufferedImage.TYPE_INT_RGB);

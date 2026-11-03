@@ -407,6 +407,13 @@ final class CaseScreens {
         g.drawImage(source, 0, 0, STRIP_WIDTH, STRIP_HEIGHT, null);
         g.dispose();
         var level = Math.max(0, Math.min(100, brightness)) / 100.0;
+        var pixels = image.getRGB(0, 0, STRIP_WIDTH, STRIP_HEIGHT, null, 0, STRIP_WIDTH);
+        var scale = new byte[256];
+
+        for (var v = 0; v < 256; v++) {
+            scale[v] = (byte) Math.round(v * level);
+        }
+
         var frame = new byte[STRIP_BLOCKS * 512];
         var zero = new byte[8];
         var k = 0;
@@ -418,11 +425,11 @@ final class CaseScreens {
             for (var i = 0; i < 160; i++, k++) {
                 var x = k / STRIP_HEIGHT;
                 var y = STRIP_HEIGHT - 1 - k % STRIP_HEIGHT;
-                var rgb = image.getRGB(x, y);
+                var rgb = pixels[y * STRIP_WIDTH + x];
                 var at = base + 32 + i * 3;
-                frame[at] = (byte) Math.round((rgb & 0xff) * level);
-                frame[at + 1] = (byte) Math.round(((rgb >> 8) & 0xff) * level);
-                frame[at + 2] = (byte) Math.round(((rgb >> 16) & 0xff) * level);
+                frame[at] = scale[rgb & 0xff];
+                frame[at + 1] = scale[(rgb >> 8) & 0xff];
+                frame[at + 2] = scale[(rgb >> 16) & 0xff];
             }
         }
 
@@ -479,7 +486,8 @@ final class CaseScreens {
             }
         }
 
-        stripReply(link, 300);
+        // Подтверждение не ждём (полоска отвечает не всегда) — только забираем, если уже пришло
+        stripReply(link, 1);
         return null;
     }
 

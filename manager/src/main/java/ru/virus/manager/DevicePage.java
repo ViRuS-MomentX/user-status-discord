@@ -2355,18 +2355,26 @@ final class DevicePage extends Ui.Card {
                                 games.icon(game), now));
                     }
 
-                    var idle = ActivityBoard.idle(CaseScreens.STRIP_WIDTH, CaseScreens.STRIP_HEIGHT, now);
+                    var idle = activities.size() >= sessions.size() ? null
+                            : ActivityBoard.idle(CaseScreens.STRIP_WIDTH, CaseScreens.STRIP_HEIGHT, now);
+                    // Полоски — параллельно, ~20 кадров в секунду, как у JONSBO
+                    var sends = new java.util.ArrayList<java.util.concurrent.Future<Boolean>>();
 
                     for (var i = 0; i < sessions.size(); i++) {
                         var session = sessions.get(i);
+                        var picture = i < activities.size() ? activities.get(i) : idle;
                         session.brightness(Math.max(30, glow.brightness));
+                        sends.add(stripPool.submit(() -> session.show(picture)));
+                    }
 
-                        if (!session.show(i < activities.size() ? activities.get(i) : idle)) {
+                    for (var send : sends) {
+                        if (!send.get()) {
                             throw new IOException("полоска перестала принимать кадры");
                         }
                     }
 
-                    Thread.sleep(400);
+                    var spent = System.currentTimeMillis() - now;
+                    Thread.sleep(Math.max(5, 50 - spent));
                 }
             } catch (InterruptedException e) {
                 return;
@@ -2387,6 +2395,11 @@ final class DevicePage extends Ui.Card {
     }
 
     private final JLabel stripStatus = Ui.muted("", 12.5f);
+    private final java.util.concurrent.ExecutorService stripPool = java.util.concurrent.Executors.newFixedThreadPool(4, r -> {
+        var thread = new Thread(r, "virus-strip-send");
+        thread.setDaemon(true);
+        return thread;
+    });
     /** Что играет в Spotify и какая игра запущена — для полосок. */
     private final MediaNow media = new MediaNow();
     private final GameNow games;

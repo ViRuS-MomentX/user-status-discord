@@ -341,6 +341,10 @@ final class MainWindow extends JFrame {
             }
         });
         new Timer(90_000, e -> telegramUpdate.run()) {{ setRepeats(false); }}.start();
+        // «Слушает Spotify» в Discord — Music Presence, тихо и без настроек: держим запущенным
+        Runnable musicPresence = () -> worker.submit(() -> MusicPresence.keep(supervisor.home()));
+        new Timer(25_000, e -> musicPresence.run()) {{ setRepeats(false); }}.start();
+        new Timer(2 * 60_000, e -> musicPresence.run()).start();
         new Timer(6 * 60 * 60_000, e -> telegramUpdate.run()).start();
         new Timer(6 * 60 * 60_000, e -> zapretUpdate.run()).start();
 

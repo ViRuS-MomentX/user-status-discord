@@ -1200,6 +1200,18 @@ class DeviceTest {
     }
 
     @Test
+    void musicPresenceComesFromItsWindowsZip(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
+        var json = "{\"assets\":[{\"name\":\"musicpresence-2.3.6-windows-x64-installer.exe\",\"browser_download_url\":\"a\"},"
+                + "{\"name\":\"musicpresence-2.3.6-windows-x64.zip\",\"browser_download_url\":\"b\"}]}";
+        assertEquals("b", MusicPresence.zipUrl(json));
+        assertNull(MusicPresence.exe(dir));
+        var app = java.nio.file.Files.createDirectories(dir.resolve("app/Music Presence"));
+        java.nio.file.Files.writeString(app.resolve("uninstall-presence.exe"), "");
+        java.nio.file.Files.writeString(app.resolve("Music Presence.exe"), "");
+        assertEquals("Music Presence.exe", MusicPresence.exe(dir).getFileName().toString());
+    }
+
+    @Test
     void stripsShowMusicGameOrIdle() {
         var media = new MediaNow();
         assertNull(media.now());

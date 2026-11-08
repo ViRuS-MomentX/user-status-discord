@@ -16,11 +16,18 @@ import java.util.function.Consumer;
  */
 final class SleepStand {
 
-    /** Показание: граммы (-1 — весов нет) и контакт (кнопка, концевик или геркон). */
-    record Reading(int grams, boolean contact) {
+    /**
+     * Показание: граммы (-1 — весов нет), контакт (метка RFID, кнопка, датчик
+     * на D4) и сила магнита на аналоговом датчике Холла (-1 — старая прошивка).
+     */
+    record Reading(int grams, boolean contact, int magnet) {
 
-        boolean placed(int threshold) {
-            return contact || grams >= threshold;
+        Reading(int grams, boolean contact) {
+            this(grams, contact, -1);
+        }
+
+        boolean placed(int threshold, int magnetThreshold) {
+            return contact || grams >= threshold || magnet >= magnetThreshold;
         }
     }
 
@@ -36,6 +43,7 @@ final class SleepStand {
     private volatile String port = "";
     private volatile boolean asleep;
     private volatile int threshold = 250;
+    private volatile int magnetThreshold = 20;
     private Thread thread;
     private Boolean candidate;
     private long candidateSince;
@@ -53,6 +61,11 @@ final class SleepStand {
         threshold = Math.max(20, grams);
     }
 
+    /** С какой силы магнита «фигурка стоит» (без неё обычно 0–3). */
+    void magnetThreshold(int value) {
+        magnetThreshold = Math.max(3, value);
+    }
+
     Reading last() {
         return last;
     }
@@ -65,12 +78,13 @@ final class SleepStand {
     static Reading parse(String line) {
         var parts = line.strip().split("\\s+");
 
-        if (parts.length != 3 || !parts[0].equals("VIRUS-STAND")) {
+        if (parts.length < 3 || parts.length > 4 || !parts[0].equals("VIRUS-STAND")) {
             return null;
         }
 
         try {
-            return new Reading(Integer.parseInt(parts[1]), parts[2].equals("1"));
+            return new Reading(Integer.parseInt(parts[1]), parts[2].equals("1"),
+                    parts.length == 4 ? Integer.parseInt(parts[3]) : -1);
         } catch (NumberFormatException e) {
             return null;
         }
@@ -84,7 +98,7 @@ final class SleepStand {
      */
     synchronized Boolean feed(Reading reading, long now) {
         last = reading;
-        var placed = reading.placed(threshold);
+        var placed = reading.placed(threshold, magnetThreshold);
 
         if (candidate == null || candidate != placed) {
             candidate = placed;
@@ -156,7 +170,7 @@ final class SleepStand {
                             port = line.substring(5);
                             status.accept("Подставка: плата на " + port + ".");
                         } else if (line.startsWith("VIRUS-STAND-OK")) {
-                            status.accept(line.contains("tare") ? "Подставка: весы обнулены." : "Подставка: весы откалиброваны.");
+                            status.accept(line.contains("tare") ? "Подставка: «пусто» запомнено." : "Подставка: весы откалиброваны.");
                         } else {
                             var reading = parse(line);
 

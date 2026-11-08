@@ -1217,7 +1217,10 @@ class DeviceTest {
         assertNull(stand.feed(figure, 6000), "уже спит");
         assertNull(stand.feed(empty, 7000));
         assertEquals(Boolean.FALSE, stand.feed(empty, 9100), "убрали — просыпаться");
-        assertTrue(new SleepStand.Reading(-1, true).placed(250), "контакт (геркон, кнопка) — тоже стоит");
+        assertTrue(new SleepStand.Reading(-1, true).placed(250, 20), "контакт (метка, кнопка) — тоже стоит");
+        assertEquals(new SleepStand.Reading(-1, false, 37), SleepStand.parse("VIRUS-STAND -1 0 37"));
+        assertTrue(SleepStand.parse("VIRUS-STAND -1 0 37").placed(250, 20), "магнит сильнее порога — стоит");
+        assertFalse(SleepStand.parse("VIRUS-STAND -1 0 2").placed(250, 20), "без фигурки поле почти 0");
         assertEquals("381b4222-f694-41f0-9685-ff5bb260df2e",
                 Power.guid("GUID схемы питания: 381b4222-f694-41f0-9685-ff5bb260df2e  (Сбалансированная)"));
         assertTrue(DevicePage.class.getResourceAsStream("virus_stand.ino") != null, "прошивка лежит в программе");

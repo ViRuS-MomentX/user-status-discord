@@ -3,12 +3,17 @@
 // убираешь — всё возвращается. Плата: Arduino Nano/Uno, связь с V.I.R.U.S. по USB.
 //
 // Датчик — любой (можно несколько):
+//  М) Магнит в фигурке + АНАЛОГОВЫЙ датчик Холла (KY-035 «Analog Hall» или
+//     KY-024 «Linear Hall» из 37 Sensor Kit) под столом. Плата меряет силу
+//     поля сама — работает сквозь толстую столешницу, любым полюсом магнита.
+//     KY-035: S → A0, средний (+) → 5V, − → GND.
+//     KY-024: A0 → A0, + → 5V, G → GND (D0 не нужен).
 //  0) RFID (лучше всего, есть в GyverKIT EXTRA): брелок или карта — в фигурке,
 //     считыватель RC522 — под площадкой. Реагирует только на метку, сквозь
 //     дерево или пластик до ~3 см. RC522: SDA → D10, SCK → D13, MOSI → D11,
 //     MISO → D12, RST → D9, 3.3V → 3.3V (не 5V!), GND → GND.
 //     Нужна библиотека MFRC522 (есть в «Библиотеки к набору» GyverKIT или в
-//     Менеджере библиотек Arduino IDE). Без RFID поставь USE_RFID 0.
+//     Менеджере библиотек Arduino IDE) и USE_RFID 1 ниже.
 //  1) Весы: тензодатчик на 1–5 кг + модуль HX711.
 //     HX711: VCC → 5V, GND → GND, DT → D2, SCK → D3.
 //     Тензодатчик → HX711: красный E+, чёрный E-, белый A-, зелёный A+.
@@ -16,12 +21,13 @@
 //     с выходом S (датчик Холла KY-003 + магнит в фигурке, датчик
 //     препятствия смотрит вверх в отверстие): S → D4, + → 5V, − → GND.
 //
-// Раз в 0,2 с плата пишет: «VIRUS-STAND <граммы> <контакт>»
-// (граммы = -1, если весов нет; «контакт» 1 — метка RFID рядом или D4 замкнут).
-// Команды от V.I.R.U.S.: «t» — обнулить весы (на подставке пусто),
-// «c400» — калибровка: на подставке груз 400 г.
+// Раз в 0,2 с плата пишет: «VIRUS-STAND <граммы> <контакт> <магнит>»
+// (граммы = -1, если весов нет; «контакт» 1 — метка RFID рядом или D4 замкнут;
+// «магнит» — насколько поле на A0 отличается от «пусто», 0…512).
+// Команды от V.I.R.U.S.: «t» — запомнить «пусто» (фигурку убрать),
+// «c400» — калибровка весов: на подставке груз 400 г.
 
-#define USE_RFID 1
+#define USE_RFID 0  // 1 — если используешь RFID (нужна библиотека MFRC522)
 
 #include <EEPROM.h>
 #if USE_RFID
@@ -52,16 +58,25 @@ bool tagNear() {
 const byte DT_PIN = 2;
 const byte SCK_PIN = 3;
 const byte SWITCH_PIN = 4;
+const byte HALL_PIN = A0;
 const long NO_DATA = -2147483647L;
-const int MAGIC = 0x5649;  // «VI» — в памяти уже есть калибровка
+const int MAGIC = 0x5650;  // в памяти уже есть калибровка этой версии
 
 struct Calibration {
   int magic;
   long offset;
   float scale;  // отсчётов HX711 на грамм
+  int hallBase;  // A0 без фигурки
 };
 
-Calibration cal = {MAGIC, 0, 420.0};
+Calibration cal = {MAGIC, 0, 420.0, -1};
+
+// Среднее по 16 замерам — меньше шума
+int hallRead() {
+  long sum = 0;
+  for (byte i = 0; i < 16; i++) sum += analogRead(HALL_PIN);
+  return sum / 16;
+}
 bool scales = false;
 
 long readRaw() {
@@ -111,6 +126,8 @@ void setup() {
   pinMode(DT_PIN, INPUT);
   pinMode(SCK_PIN, OUTPUT);
   pinMode(SWITCH_PIN, INPUT_PULLUP);
+  // Подтяжка: без датчика на A0 там стабильные 1023, а не случайный шум
+  pinMode(HALL_PIN, INPUT_PULLUP);
   digitalWrite(SCK_PIN, LOW);
 #if USE_RFID
   SPI.begin();
@@ -126,8 +143,10 @@ void setup() {
 
   if (stored.magic == MAGIC && stored.scale > 0.01 && stored.scale < 100000.0) {
     cal = stored;
-  } else if (scales) {
-    cal.offset = now;  // первый запуск: считаем, что подставка пустая
+  } else {
+    // Первый запуск: считаем, что фигурки сейчас нет
+    if (scales) cal.offset = now;
+    cal.hallBase = hallRead();
     save();
   }
 }
@@ -135,13 +154,14 @@ void setup() {
 void command() {
   char c = Serial.read();
 
-  if (c == 't' && scales) {
-    long now = average(15);
-    if (now != NO_DATA) {
-      cal.offset = now;
-      save();
-      Serial.println("VIRUS-STAND-OK tare");
+  if (c == 't') {
+    if (scales) {
+      long now = average(15);
+      if (now != NO_DATA) cal.offset = now;
     }
+    cal.hallBase = hallRead();
+    save();
+    Serial.println("VIRUS-STAND-OK tare");
   } else if (c == 'c' && scales) {
     long grams = Serial.parseInt();
     long now = average(15);
@@ -174,7 +194,11 @@ void loop() {
 #endif
   Serial.print("VIRUS-STAND ");
   Serial.print(grams);
+  int hall = hallRead() - cal.hallBase;
+  if (hall < 0) hall = -hall;  // любой полюс магнита (abs в Arduino — макрос, не для функций)
   Serial.print(' ');
-  Serial.println(closed ? 1 : 0);
+  Serial.print(closed ? 1 : 0);
+  Serial.print(' ');
+  Serial.println(hall);
   delay(200);
 }

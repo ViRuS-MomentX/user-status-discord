@@ -2433,6 +2433,7 @@ final class DevicePage extends Ui.Card {
         var stack = Ui.transparent(null);
         stack.setLayout(new BoxLayout(stack, BoxLayout.Y_AXIS));
         stand.threshold(settings.standThreshold);
+        stand.magnetThreshold(settings.standMagnet);
         var on = new Ui.Switch(settings.standOn);
         on.onChange(value -> {
             settings.standOn = value;
@@ -2464,9 +2465,19 @@ final class DevicePage extends Ui.Card {
         tools.add(Ui.muted("срабатывает от", 12.5f));
         tools.add(threshold);
         tools.add(Ui.muted("г", 12.5f));
-        var tare = Ui.ghost("Обнулить весы");
-        tare.setToolTipText("Подставка пустая — запомнить это как ноль");
-        tare.addActionListener(e -> standStatus.setText(stand.send("t") ? "Подставка: обнуляю…" : "Подставка: плата не подключена."));
+        var magnet = new javax.swing.JSpinner(new javax.swing.SpinnerNumberModel(settings.standMagnet, 3, 500, 1));
+        magnet.setPreferredSize(new Dimension(64, magnet.getPreferredSize().height));
+        magnet.setToolTipText("Сила магнита, с которой «фигурка стоит». Посмотри «магнит: …» без фигурки и с ней и поставь посередине");
+        magnet.addChangeListener(e -> {
+            settings.standMagnet = (Integer) magnet.getValue();
+            stand.magnetThreshold(settings.standMagnet);
+            settings.save();
+        });
+        tools.add(Ui.muted("или магнит от", 12.5f));
+        tools.add(magnet);
+        var tare = Ui.ghost("Запомнить «пусто»");
+        tare.setToolTipText("Убери фигурку и нажми: это станет нулём для весов и магнита");
+        tare.addActionListener(e -> standStatus.setText(stand.send("t") ? "Подставка: запоминаю «пусто»…" : "Подставка: плата не подключена."));
         var calibrate = Ui.ghost("Калибровать…");
         calibrate.setToolTipText("Поставь на подставку что-то известного веса (саму фигурку) и впиши его вес");
         calibrate.addActionListener(e -> {
@@ -2492,7 +2503,8 @@ final class DevicePage extends Ui.Card {
             var reading = stand.last();
 
             if (reading != null && !stand.port().isBlank()) {
-                standReading.setText((reading.grams() >= 0 ? "на весах " + reading.grams() + " г" : "весов нет")
+                standReading.setText((reading.magnet() >= 0 ? "магнит: " + reading.magnet() + " · " : "")
+                        + (reading.grams() >= 0 ? "на весах " + reading.grams() + " г" : "весов нет")
                         + (reading.contact() ? " · метка RFID или контакт: фигурка на месте" : "") + (stand.asleep() ? " · компьютер спит" : ""));
             } else {
                 standReading.setText("");
@@ -4456,6 +4468,7 @@ final class DevicePage extends Ui.Card {
         /** Подставка сна: включена ли и сколько граммов — «фигурка стоит». */
         boolean standOn = true;
         int standThreshold = 250;
+        int standMagnet = 20;
         /** Табло на полосках TURZX-338 (их две, одна модель) и включалось ли оно само. */
         boolean stripBoard;
         boolean stripAuto;
@@ -4547,6 +4560,7 @@ final class DevicePage extends Ui.Card {
                     settings.screenAuto = Boolean.TRUE.equals(json.get("screenAuto"));
                     settings.standOn = !Boolean.FALSE.equals(json.get("standOn"));
                     settings.standThreshold = json.get("standThreshold") instanceof Number n ? n.intValue() : 250;
+                    settings.standMagnet = json.get("standMagnet") instanceof Number n ? n.intValue() : 20;
                     settings.stripBoard = Boolean.TRUE.equals(json.get("stripBoard"));
                     settings.stripAuto = Boolean.TRUE.equals(json.get("stripAuto"));
                     settings.tuyaLamps = Boolean.TRUE.equals(json.get("tuyaLamps"));
@@ -4664,6 +4678,7 @@ final class DevicePage extends Ui.Card {
             json.put("screenAuto", screenAuto);
             json.put("standOn", standOn);
             json.put("standThreshold", standThreshold);
+            json.put("standMagnet", standMagnet);
             json.put("stripBoard", stripBoard);
             json.put("stripAuto", stripAuto);
             json.put("tuyaLamps", tuyaLamps);

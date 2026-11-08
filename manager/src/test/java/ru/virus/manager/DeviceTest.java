@@ -1200,6 +1200,30 @@ class DeviceTest {
     }
 
     @Test
+    void sleepStandFallsAsleepOnlyWhenFigurineStaysPut() {
+        assertEquals(new SleepStand.Reading(412, false), SleepStand.parse("VIRUS-STAND 412 0"));
+        assertEquals(new SleepStand.Reading(-1, true), SleepStand.parse("VIRUS-STAND -1 1\r"));
+        assertNull(SleepStand.parse("мусор"));
+        var stand = new SleepStand(text -> { });
+        stand.threshold(250);
+        var empty = new SleepStand.Reading(3, false);
+        var figure = new SleepStand.Reading(405, false);
+        assertNull(stand.feed(empty, 0));
+        assertNull(stand.feed(figure, 1000), "только поставили");
+        assertNull(stand.feed(empty, 1500), "задели и сняли — не считается");
+        assertNull(stand.feed(figure, 2000));
+        assertNull(stand.feed(figure, 3500));
+        assertEquals(Boolean.TRUE, stand.feed(figure, 4100), "простояла 2 с — спать");
+        assertNull(stand.feed(figure, 6000), "уже спит");
+        assertNull(stand.feed(empty, 7000));
+        assertEquals(Boolean.FALSE, stand.feed(empty, 9100), "убрали — просыпаться");
+        assertTrue(new SleepStand.Reading(-1, true).placed(250), "контакт (геркон, кнопка) — тоже стоит");
+        assertEquals("381b4222-f694-41f0-9685-ff5bb260df2e",
+                Power.guid("GUID схемы питания: 381b4222-f694-41f0-9685-ff5bb260df2e  (Сбалансированная)"));
+        assertTrue(DevicePage.class.getResourceAsStream("virus_stand.ino") != null, "прошивка лежит в программе");
+    }
+
+    @Test
     void musicPresenceComesFromItsWindowsZip(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
         var json = "{\"assets\":[{\"name\":\"musicpresence-2.3.6-windows-x64-installer.exe\",\"browser_download_url\":\"a\"},"
                 + "{\"name\":\"musicpresence-2.3.6-windows-x64.zip\",\"browser_download_url\":\"b\"}]}";

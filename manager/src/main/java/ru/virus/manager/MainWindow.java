@@ -344,6 +344,8 @@ final class MainWindow extends JFrame {
         // «Слушает Spotify» в Discord — Music Presence, тихо и без настроек: держим запущенным
         Runnable musicPresence = () -> worker.submit(() -> MusicPresence.keep(supervisor.home()));
         new Timer(25_000, e -> musicPresence.run()) {{ setRepeats(false); }}.start();
+        devicePage.stand().actions(() -> SwingUtilities.invokeLater(this::standSleep),
+                () -> SwingUtilities.invokeLater(this::standWake));
         new Timer(2 * 60_000, e -> musicPresence.run()).start();
         new Timer(6 * 60 * 60_000, e -> telegramUpdate.run()).start();
         new Timer(6 * 60 * 60_000, e -> zapretUpdate.run()).start();
@@ -817,7 +819,10 @@ final class MainWindow extends JFrame {
                 .findFirst().ifPresent(process -> healTelegram());
 
         // Что запущено — запомнить: после перезагрузки компьютера V.I.R.U.S. запустит это сам
-        supervisor.track();
+        // Пока компьютер «спит» на подставке, остановленные процессы не забываем: после сна они вернутся
+        if (!standAsleep) {
+            supervisor.track();
+        }
 
         // Состояние процессов — на табло экрана в корпусе: id → «off», «start», «run», «error»
         var states = new java.util.LinkedHashMap<String, String>();
@@ -919,6 +924,68 @@ final class MainWindow extends JFrame {
             var text = result;
             SwingUtilities.invokeLater(() -> toast(text));
         });
+    }
+
+    /** Подставка сна: что было запущено и была ли подсветка погашена до сна. */
+    private volatile boolean standAsleep;
+    private List<String> sleptProcesses = List.of();
+    private boolean darkBeforeSleep;
+    private String powerPlanBeforeSleep = "";
+
+    /** Фигурка на подставке: остановить процессы, погасить подсветку, экраны и мониторы, тихий режим питания. */
+    private void standSleep() {
+        if (standAsleep) {
+            return;
+        }
+
+        standAsleep = true;
+        sleptProcesses = supervisor.all().stream()
+                .filter(process -> process.state() == ManagedProcess.State.RUNNING || process.state() == ManagedProcess.State.WAITING)
+                .map(process -> process.spec().id()).toList();
+        darkBeforeSleep = devicePage.dark();
+        sleptProcesses.forEach(id -> supervisor.get(id).stop());
+
+        if (!darkBeforeSleep) {
+            devicePage.setDark(true);
+        }
+
+        worker.submit(() -> {
+            powerPlanBeforeSleep = Power.activePlan();
+            Power.setPlan(Power.SAVER);
+            Power.monitors(false);
+        });
+        toast("Подставка: спокойной ночи — процессы остановлены, подсветка и экраны погашены.");
+    }
+
+    /** Фигурку убрали: всё как было до сна. */
+    private void standWake() {
+        if (!standAsleep) {
+            return;
+        }
+
+        standAsleep = false;
+        var plan = powerPlanBeforeSleep;
+        worker.submit(() -> {
+            Power.monitors(true);
+
+            if (!plan.isBlank()) {
+                Power.setPlan(plan);
+            }
+        });
+
+        if (!darkBeforeSleep) {
+            devicePage.setDark(false);
+        }
+
+        for (var id : sleptProcesses) {
+            var process = supervisor.get(id);
+
+            if (process != null) {
+                process.start();
+            }
+        }
+
+        toast("Подставка: с добрым утром — запускаю всё, что работало.");
     }
 
     private long zapretHealedAt;

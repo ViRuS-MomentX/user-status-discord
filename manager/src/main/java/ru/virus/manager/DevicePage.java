@@ -528,7 +528,7 @@ final class DevicePage extends Ui.Card {
 
         var lighting = signalCard();
 
-        for (var card : List.of(lighting, inner("Лампы и микрофон", extras), rgb, screensCard())) {
+        for (var card : List.of(lighting, inner("Лампы и микрофон", extras), standCard(), rgb, screensCard())) {
             card.setAlignmentX(LEFT_ALIGNMENT);
             page.add(card);
             page.add(Box.createVerticalStrut(14));
@@ -2411,6 +2411,117 @@ final class DevicePage extends Ui.Card {
     }
 
     private final JLabel stripStatus = Ui.muted("", 12.5f);
+
+    /** Подставка сна на Arduino. */
+    private final JLabel standStatus = Ui.muted("", 12.5f);
+    private final JLabel standReading = Ui.muted("", 12.5f);
+    private final SleepStand stand = new SleepStand(text -> SwingUtilities.invokeLater(() -> standStatus.setText(text)));
+
+    SleepStand stand() {
+        return stand;
+    }
+
+    boolean dark() {
+        return settings.allDark;
+    }
+
+    /**
+     * Подставка сна: фигурка на подставке — компьютер «засыпает», убрал —
+     * просыпается. Сама плата — Arduino с прошивкой virus_stand.ino.
+     */
+    private JComponent standCard() {
+        var stack = Ui.transparent(null);
+        stack.setLayout(new BoxLayout(stack, BoxLayout.Y_AXIS));
+        stand.threshold(settings.standThreshold);
+        var on = new Ui.Switch(settings.standOn);
+        on.onChange(value -> {
+            settings.standOn = value;
+            settings.save();
+
+            if (value) {
+                standStatus.setText("Подставка: ищу плату…");
+                stand.start();
+            } else {
+                stand.stop();
+                standStatus.setText("");
+            }
+        });
+        var threshold = new javax.swing.JSpinner(new javax.swing.SpinnerNumberModel(settings.standThreshold, 20, 5000, 10));
+        threshold.setPreferredSize(new Dimension(80, threshold.getPreferredSize().height));
+        threshold.setToolTipText("Сколько граммов на весах считается «фигурка стоит» (фигурка ~400 г — ставь 250)");
+        threshold.addChangeListener(e -> {
+            settings.standThreshold = (Integer) threshold.getValue();
+            stand.threshold(settings.standThreshold);
+            settings.save();
+        });
+        var row = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        row.add(on);
+        row.add(Ui.muted("фигурка на подставке — процессы, подсветка, экраны и мониторы гаснут; убрал — всё возвращается", 12.5f));
+        stack.add(left(row));
+        stack.add(Box.createVerticalStrut(8));
+
+        var tools = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        tools.add(Ui.muted("срабатывает от", 12.5f));
+        tools.add(threshold);
+        tools.add(Ui.muted("г", 12.5f));
+        var tare = Ui.ghost("Обнулить весы");
+        tare.setToolTipText("Подставка пустая — запомнить это как ноль");
+        tare.addActionListener(e -> standStatus.setText(stand.send("t") ? "Подставка: обнуляю…" : "Подставка: плата не подключена."));
+        var calibrate = Ui.ghost("Калибровать…");
+        calibrate.setToolTipText("Поставь на подставку что-то известного веса (саму фигурку) и впиши его вес");
+        calibrate.addActionListener(e -> {
+            var answer = javax.swing.JOptionPane.showInputDialog(this, "Поставь на подставку груз известного веса "
+                    + "(например, фигурку) и впиши, сколько он весит, в граммах:", "400");
+
+            if (answer != null && answer.strip().matches("\\d{1,5}")) {
+                standStatus.setText(stand.send("c" + answer.strip()) ? "Подставка: калибрую…" : "Подставка: плата не подключена.");
+            }
+        });
+        var sketch = Ui.ghost("Прошивка для Arduino…");
+        sketch.setToolTipText("Сохранить скетч virus_stand.ino — открыть в Arduino IDE и залить в плату");
+        sketch.addActionListener(e -> saveSketch());
+        tools.add(tare);
+        tools.add(calibrate);
+        tools.add(sketch);
+        stack.add(left(tools));
+        stack.add(Box.createVerticalStrut(6));
+        stack.add(left(standReading));
+        stack.add(left(standStatus));
+
+        new Timer(1000, e -> {
+            var reading = stand.last();
+
+            if (reading != null && !stand.port().isBlank()) {
+                standReading.setText((reading.grams() >= 0 ? "на весах " + reading.grams() + " г" : "весов нет")
+                        + (reading.contact() ? " · контакт замкнут" : "") + (stand.asleep() ? " · компьютер спит" : ""));
+            } else {
+                standReading.setText("");
+            }
+        }).start();
+
+        if (settings.standOn) {
+            stand.start();
+        }
+
+        return inner("Подставка сна (Arduino)", stack);
+    }
+
+    /** Сохранить прошивку подставки в «Документы» и открыть папку. */
+    private void saveSketch() {
+        try (var in = DevicePage.class.getResourceAsStream("virus_stand.ino")) {
+            var folder = Path.of(System.getProperty("user.home"), "Documents", "V.I.R.U.S", "virus_stand");
+            Files.createDirectories(folder);
+            var file = folder.resolve("virus_stand.ino");
+            Files.write(file, in.readAllBytes());
+            standStatus.setText("Прошивка сохранена: " + file + ". Открой её в Arduino IDE и нажми «Загрузить».");
+
+            if (java.awt.Desktop.isDesktopSupported()) {
+                java.awt.Desktop.getDesktop().open(folder.toFile());
+            }
+        } catch (Exception e) {
+            standStatus.setText("Прошивка не сохранилась: " + e.getMessage());
+        }
+    }
     private final java.util.concurrent.ExecutorService stripPool = java.util.concurrent.Executors.newFixedThreadPool(4, r -> {
         var thread = new Thread(r, "virus-strip-send");
         thread.setDaemon(true);
@@ -4342,6 +4453,9 @@ final class DevicePage extends Ui.Card {
         boolean moreOpen;
         /** Табло уже само включалось на найденном экране — второй раз не навязываем. */
         boolean screenAuto;
+        /** Подставка сна: включена ли и сколько граммов — «фигурка стоит». */
+        boolean standOn = true;
+        int standThreshold = 250;
         /** Табло на полосках TURZX-338 (их две, одна модель) и включалось ли оно само. */
         boolean stripBoard;
         boolean stripAuto;
@@ -4431,6 +4545,8 @@ final class DevicePage extends Ui.Card {
                     settings.screenBoard = Boolean.TRUE.equals(json.get("screenBoard"));
                     settings.moreOpen = Boolean.TRUE.equals(json.get("moreOpen"));
                     settings.screenAuto = Boolean.TRUE.equals(json.get("screenAuto"));
+                    settings.standOn = !Boolean.FALSE.equals(json.get("standOn"));
+                    settings.standThreshold = json.get("standThreshold") instanceof Number n ? n.intValue() : 250;
                     settings.stripBoard = Boolean.TRUE.equals(json.get("stripBoard"));
                     settings.stripAuto = Boolean.TRUE.equals(json.get("stripAuto"));
                     settings.tuyaLamps = Boolean.TRUE.equals(json.get("tuyaLamps"));
@@ -4546,6 +4662,8 @@ final class DevicePage extends Ui.Card {
             json.put("screenBoard", screenBoard);
             json.put("moreOpen", moreOpen);
             json.put("screenAuto", screenAuto);
+            json.put("standOn", standOn);
+            json.put("standThreshold", standThreshold);
             json.put("stripBoard", stripBoard);
             json.put("stripAuto", stripAuto);
             json.put("tuyaLamps", tuyaLamps);

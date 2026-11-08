@@ -2493,7 +2493,7 @@ final class DevicePage extends Ui.Card {
 
             if (reading != null && !stand.port().isBlank()) {
                 standReading.setText((reading.grams() >= 0 ? "на весах " + reading.grams() + " г" : "весов нет")
-                        + (reading.contact() ? " · контакт замкнут" : "") + (stand.asleep() ? " · компьютер спит" : ""));
+                        + (reading.contact() ? " · метка RFID или контакт: фигурка на месте" : "") + (stand.asleep() ? " · компьютер спит" : ""));
             } else {
                 standReading.setText("");
             }

@@ -2,18 +2,52 @@
 // Ставишь фигурку — компьютер «засыпает» (процессы, подсветка и экраны гаснут),
 // убираешь — всё возвращается. Плата: Arduino Nano/Uno, связь с V.I.R.U.S. по USB.
 //
-// Датчик — любой из двух (можно оба):
+// Датчик — любой (можно несколько):
+//  0) RFID (лучше всего, есть в GyverKIT EXTRA): брелок или карта — в фигурке,
+//     считыватель RC522 — под площадкой. Реагирует только на метку, сквозь
+//     дерево или пластик до ~3 см. RC522: SDA → D10, SCK → D13, MOSI → D11,
+//     MISO → D12, RST → D9, 3.3V → 3.3V (не 5V!), GND → GND.
+//     Нужна библиотека MFRC522 (есть в «Библиотеки к набору» GyverKIT или в
+//     Менеджере библиотек Arduino IDE). Без RFID поставь USE_RFID 0.
 //  1) Весы: тензодатчик на 1–5 кг + модуль HX711.
 //     HX711: VCC → 5V, GND → GND, DT → D2, SCK → D3.
 //     Тензодатчик → HX711: красный E+, чёрный E-, белый A-, зелёный A+.
-//  2) Контакт: кнопка, концевик или геркон (и магнит в фигурке) между D4 и GND.
+//  2) Контакт на D4: кнопка или концевик между D4 и GND, либо модуль
+//     с выходом S (датчик Холла KY-003 + магнит в фигурке, датчик
+//     препятствия смотрит вверх в отверстие): S → D4, + → 5V, − → GND.
 //
 // Раз в 0,2 с плата пишет: «VIRUS-STAND <граммы> <контакт>»
-// (граммы = -1, если весов нет; контакт 1 — замкнут).
+// (граммы = -1, если весов нет; «контакт» 1 — метка RFID рядом или D4 замкнут).
 // Команды от V.I.R.U.S.: «t» — обнулить весы (на подставке пусто),
 // «c400» — калибровка: на подставке груз 400 г.
 
+#define USE_RFID 1
+
 #include <EEPROM.h>
+#if USE_RFID
+#include <SPI.h>
+#include <MFRC522.h>
+MFRC522 rfid(10, 9);  // SDA (SS) → D10, RST → D9
+byte rfidMisses = 255;
+
+// Метка рядом? WakeupA будит и «уснувшие» метки — так видно, что она лежит, а не только что положили
+bool tagNear() {
+  byte atqa[2];
+  byte size = sizeof(atqa);
+  rfid.PCD_StopCrypto1();
+  MFRC522::StatusCode status = rfid.PICC_WakeupA(atqa, &size);
+
+  if (status == MFRC522::STATUS_OK || status == MFRC522::STATUS_COLLISION) {
+    rfid.PICC_ReadCardSerial();
+    rfid.PICC_HaltA();
+    rfidMisses = 0;
+  } else if (rfidMisses < 255) {
+    rfidMisses++;
+  }
+
+  return rfidMisses < 3;  // три промаха подряд — метку убрали (одиночный сбой не считается)
+}
+#endif
 
 const byte DT_PIN = 2;
 const byte SCK_PIN = 3;
@@ -78,6 +112,10 @@ void setup() {
   pinMode(SCK_PIN, OUTPUT);
   pinMode(SWITCH_PIN, INPUT_PULLUP);
   digitalWrite(SCK_PIN, LOW);
+#if USE_RFID
+  SPI.begin();
+  rfid.PCD_Init();
+#endif
   delay(400);
 
   Calibration stored;
@@ -131,6 +169,9 @@ void loop() {
   }
 
   bool closed = digitalRead(SWITCH_PIN) == LOW;
+#if USE_RFID
+  closed = closed || tagNear();
+#endif
   Serial.print("VIRUS-STAND ");
   Serial.print(grams);
   Serial.print(' ');

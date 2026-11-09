@@ -281,7 +281,16 @@ final class ClaudeMascot {
                 -pose.tilt());
     }
 
+    /**
+     * Поднимает руку в небо правая рука Клода (на экране — слева от зрителя),
+     * левая в это время — кулачком у груди.
+     */
     static Pose kwikFlip(long now) {
+        var pose = kwikRaw(now);
+        return kwikFrame(now) >= 6 ? mirror(pose) : pose;
+    }
+
+    private static Pose kwikRaw(long now) {
         var blink = Math.floorMod(now, 4300L) < 140;
         var parts = new ArrayList<double[]>();
         parts.add(new double[] {0, 0, 18, 12});
@@ -298,12 +307,10 @@ final class ClaudeMascot {
                 parts.add(new double[] {-3.5, 14, 2.5, 1.5});
                 parts.add(new double[] {-5.5, 14.5, 2.5, 1.5});
                 // Задняя рука (цветом тела) и передняя (темнее) — параллельно, к ножке
-                parts.add(new double[] {-2, 6, 3, 2});
-                parts.add(new double[] {-4.5, 7.5, 3, 2});
-                parts.add(new double[] {-7, 9, 3, 2});
-                parts.add(new double[] {-1, 9, 3, 2, 1});
-                parts.add(new double[] {-3.5, 10.5, 3, 2, 1});
-                parts.add(new double[] {-6, 12, 3, 2, 1});
+                parts.add(new double[] {-2, 6.5, 2.5, 2});
+                parts.add(new double[] {-4, 8, 2.5, 2});
+                parts.add(new double[] {-1, 9, 2.5, 2, 1});
+                parts.add(new double[] {-3, 10.5, 2.5, 2, 1});
                 var pose = new Pose(1.0, -0.4, 1, 1, parts, blink, -1, true, 4);
                 return kwikFrame(now) == 3 ? mirror(pose) : pose;
             }
@@ -314,9 +321,8 @@ final class ClaudeMascot {
                 parts.add(new double[] {15, 12, 2, 3});
                 parts.add(new double[] {0, 12, 2, 1.5});
                 parts.add(new double[] {-1, 13, 2, 2});
-                parts.add(new double[] {-3, 7, 3, 3});
-                parts.add(new double[] {-1, 9.5, 3, 2});
-                parts.add(new double[] {1, 8, 6, 2, 1});
+                parts.add(new double[] {-2.5, 7, 2.5, 3});
+                parts.add(new double[] {1, 8, 4, 2, 1});
                 var pose = new Pose(0.6, 0, 1, 1, parts, blink, -1, true, 2);
                 return kwikFrame(now) == 4 ? mirror(pose) : pose;
             }
@@ -326,28 +332,25 @@ final class ClaudeMascot {
                 parts.add(new double[] {4, 12, 2, 3});
                 parts.add(new double[] {12, 12, 2, 3});
                 parts.add(new double[] {16, 12, 2, 3});
-                parts.add(new double[] {-3, 6, 3, 2});
-                parts.add(new double[] {-7, 6, 4, 2});
-                parts.add(new double[] {18, 7, 2, 5});
+                parts.add(new double[] {-4.5, 6, 4.5, 2});
+                parts.add(new double[] {18, 7, 2, 4});
                 var pose = new Pose(0, 0, 1, 1, parts, blink, 0, true);
                 return kwikFrame(now) == 5 ? mirror(pose) : pose;
             }
             case 6, 9 -> {
                 // Рука прямо вверх, указательный «в небо», вторая — кулачок у бедра; стоит ровно
                 legsStraight(parts);
-                parts.add(new double[] {18, -8, 2, 13});
-                parts.add(new double[] {18.5, -10, 1, 2});
-                parts.add(new double[] {-2, 7, 2, 4});
-                parts.add(new double[] {1, 9.5, 3, 2, 1});
+                parts.add(new double[] {18, -3, 2, 9});
+                parts.add(new double[] {18.5, -5, 1, 2});
+                parts.add(new double[] {1, 8, 3, 2, 1});
                 return new Pose(0, -0.5, 1, 1, parts, blink, 0, true);
             }
             case 7 -> {
                 // Рука чуть согнута
                 legsStraight(parts);
-                parts.add(new double[] {18, -4, 2, 9});
-                parts.add(new double[] {19, -7, 2, 3});
-                parts.add(new double[] {-2, 7, 2, 4});
-                parts.add(new double[] {1, 9.5, 3, 2, 1});
+                parts.add(new double[] {18, -1, 2, 7});
+                parts.add(new double[] {19, -3, 2, 2});
+                parts.add(new double[] {1, 8, 3, 2, 1});
                 return new Pose(0, -0.3, 1, 1, parts, blink, 0, true);
             }
             case 8 -> {
@@ -357,19 +360,17 @@ final class ClaudeMascot {
                 parts.add(new double[] {12, 12, 2, 3});
                 parts.add(new double[] {15, 12, 2, 3});
                 // плечо → вверх, предплечье над головой (с зазором — чтобы не казалось шапкой), кулачок
-                parts.add(new double[] {18, -2, 2, 7});
-                parts.add(new double[] {14, -4, 6, 2});
-                parts.add(new double[] {11.5, -5.5, 3, 3});
-                parts.add(new double[] {-3, 6, 3, 2});
-                parts.add(new double[] {2, 6.5, 7, 2, 1});
+                parts.add(new double[] {18, 0, 2, 6});
+                parts.add(new double[] {14.5, -2, 5.5, 2});
+                parts.add(new double[] {12.5, -3, 2.5, 2.5});
+                parts.add(new double[] {1, 6.5, 4, 2, 1});
                 return new Pose(0, 0.3, 1.02, 0.96, parts, blink, -0.5, true, -3);
             }
             default -> {
                 // Рука опускается
                 legsStraight(parts);
-                parts.add(new double[] {18, -2, 2, 7});
-                parts.add(new double[] {-2, 7, 2, 4});
-                parts.add(new double[] {1, 9.5, 3, 2, 1});
+                parts.add(new double[] {18, 2, 2, 5});
+                parts.add(new double[] {1, 8, 3, 2, 1});
                 return new Pose(0, 0, 1, 1, parts, blink, 0, true);
             }
         }

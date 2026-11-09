@@ -2529,9 +2529,39 @@ final class DevicePage extends Ui.Card {
                 standStatus.setText(stand.send("c" + answer.strip()) ? "Подставка: калибрую…" : "Подставка: плата не подключена.");
             }
         });
-        var sketch = Ui.ghost("Прошивка для Arduino…");
-        sketch.setToolTipText("Сохранить скетч virus_stand.ino — открыть в Arduino IDE и залить в плату");
+        var sketch = Ui.ghost("Скетч…");
+        sketch.setToolTipText("Сохранить скетч virus_stand.ino — если хочешь поменять прошивку сам в Arduino IDE");
         sketch.addActionListener(e -> saveSketch());
+        var flash = Ui.button("Прошить плату");
+        flash.setToolTipText("Записать прошивку подставки в Arduino Nano по USB — Arduino IDE не нужна");
+        flash.addActionListener(e -> {
+            flash.setEnabled(false);
+            standStatus.setText("Подставка: готовлюсь прошивать…");
+            worker.submit(() -> {
+                stand.release();
+                var ok = StandFlasher.flash(text -> SwingUtilities.invokeLater(() -> standStatus.setText(text)));
+                SwingUtilities.invokeLater(() -> {
+                    flash.setEnabled(true);
+
+                    if (ok && !settings.standOn) {
+                        settings.standOn = true;
+                        settings.save();
+                        on.setOn(true);
+                    }
+                });
+
+                if (settings.standOn || ok) {
+                    try {
+                        Thread.sleep(1500);
+                    } catch (InterruptedException ignored) {
+                        return;
+                    }
+
+                    stand.start();
+                }
+            });
+        });
+        tools.add(flash);
         tools.add(tare);
         tools.add(calibrate);
         tools.add(sketch);

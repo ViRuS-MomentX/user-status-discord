@@ -1200,6 +1200,24 @@ class DeviceTest {
     }
 
     @Test
+    void standFirmwareIsBundledAndParsedForFlashing() throws Exception {
+        var image = StandFlasher.bundled();
+        assertTrue(image.length > 1024 && image.length < StandFlasher.MAX, "прошивка на месте и влезает в Nano");
+        assertEquals(0, image.length % StandFlasher.PAGE, "пишем целыми страницами");
+        assertEquals(0x0c, image[0] & 0xff, "в начале — таблица прерываний (jmp)");
+        assertEquals(0x94, image[1] & 0xff);
+
+        var small = StandFlasher.image(":0400000001020304F2\n:00000001FF\n");
+        assertEquals(StandFlasher.PAGE, small.length);
+        assertEquals(4, small[3]);
+        assertEquals((byte) 0xff, small[4], "пустое — как стёртая флешка");
+        assertThrows(IllegalArgumentException.class, () -> StandFlasher.image(":0400000001020304F3\n"));
+        assertTrue(StandFlasher.say("noport").contains("CH340"));
+        assertTrue(StandFlasher.say("progress 50").contains("50%"));
+        assertNull(StandFlasher.say("что-то"));
+    }
+
+    @Test
     void sleepStandFallsAsleepOnlyWhenFigurineStaysPut() {
         assertEquals(new SleepStand.Reading(412, false), SleepStand.parse("VIRUS-STAND 412 0"));
         assertEquals(new SleepStand.Reading(-1, true), SleepStand.parse("VIRUS-STAND -1 1\r"));

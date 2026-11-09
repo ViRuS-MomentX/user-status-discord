@@ -131,6 +131,26 @@ final class SleepStand {
         send("");
     }
 
+    /** Отпустить COM-порт насовсем (для прошивки платы): остановить и дождаться помощника. */
+    void release() {
+        Thread running;
+
+        synchronized (this) {
+            stop();
+            running = thread;
+        }
+
+        if (running != null) {
+            running.interrupt();
+
+            try {
+                running.join(5000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
     /** Команда плате: «t» — обнулить весы, «c400» — калибровка грузом 400 г. */
     boolean send(String command) {
         var writer = input;

@@ -2369,10 +2369,20 @@ final class DevicePage extends Ui.Card {
                         sends.add(stripPool.submit(() -> session.show(picture)));
                     }
 
+                    var failed = 0;
+
                     for (var send : sends) {
-                        if (!send.get()) {
-                            throw new IOException("полоска перестала принимать кадры");
+                        if (!send.get(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                            failed++;
                         }
+                    }
+
+                    // Полоска иногда пропускает кадр — переподключаемся, только если она молчит подряд
+                    stripMisses = failed == 0 ? 0 : stripMisses + 1;
+
+                    if (stripMisses >= 5) {
+                        stripMisses = 0;
+                        throw new IOException("полоска перестала принимать кадры");
                     }
 
                     // Сколько кадров в секунду на самом деле — в строку состояния
@@ -2397,10 +2407,10 @@ final class DevicePage extends Ui.Card {
             } catch (Exception e) {
                 var closed = freeScreens();
                 SwingUtilities.invokeLater(() -> stripStatus.setText("Полоски: " + e.getMessage() + (closed
-                        ? ". Закрыл программу JONSBO, пробую снова." : ". Пробую снова через 10 секунд.")));
+                        ? ". Закрыл программу JONSBO, пробую снова." : ". Переподключаюсь…")));
 
                 try {
-                    Thread.sleep(10_000);
+                    Thread.sleep(2_000);
                 } catch (InterruptedException stop) {
                     return;
                 }
@@ -2411,6 +2421,7 @@ final class DevicePage extends Ui.Card {
     }
 
     private final JLabel stripStatus = Ui.muted("", 12.5f);
+    private int stripMisses;
 
     /** Подставка сна на Arduino. */
     private final JLabel standStatus = Ui.muted("", 12.5f);
@@ -2604,19 +2615,27 @@ final class DevicePage extends Ui.Card {
 
             try (var session = new CaseScreens.Session(screen, Math.max(30, glow.brightness))) {
                 SwingUtilities.invokeLater(() -> boardStatus.setText("Табло: работает на экране " + settings.screenId + "."));
+                media.start();
+                var misses = 0;
 
                 while (board == me && settings.screenBoard && !settings.allDark) {
+                    var now = System.currentTimeMillis();
                     var size = settings.screenSize.split("×");
                     var width = Integer.parseInt(size[0]);
                     var height = Integer.parseInt(size[1]);
                     var turned = settings.screenRotation % 180 != 0;
-                    var frame = ScreenBoard.render(turned ? height : width, turned ? width : height, processes);
+                    var track = media.now();
+                    var frame = MainScreen.render(settings.screenMode, turned ? height : width, turned ? width : height,
+                            processes, track, glow.cpu(), now);
 
-                    if (!session.show(CaseScreens.rotate(frame, settings.screenRotation))) {
+                    // Один пропущенный кадр — не повод переподключаться: экран иногда отвечает с опозданием
+                    if (session.show(CaseScreens.rotate(frame, settings.screenRotation))) {
+                        misses = 0;
+                    } else if (++misses >= 3) {
                         throw new IOException("экран перестал принимать кадры");
                     }
 
-                    Thread.sleep(1000);
+                    Thread.sleep(Math.max(5, MainScreen.period(settings.screenMode, track) - (System.currentTimeMillis() - now)));
                 }
             } catch (InterruptedException e) {
                 return;
@@ -2624,10 +2643,10 @@ final class DevicePage extends Ui.Card {
                 // Экран занят программой JONSBO — закрываем её и пробуем снова
                 var closed = freeScreens();
                 SwingUtilities.invokeLater(() -> boardStatus.setText("Табло: " + e.getMessage() + (closed
-                        ? ". Закрыл программу JONSBO, пробую снова." : ". Пробую снова через 10 секунд.")));
+                        ? ". Закрыл программу JONSBO, пробую снова." : ". Переподключаюсь…")));
 
                 try {
-                    Thread.sleep(10_000);
+                    Thread.sleep(3_000);
                 } catch (InterruptedException stop) {
                     return;
                 }
@@ -2858,6 +2877,20 @@ final class DevicePage extends Ui.Card {
             row.add(Ui.muted("живое табло", 12.5f));
             row.setAlignmentX(LEFT_ALIGNMENT);
             screenRows.add(row);
+
+            // Что показывать на этом экране — меняется сразу, без переподключения
+            var modeRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 4));
+            modeRow.setBorder(BorderFactory.createEmptyBorder(0, 6, 0, 0));
+            var modes = new javax.swing.JComboBox<>(MainScreen.MODES.stream().map(MainScreen.Mode::title).toArray(String[]::new));
+            modes.setSelectedItem(MainScreen.title(settings.screenMode));
+            modes.addActionListener(e -> {
+                settings.screenMode = MainScreen.MODES.get(modes.getSelectedIndex()).id();
+                settings.save();
+            });
+            modeRow.add(Ui.muted("на экране:", 12.5f));
+            modeRow.add(modes);
+            modeRow.setAlignmentX(LEFT_ALIGNMENT);
+            screenRows.add(modeRow);
         }
 
         // Строки не растягиваются на всю высоту карточки — каждая ровно по себе
@@ -4465,6 +4498,8 @@ final class DevicePage extends Ui.Card {
         boolean moreOpen;
         /** Табло уже само включалось на найденном экране — второй раз не навязываем. */
         boolean screenAuto;
+        /** Что показывает большой экран корпуса (MainScreen.MODES). */
+        String screenMode = "processes";
         /** Подставка сна: включена ли и сколько граммов — «фигурка стоит». */
         boolean standOn = true;
         int standThreshold = 250;
@@ -4558,6 +4593,8 @@ final class DevicePage extends Ui.Card {
                     settings.screenBoard = Boolean.TRUE.equals(json.get("screenBoard"));
                     settings.moreOpen = Boolean.TRUE.equals(json.get("moreOpen"));
                     settings.screenAuto = Boolean.TRUE.equals(json.get("screenAuto"));
+                    settings.screenMode = json.get("screenMode") instanceof String mode
+                            && MainScreen.MODES.stream().anyMatch(m -> m.id().equals(mode)) ? mode : "processes";
                     settings.standOn = !Boolean.FALSE.equals(json.get("standOn"));
                     settings.standThreshold = json.get("standThreshold") instanceof Number n ? n.intValue() : 250;
                     settings.standMagnet = json.get("standMagnet") instanceof Number n ? n.intValue() : 20;
@@ -4676,6 +4713,7 @@ final class DevicePage extends Ui.Card {
             json.put("screenBoard", screenBoard);
             json.put("moreOpen", moreOpen);
             json.put("screenAuto", screenAuto);
+            json.put("screenMode", screenMode);
             json.put("standOn", standOn);
             json.put("standThreshold", standThreshold);
             json.put("standMagnet", standMagnet);

@@ -1239,6 +1239,21 @@ class DeviceTest {
     }
 
     @Test
+    void mainScreenModesAllRender() {
+        var track = new MediaNow.Track("Песня", "Группа", "Альбом", true, 0, 200_000, 0, null);
+
+        for (var mode : MainScreen.MODES) {
+            var image = MainScreen.render(mode.id(), 640, 480, java.util.Map.of(), track, 0.3, 1_000);
+            assertEquals(640, image.getWidth(), mode.id());
+            assertEquals(480, image.getHeight(), mode.id());
+        }
+
+        assertTrue(ClaudeMascot.greeting(10_500) && !ClaudeMascot.greeting(15_000), "машет первые 2,6 с каждых 10 с");
+        assertEquals(90, MainScreen.period("claude", null), "Клоду — плавно");
+        assertEquals("Фоновые процессы", MainScreen.title("нет такого"));
+    }
+
+    @Test
     void stripsShowMusicGameOrIdle() {
         var media = new MediaNow();
         assertNull(media.now());

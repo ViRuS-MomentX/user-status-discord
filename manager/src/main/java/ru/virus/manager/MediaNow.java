@@ -27,6 +27,7 @@ final class MediaNow {
     }
 
     private volatile Track track;
+    private volatile long lookedAt;
     /** Почему нет обложки (для строки состояния); пусто — всё хорошо. */
     private volatile String problem = "";
 
@@ -138,6 +139,12 @@ final class MediaNow {
                     cover = null;
                 }
 
+                lookup(title, text(map.get("artist")));
+            }
+
+            // Обложки так и нет — раз в 20 секунд пробуем найти её снова (Windows могла отдать её позже, iTunes — найти)
+            if (cover == null && System.currentTimeMillis() - lookedAt > 20_000) {
+                lookedAt = System.currentTimeMillis();
                 lookup(title, text(map.get("artist")));
             }
 

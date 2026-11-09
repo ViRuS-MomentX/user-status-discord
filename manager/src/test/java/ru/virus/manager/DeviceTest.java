@@ -1255,6 +1255,18 @@ class DeviceTest {
         assertFalse(MainScreen.intro(frame, "processes", ClaudeMascot.INTRO_MS + 1, 1000), "и больше не появляется");
         assertFalse(MainScreen.intro(frame, "claude", 1000, 1000), "в режиме «Клод» он и так на сцене");
         assertEquals("Фоновые процессы", MainScreen.title("нет такого"));
+
+        // Каждый танец на каждой сцене рисуется, «по очереди» перебирает танцы и сцены
+        for (var dance : ClaudeMascot.DANCES) {
+            for (var scene : ClaudeScenes.SCENES) {
+                assertEquals(160, MainScreen.claude(160, 120, dance.id(), scene.id(), 1_700_000_000_000L).getWidth());
+            }
+        }
+
+        assertEquals("classic", ClaudeMascot.current("auto", 0));
+        assertEquals("floss", ClaudeMascot.current("auto", ClaudeMascot.DANCE_TURN_MS));
+        assertEquals("dab", ClaudeMascot.current("dab", 123));
+        assertEquals("stage", ClaudeScenes.current("auto", 0));
     }
 
     @Test

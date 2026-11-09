@@ -202,6 +202,8 @@ final class DevicePage extends Ui.Card {
         this.home = home;
         this.games = new GameNow(home);
         this.settings = Settings.load(home.resolve("device.json"));
+        MainScreen.claudeDance = settings.claudeDance;
+        MainScreen.claudeScene = settings.claudeScene;
         rotateSpinner.setValue(settings.rotateMinutes);
         this.glow = new SignalRgb.Live(DevicePage::cpuLoad);
         glow.mode = settings.glowMode;
@@ -2079,52 +2081,20 @@ final class DevicePage extends Ui.Card {
     /** Экраны корпуса (TURZX/JONSBO): найденные и что они ответили. */
     private final JPanel screenRows = Ui.transparent(null);
 
+    /** Какие экраны были подключены при прошлой проверке — для автопоиска. */
+    private volatile List<String> screensPresent = List.of();
+
     /**
-     * Экраны в корпусе — проба: найти, поздороваться, показать тестовую
-     * картинку. Пока программа JONSBO работает, она держит экраны — её надо закрыть.
+     * Экраны в корпусе: находятся сами — при запуске и когда экран
+     * подключили или отключили (проверка раз в 15 секунд, не трогая работающие).
      */
     private JComponent screensCard() {
         screenRows.setLayout(new BoxLayout(screenRows, BoxLayout.Y_AXIS));
-        var find = Ui.button("Найти экраны");
-        find.addActionListener(e -> {
-            find.setEnabled(false);
-            screenRows.removeAll();
-            screenRows.add(left(Ui.muted("Ищу… (программа JONSBO должна быть закрыта, и в трее тоже)", 13f)));
-            screenRows.revalidate();
-            worker.submit(() -> {
-                List<CaseScreens.Screen> found;
-                // Своё табло держит экран — на время поиска отпускаем
-                var resume = pauseBoard();
-
-                try {
-                    freeScreens();
-                    found = CaseScreens.probe();
-                } catch (Throwable t) {
-                    found = List.of(new CaseScreens.Screen(0, 0, 0, 0, "USB", "", "не запустился USB: " + t.getMessage()));
-                }
-
-                var result = found;
-                SwingUtilities.invokeLater(() -> {
-                    find.setEnabled(true);
-                    showScreens(result);
-                    autoBoard(result);
-                });
-
-                if (resume) {
-                    startBoard();
-                }
-            });
-        });
-
-        var head = Ui.transparent(new BorderLayout(10, 0));
-        head.add(Ui.muted("<html><body style='width:560px'>Экраны TURZX, которые JONSBO ставит в корпус и на кулер. "
-                + "V.I.R.U.S. говорит с ними напрямую по их открытому протоколу. Перед поиском закрой программу "
-                + "JONSBO: экраном может управлять только кто-то один. Сейчас это проба: найти экраны и вывести "
-                + "тестовую картинку, чтобы подобрать разрешение.</body></html>", 12.5f), BorderLayout.CENTER);
-        head.add(find, BorderLayout.EAST);
+        screenRows.add(left(Ui.muted("Ищу экраны в корпусе…", 13f)));
 
         var body = Ui.transparent(new BorderLayout(0, 10));
-        body.add(head, BorderLayout.NORTH);
+        body.add(left(Ui.muted("Экраны TURZX/JONSBO в корпусе находятся сами. Выбери, что показывать на каждом.", 12.5f)),
+                BorderLayout.NORTH);
         body.add(screenRows, BorderLayout.CENTER);
         var statuses = Ui.transparent(null);
         statuses.setLayout(new BoxLayout(statuses, BoxLayout.Y_AXIS));
@@ -2132,29 +2102,45 @@ final class DevicePage extends Ui.Card {
         statuses.add(left(stripStatus));
         body.add(statuses, BorderLayout.SOUTH);
 
-        if (settings.stripBoard && !settings.allDark) {
-            startStrips();
-        }
-
-        if (settings.screenBoard && !settings.screenId.isBlank() && !settings.allDark) {
-            startBoard();
-        } else if (!settings.screenAuto && !settings.allDark && SystemInfo.isWindows()) {
-            // Первый запуск: сами находим экран и включаем на нём табло с процессами
-            worker.submit(() -> {
+        if (SystemInfo.isWindows()) {
+            // Сначала найти, потом запускать табло — так поиск не рвёт приветствие Клода
+            worker.submit(() -> detectScreens(true));
+            new Timer(15_000, e -> worker.submit(() -> {
                 try {
-                    freeScreens();
-                    var found = CaseScreens.probe();
-                    SwingUtilities.invokeLater(() -> {
-                        showScreens(found);
-                        autoBoard(found);
-                    });
+                    if (!CaseScreens.present().equals(screensPresent)) {
+                        detectScreens(false);
+                    }
                 } catch (Throwable ignored) {
-                    // USB недоступен — пусть ищут кнопкой
+                    // USB недоступен — проверим в следующий раз
                 }
-            });
+            })).start();
         }
 
         return inner("Экраны корпуса", body);
+    }
+
+    /** Найти экраны, показать их в окне и (при запуске или если работало) запустить табло. */
+    private void detectScreens(boolean first) {
+        List<CaseScreens.Screen> found;
+        var resume = pauseBoard();
+
+        try {
+            freeScreens();
+            found = CaseScreens.probe();
+            screensPresent = CaseScreens.present();
+        } catch (Throwable t) {
+            found = List.of(new CaseScreens.Screen(0, 0, 0, 0, "USB", "", "не запустился USB: " + t.getMessage()));
+        }
+
+        var result = found;
+        SwingUtilities.invokeLater(() -> {
+            showScreens(result);
+            autoBoard(result);
+        });
+
+        if ((first || resume) && !settings.allDark) {
+            startBoard();
+        }
     }
 
     /** Живое табло на экране корпуса: свой поток, раз в 2 секунды кадр. */
@@ -2384,6 +2370,14 @@ final class DevicePage extends Ui.Card {
                     }
                     // Полоски — параллельно, ~20 кадров в секунду, как у JONSBO
                     var sends = new java.util.ArrayList<java.util.concurrent.Future<Boolean>>();
+
+                    var shownNow = new java.util.ArrayList<java.awt.image.BufferedImage>();
+
+                    for (var i = 0; i < sessions.size(); i++) {
+                        shownNow.add(i < activities.size() ? activities.get(i) : idle);
+                    }
+
+                    stripLastFrames = shownNow;
 
                     for (var i = 0; i < sessions.size(); i++) {
                         var session = sessions.get(i);
@@ -2660,6 +2654,7 @@ final class DevicePage extends Ui.Card {
                     }
 
                     var introducing = MainScreen.intro(frame, settings.screenMode, now - mainIntroAt, now);
+                    mainLastFrame = frame;
 
                     // Один пропущенный кадр — не повод переподключаться: экран иногда отвечает с опозданием
                     if (session.show(CaseScreens.rotate(frame, settings.screenRotation))) {
@@ -2733,74 +2728,32 @@ final class DevicePage extends Ui.Card {
                     + "JONSBO закрыта.", 13f)));
         }
 
+        var stripsShown = false;
+
         for (var screen : found) {
-            var row = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 4));
-            var title = (screen.name().isBlank() ? "Экран" : screen.name()) + " · " + screen.id();
-            row.add(Ui.label("<html><b>" + ConfigPage.escape(title) + "</b> <font color='#7C8C84'>· "
-                    + ConfigPage.escape(screen.answers() ? "ответил, прошивка " + screen.firmware()
-                    + (CaseScreens.model(screen.vendor(), screen.product()) == null ? ""
-                    : " · " + CaseScreens.model(screen.vendor(), screen.product()).name()) : screen.error())
-                    + "</font></html>", Theme.ui, Theme.TEXT));
+            JPanel row;
 
-            row.setAlignmentX(LEFT_ALIGNMENT);
-            screenRows.add(row);
-
-            // Что экран рассказал о себе: адреса USB и ответ на приветствие — по ним разбираемся с непонятными экранами
-            var about = (screen.details().isBlank() ? "" : "USB: " + screen.details())
-                    + (screen.reply().isBlank() ? "" : "<br>ответ: " + screen.reply());
-
-            if (!about.isBlank()) {
-                var info = Ui.label("<html><body style='width:760px'>" + about.replace("<br>", "\n")
-                        .lines().map(ConfigPage::escape).reduce((a, b) -> a + "<br>" + b).orElse("") + "</body></html>",
-                        Theme.mono.deriveFont(11f), Theme.DIM);
-                info.setBorder(BorderFactory.createEmptyBorder(0, 14, 4, 0));
-                info.setAlignmentX(LEFT_ALIGNMENT);
-                screenRows.add(info);
-            }
-
+            // Не ответил — одной строкой, подробности (USB, сырой ответ) — в подсказке
             if (!screen.answers()) {
+                var line = Ui.muted("<html><b>" + ConfigPage.escape(screen.name().isBlank() ? "Экран " + screen.id()
+                        : screen.name()) + "</b> — " + ConfigPage.escape(String.valueOf(screen.error())) + "</html>", 12.5f);
+                line.setToolTipText("<html>USB: " + ConfigPage.escape(screen.details()) + (screen.reply().isBlank() ? ""
+                        : "<br>ответ: " + ConfigPage.escape(screen.reply())) + "</html>");
+                line.setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
+                screenRows.add(left(line));
                 continue;
             }
 
-            // Полоски TURZX-338: размер известен (640×180), обе ведёт одно табло
+            // Полоски TURZX-338: обе ведёт одно табло — одна карточка на все
             if (CaseScreens.strip(screen.vendor(), screen.product())) {
-                row = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 4));
-                row.setBorder(BorderFactory.createEmptyBorder(0, 6, 0, 0));
-                var stripLive = new Ui.Switch(settings.stripBoard);
-                stripLive.onChange(on -> {
-                    settings.stripBoard = on;
-                    settings.save();
+                if (!stripsShown) {
+                    stripsShown = true;
+                    var count = (int) found.stream().filter(other -> other.answers()
+                            && CaseScreens.strip(other.vendor(), other.product())).count();
+                    screenRows.add(left(stripsPanel(screen, count)));
+                    screenRows.add(Box.createVerticalStrut(14));
+                }
 
-                    if (on) {
-                        startStrips();
-                    } else {
-                        stopStrips();
-                        stripStatus.setText("");
-                    }
-                });
-                row.add(stripLive);
-                row.add(Ui.muted("полоски: музыка из Spotify и запущенная игра, в простое — живой фон (640×180)", 12.5f));
-                var stripTest = Ui.button("Тестовая картинка");
-                stripTest.addActionListener(e -> {
-                    stripTest.setEnabled(false);
-                    worker.submit(() -> {
-                        var resume = pauseBoard();
-                        var problem = CaseScreens.show(screen, CaseScreens.testPattern(CaseScreens.STRIP_WIDTH,
-                                CaseScreens.STRIP_HEIGHT, screen.id()), Math.max(30, glow.brightness));
-
-                        if (resume) {
-                            new Timer(15_000, t -> startBoard()) {{ setRepeats(false); }}.start();
-                        }
-
-                        SwingUtilities.invokeLater(() -> {
-                            stripTest.setEnabled(true);
-                            toast.accept(problem == null ? "Тестовая картинка ушла на полоску." : "Полоска: " + problem);
-                        });
-                    });
-                });
-                row.add(stripTest);
-                row.setAlignmentX(LEFT_ALIGNMENT);
-                screenRows.add(row);
                 continue;
             }
 
@@ -2907,24 +2860,9 @@ final class DevicePage extends Ui.Card {
             row.add(test);
             row.add(Ui.muted("поворот", 12.5f));
             row.add(rotation);
-            row.add(live);
-            row.add(Ui.muted("живое табло", 12.5f));
             row.setAlignmentX(LEFT_ALIGNMENT);
-            screenRows.add(row);
-
-            // Что показывать на этом экране — меняется сразу, без переподключения
-            var modeRow = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 4));
-            modeRow.setBorder(BorderFactory.createEmptyBorder(0, 6, 0, 0));
-            var modes = new javax.swing.JComboBox<>(MainScreen.MODES.stream().map(MainScreen.Mode::title).toArray(String[]::new));
-            modes.setSelectedItem(MainScreen.title(settings.screenMode));
-            modes.addActionListener(e -> {
-                settings.screenMode = MainScreen.MODES.get(modes.getSelectedIndex()).id();
-                settings.save();
-            });
-            modeRow.add(Ui.muted("на экране:", 12.5f));
-            modeRow.add(modes);
-            modeRow.setAlignmentX(LEFT_ALIGNMENT);
-            screenRows.add(modeRow);
+            screenRows.add(left(mainPanel(screen, model, live, row)));
+            screenRows.add(Box.createVerticalStrut(14));
         }
 
         // Строки не растягиваются на всю высоту карточки — каждая ровно по себе
@@ -2936,6 +2874,206 @@ final class DevicePage extends Ui.Card {
 
         screenRows.revalidate();
         screenRows.repaint();
+    }
+
+    /** Последние кадры, ушедшие на экраны, — для «окошек» в меню. */
+    private volatile java.awt.image.BufferedImage mainLastFrame;
+    private volatile List<java.awt.image.BufferedImage> stripLastFrames = List.of();
+
+    private static JLabel heading(String text) {
+        return Ui.label(text, Theme.ui.deriveFont(Font.BOLD, 15f), Theme.TEXT);
+    }
+
+    /** Плитки сеткой по columns в ряд, прижаты влево. */
+    private static JPanel tiles(List<? extends JComponent> items, int columns) {
+        var grid = Ui.transparent(new GridLayout(0, columns, 8, 6));
+        items.forEach(grid::add);
+        var panel = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 0, 4));
+        panel.add(grid);
+        panel.setAlignmentX(LEFT_ALIGNMENT);
+        return panel;
+    }
+
+    /**
+     * Карточка большого экрана: слева — что на нём сейчас, справа — выбор
+     * режима плитками; для Клода — ещё танец и сцена. Размер, поворот и
+     * проверка — под «Настройки экрана».
+     */
+    private JComponent mainPanel(CaseScreens.Screen screen, CaseScreens.Model model, Ui.Switch live, JPanel advanced) {
+        var panel = Ui.transparent(new BorderLayout(18, 0));
+        var size = settings.screenSize.split("×");
+        var ratio = Integer.parseInt(size[1]) / (double) Integer.parseInt(size[0]);
+        var preview = new PreviewTile((w, h, now) -> {
+            var frame = mainLastFrame;
+            return frame != null ? frame : MainScreen.render(settings.screenMode, w, h, processes, media.now(), glow.cpu(), now);
+        }, null, 240, (int) Math.round(240 * ratio));
+        var left = Ui.transparent(null);
+        left.setLayout(new BoxLayout(left, BoxLayout.Y_AXIS));
+        left.add(preview);
+        panel.add(left, BorderLayout.WEST);
+
+        var right = Ui.transparent(null);
+        right.setLayout(new BoxLayout(right, BoxLayout.Y_AXIS));
+        var head = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        head.add(heading(model != null ? "Экран " + model.name() : "Экран " + screen.id()));
+        head.add(Ui.muted(settings.screenSize + (screen.firmware().isBlank() ? "" : " · " + screen.firmware()), 12f));
+        head.add(live);
+        head.add(Ui.muted("включён", 12.5f));
+        head.setAlignmentX(LEFT_ALIGNMENT);
+        right.add(head);
+        right.add(Box.createVerticalStrut(8));
+
+        // Режимы — плитками с живой миниатюрой
+        var modeTiles = new java.util.ArrayList<PreviewTile>();
+        var claudeOptions = Ui.transparent(null);
+        claudeOptions.setLayout(new BoxLayout(claudeOptions, BoxLayout.Y_AXIS));
+        claudeOptions.setAlignmentX(LEFT_ALIGNMENT);
+
+        for (var mode : MainScreen.MODES) {
+            var tile = new PreviewTile((w, h, now) -> MainScreen.render(mode.id(), w, h, processes, media.now(), glow.cpu(), now),
+                    shortTitle(mode), 112, 84);
+            tile.setSelected(mode.id().equals(settings.screenMode));
+            tile.onClick(() -> {
+                settings.screenMode = mode.id();
+                settings.save();
+                modeTiles.forEach(other -> other.setSelected(other == tile));
+                claudeOptions.setVisible("claude".equals(mode.id()));
+                panel.revalidate();
+            });
+            modeTiles.add(tile);
+        }
+
+        right.add(left(Ui.caption("Что показывать")));
+        right.add(tiles(modeTiles, modeTiles.size()));
+
+        // Танец и сцена Клода
+        var danceTiles = new java.util.ArrayList<PreviewTile>();
+
+        for (var dance : ClaudeMascot.DANCES) {
+            var tile = new PreviewTile((w, h, now) -> MainScreen.claude(w, h, dance.id(), settings.claudeScene, now),
+                    dance.title(), 96, 72);
+            tile.setSelected(dance.id().equals(settings.claudeDance));
+            tile.onClick(() -> {
+                settings.claudeDance = dance.id();
+                MainScreen.claudeDance = dance.id();
+                settings.save();
+                danceTiles.forEach(other -> other.setSelected(other == tile));
+            });
+            danceTiles.add(tile);
+        }
+
+        var sceneTiles = new java.util.ArrayList<PreviewTile>();
+
+        for (var scene : ClaudeScenes.SCENES) {
+            var tile = new PreviewTile((w, h, now) -> MainScreen.claude(w, h, settings.claudeDance, scene.id(), now),
+                    scene.title(), 96, 72);
+            tile.setSelected(scene.id().equals(settings.claudeScene));
+            tile.onClick(() -> {
+                settings.claudeScene = scene.id();
+                MainScreen.claudeScene = scene.id();
+                settings.save();
+                sceneTiles.forEach(other -> other.setSelected(other == tile));
+            });
+            sceneTiles.add(tile);
+        }
+
+        claudeOptions.add(Box.createVerticalStrut(6));
+        claudeOptions.add(left(Ui.caption("Танец Клода")));
+        claudeOptions.add(tiles(danceTiles, 5));
+        claudeOptions.add(Box.createVerticalStrut(6));
+        claudeOptions.add(left(Ui.caption("Сцена")));
+        claudeOptions.add(tiles(sceneTiles, 7));
+        claudeOptions.setVisible("claude".equals(settings.screenMode));
+        right.add(claudeOptions);
+
+        // Редкое — под спойлер
+        advanced.setVisible(false);
+        var toggle = Ui.ghost("Настройки экрана…");
+        toggle.addActionListener(e -> {
+            advanced.setVisible(!advanced.isVisible());
+            toggle.setText(advanced.isVisible() ? "Скрыть настройки экрана" : "Настройки экрана…");
+            panel.revalidate();
+        });
+        right.add(Box.createVerticalStrut(6));
+        right.add(left(toggle));
+        right.add(advanced);
+        panel.add(right, BorderLayout.CENTER);
+        return panel;
+    }
+
+    private static String shortTitle(MainScreen.Mode mode) {
+        return switch (mode.id()) {
+            case "processes" -> "Процессы";
+            case "auto" -> "Авто";
+            case "claude" -> "Клод";
+            case "music" -> "Музыка";
+            case "clock" -> "Часы";
+            default -> mode.title();
+        };
+    }
+
+    /** Карточка полосок: что на них сейчас (обе) и переключатель. */
+    private JComponent stripsPanel(CaseScreens.Screen screen, int count) {
+        var panel = Ui.transparent(new BorderLayout(18, 0));
+        var previews = Ui.transparent(null);
+        previews.setLayout(new BoxLayout(previews, BoxLayout.Y_AXIS));
+
+        for (var i = 0; i < Math.max(1, count); i++) {
+            var index = i;
+            previews.add(new PreviewTile((w, h, now) -> {
+                var frames = stripLastFrames;
+                return index < frames.size() ? frames.get(index) : ActivityBoard.idle(w, h, now);
+            }, null, 240, 68));
+        }
+
+        panel.add(previews, BorderLayout.WEST);
+        var right = Ui.transparent(null);
+        right.setLayout(new BoxLayout(right, BoxLayout.Y_AXIS));
+        var head = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        head.add(heading("Полоски TURZX" + (count > 1 ? " × " + count : "")));
+        head.add(Ui.muted("640×180", 12f));
+        var stripLive = new Ui.Switch(settings.stripBoard);
+        stripLive.onChange(on -> {
+            settings.stripBoard = on;
+            settings.save();
+
+            if (on) {
+                startStrips();
+            } else {
+                stopStrips();
+                stripStatus.setText("");
+            }
+        });
+        head.add(stripLive);
+        head.add(Ui.muted("включены", 12.5f));
+        head.setAlignmentX(LEFT_ALIGNMENT);
+        right.add(head);
+        right.add(Box.createVerticalStrut(6));
+        right.add(left(Ui.muted("<html><body style='width:420px'>Играет музыка в Spotify — на свободной полоске обложка, "
+                + "трек и время. Запущена игра — её иконка и сколько играешь. В простое — живой цифровой фон.</body></html>",
+                12.5f)));
+        var test = Ui.ghost("Тестовая картинка");
+        test.addActionListener(e -> {
+            test.setEnabled(false);
+            worker.submit(() -> {
+                var resume = pauseBoard();
+                var problem = CaseScreens.show(screen, CaseScreens.testPattern(CaseScreens.STRIP_WIDTH,
+                        CaseScreens.STRIP_HEIGHT, screen.id()), Math.max(30, glow.brightness));
+
+                if (resume) {
+                    new Timer(15_000, t -> startBoard()) {{ setRepeats(false); }}.start();
+                }
+
+                SwingUtilities.invokeLater(() -> {
+                    test.setEnabled(true);
+                    toast.accept(problem == null ? "Тестовая картинка ушла на полоску." : "Полоска: " + problem);
+                });
+            });
+        });
+        right.add(Box.createVerticalStrut(6));
+        right.add(left(test));
+        panel.add(right, BorderLayout.CENTER);
+        return panel;
     }
 
     /** Переключатель «как в Windows». */
@@ -4534,6 +4672,8 @@ final class DevicePage extends Ui.Card {
         boolean screenAuto;
         /** Что показывает большой экран корпуса (MainScreen.MODES). */
         String screenMode = "processes";
+        String claudeDance = "auto";
+        String claudeScene = "auto";
         /** Подставка сна: включена ли и сколько граммов — «фигурка стоит». */
         boolean standOn = true;
         int standThreshold = 250;
@@ -4627,6 +4767,8 @@ final class DevicePage extends Ui.Card {
                     settings.screenBoard = Boolean.TRUE.equals(json.get("screenBoard"));
                     settings.moreOpen = Boolean.TRUE.equals(json.get("moreOpen"));
                     settings.screenAuto = Boolean.TRUE.equals(json.get("screenAuto"));
+                    settings.claudeDance = json.get("claudeDance") instanceof String dance ? dance : "auto";
+                    settings.claudeScene = json.get("claudeScene") instanceof String scene ? scene : "auto";
                     settings.screenMode = json.get("screenMode") instanceof String mode
                             && MainScreen.MODES.stream().anyMatch(m -> m.id().equals(mode)) ? mode : "processes";
                     settings.standOn = !Boolean.FALSE.equals(json.get("standOn"));
@@ -4748,6 +4890,8 @@ final class DevicePage extends Ui.Card {
             json.put("moreOpen", moreOpen);
             json.put("screenAuto", screenAuto);
             json.put("screenMode", screenMode);
+            json.put("claudeDance", claudeDance);
+            json.put("claudeScene", claudeScene);
             json.put("standOn", standOn);
             json.put("standThreshold", standThreshold);
             json.put("standMagnet", standMagnet);

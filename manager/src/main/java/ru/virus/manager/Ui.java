@@ -358,4 +358,72 @@ final class Ui {
     static void hand(AbstractButton button) {
         button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
     }
+
+    /**
+     * FlowLayout, который переносит строки и честно сообщает свою высоту —
+     * плитки в меню не уезжают за край, а встают в несколько рядов.
+     */
+    static final class WrapLayout extends java.awt.FlowLayout {
+
+        WrapLayout(int align, int hgap, int vgap) {
+            super(align, hgap, vgap);
+        }
+
+        @Override
+        public java.awt.Dimension preferredLayoutSize(java.awt.Container target) {
+            return size(target, true);
+        }
+
+        @Override
+        public java.awt.Dimension minimumLayoutSize(java.awt.Container target) {
+            var size = size(target, false);
+            size.width -= getHgap() + 1;
+            return size;
+        }
+
+        private java.awt.Dimension size(java.awt.Container target, boolean preferred) {
+            synchronized (target.getTreeLock()) {
+                var width = target.getSize().width;
+                var container = target;
+
+                while (width == 0 && container.getParent() != null) {
+                    container = container.getParent();
+                    width = container.getSize().width;
+                }
+
+                if (width == 0) {
+                    width = Integer.MAX_VALUE;
+                }
+
+                var insets = target.getInsets();
+                var max = width - insets.left - insets.right - getHgap() * 2;
+                var result = new java.awt.Dimension(0, 0);
+                var rowW = 0;
+                var rowH = 0;
+
+                for (var component : target.getComponents()) {
+                    if (!component.isVisible()) {
+                        continue;
+                    }
+
+                    var d = preferred ? component.getPreferredSize() : component.getMinimumSize();
+
+                    if (rowW + d.width > max && rowW > 0) {
+                        result.width = Math.max(result.width, rowW);
+                        result.height += rowH + getVgap();
+                        rowW = 0;
+                        rowH = 0;
+                    }
+
+                    rowW += d.width + getHgap();
+                    rowH = Math.max(rowH, d.height);
+                }
+
+                result.width = Math.max(result.width, rowW);
+                result.height += rowH + getVgap() * 2 + insets.top + insets.bottom;
+                result.width += insets.left + insets.right + getHgap() * 2;
+                return result;
+            }
+        }
+    }
 }

@@ -490,6 +490,42 @@ final class CaseScreens {
         return descriptor.idVendor() == VID_TURZX || descriptor.idVendor() == VID_TURZX_R;
     }
 
+    /**
+     * Какие экраны TURZX сейчас подключены — только по описанию USB, не
+     * открывая их (работающему табло это не мешает). Для автопоиска: список
+     * поменялся — значит, экран подключили или отключили.
+     */
+    static List<String> present() {
+        var found = new ArrayList<String>();
+        var context = new Context();
+
+        if (LibUsb.init(context) != LibUsb.SUCCESS) {
+            return found;
+        }
+
+        var list = new DeviceList();
+
+        try {
+            if (LibUsb.getDeviceList(context, list) >= 0) {
+                for (var device : list) {
+                    var descriptor = new DeviceDescriptor();
+
+                    if (LibUsb.getDeviceDescriptor(device, descriptor) == LibUsb.SUCCESS && ours(descriptor)) {
+                        found.add(String.format("%04x:%04x@%d.%d", descriptor.idVendor() & 0xffff,
+                                descriptor.idProduct() & 0xffff, LibUsb.getBusNumber(device), LibUsb.getDeviceAddress(device)));
+                    }
+                }
+
+                LibUsb.freeDeviceList(list, true);
+            }
+        } finally {
+            LibUsb.exit(context);
+        }
+
+        found.sort(String::compareTo);
+        return found;
+    }
+
     /** Найти экраны и поздороваться с каждым. Программу JONSBO на это время надо закрыть. */
     static List<Screen> probe() {
         var found = new ArrayList<Screen>();

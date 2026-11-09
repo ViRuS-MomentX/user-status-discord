@@ -73,15 +73,23 @@ final class MainScreen {
         return image;
     }
 
+    /** Какой танец и какая сцена у Клода — из настроек приложения. */
+    static volatile String claudeDance = "auto";
+    static volatile String claudeScene = "auto";
+
     /** Клод на своей сцене: танцует не переставая и каждые 10 секунд машет ручкой. */
     static BufferedImage claude(int width, int height, long now) {
+        return claude(width, height, claudeDance, claudeScene, now);
+    }
+
+    static BufferedImage claude(int width, int height, String dance, String scene, long now) {
         var image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
         var g = image.createGraphics();
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        ClaudeMascot.stage(g, width, height, now);
+        ClaudeScenes.draw(g, scene, width, height, now);
         var u = Math.min(width / 56.0, height / 40.0);
-        // Ножки стоят на танцполе
-        ClaudeMascot.draw(g, width / 2.0, height * 0.8 - 8 * u, u, now);
+        // Ножки стоят на полу сцены
+        ClaudeMascot.dance(g, dance, width / 2.0, height * ClaudeScenes.FLOOR + u, u, width, now);
         g.dispose();
         return image;
     }

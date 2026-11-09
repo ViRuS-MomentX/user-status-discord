@@ -88,6 +88,27 @@ final class Supervisor {
             Files.write(memo, seeded, StandardCharsets.UTF_8);
         }
 
+        // Тестовый сервер и ИИ-бот — только руками (попросил хозяин): без автозапуска и без «как было»
+        if (!seeded.contains("manual-server-ai")) {
+            for (var id : List.of(ServerTools.ID, "parody")) {
+                var process = processes.get(id);
+
+                if (process != null) {
+                    var spec = process.spec();
+
+                    if (spec.autostart()) {
+                        process.update(new ProcessSpec(spec.id(), spec.name(), spec.command(), spec.workdir(), false,
+                                spec.restart(), spec.supervised()));
+                    }
+
+                    manual(id, true);
+                }
+            }
+
+            seeded.add("manual-server-ai");
+            Files.write(memo, seeded, StandardCharsets.UTF_8);
+        }
+
         // Telegram-прокси Flowseal (TG WS Proxy): Telegram при zapret ходит через него
         if (!seeded.contains(TgProxy.ID)) {
             if (!processes.containsKey(TgProxy.ID)) {
@@ -141,7 +162,29 @@ final class Supervisor {
             existing.update(spec);
         }
 
+        // Сняли «Запускать вместе с V.I.R.U.S.» — не поднимаем его и по памяти о прошлом запуске
+        manual(spec.id(), !spec.autostart());
         save();
+    }
+
+    /** Процессы, которые запускаются только руками: ни автозапуск, ни «как было до выключения». */
+    static final String MANUAL = "manual-start.txt";
+
+    java.util.Set<String> manual() {
+        try {
+            var file = home.resolve(MANUAL);
+            return Files.isRegularFile(file) ? new HashSet<>(Files.readAllLines(file, StandardCharsets.UTF_8)) : new HashSet<>();
+        } catch (IOException e) {
+            return new HashSet<>();
+        }
+    }
+
+    private void manual(String id, boolean only) throws IOException {
+        var set = manual();
+
+        if (only ? set.add(id) : set.remove(id)) {
+            Files.write(home.resolve(MANUAL), set.stream().sorted().toList(), StandardCharsets.UTF_8);
+        }
     }
 
     synchronized void remove(String id) throws IOException {
@@ -170,8 +213,12 @@ final class Supervisor {
             // нет списка — запустим только автозапуск
         }
 
-        // И то, что работало, когда V.I.R.U.S. закрылся в прошлый раз (выключение компьютера тоже)
-        again.addAll(lastRunning());
+        // И то, что работало, когда V.I.R.U.S. закрылся в прошлый раз (выключение компьютера тоже),
+        // кроме тех, что запускаются только руками
+        var last = lastRunning();
+        last.removeAll(manual());
+        // (после обновления V.I.R.U.S. — resume.txt — поднимается всё, что работало, и «ручные» тоже)
+        again.addAll(last);
 
         for (var process : all()) {
             if (process.spec().autostart() || again.contains(process.spec().id())) {

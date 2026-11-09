@@ -27,7 +27,7 @@ final class MainScreen {
     static final List<Mode> MODES = List.of(
             new Mode("processes", "Фоновые процессы"),
             new Mode("auto", "Авто: музыка, когда играет, иначе процессы"),
-            new Mode("claude", "Клод танцует и здоровается"),
+            new Mode("claude", "Клод танцует"),
             new Mode("music", "Музыка из Spotify"),
             new Mode("clock", "Часы и система"));
 
@@ -41,7 +41,7 @@ final class MainScreen {
     /** Как часто обновлять кадр: Клоду нужна плавность, часам — раз в секунду. */
     static long period(String mode, MediaNow.Track track) {
         return switch (mode) {
-            case "claude" -> 90;
+            case "claude" -> 80;
             case "music", "auto" -> track != null ? 400 : 1000;
             default -> 1000;
         };
@@ -73,20 +73,32 @@ final class MainScreen {
         return image;
     }
 
-    /** Клод посередине: танцует, каждые 10 секунд машет и говорит «Привет!». */
+    /** Клод на своей сцене: танцует не переставая и каждые 10 секунд машет ручкой. */
     static BufferedImage claude(int width, int height, long now) {
         var image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-        var g = start(image, now);
-        var u = Math.min(width / 46.0, height / 34.0);
-        // На приветствии Клод чуть левее — справа нужно место облачку
-        var cx = width / 2.0 - (ClaudeMascot.greeting(now) ? u * 4 : 0);
-        var cy = height / 2.0 + u * 2;
-        ClaudeMascot.glow(g, cx, cy, Math.min(width, height) * 0.45);
-        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
-        ClaudeMascot.draw(g, cx, cy, u, now, width);
+        var g = image.createGraphics();
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        ScreenBoard.brackets(g, 8, 8, width - 16, height - 16, ClaudeMascot.BODY);
-        return finish(image, g);
+        ClaudeMascot.stage(g, width, height, now);
+        var u = Math.min(width / 56.0, height / 40.0);
+        // Ножки стоят на танцполе
+        ClaudeMascot.draw(g, width / 2.0, height * 0.8 - 8 * u, u, now);
+        g.dispose();
+        return image;
+    }
+
+    /** Приветствие при запуске поверх кадра (кроме режима «Клод» — там он и так на сцене). */
+    static boolean intro(BufferedImage frame, String mode, long elapsed, long now) {
+        if ("claude".equals(mode)) {
+            return false;
+        }
+
+        var g = frame.createGraphics();
+
+        try {
+            return ClaudeMascot.intro(g, frame.getWidth(), frame.getHeight(), elapsed, now);
+        } finally {
+            g.dispose();
+        }
     }
 
     /** Часы крупно, дата, загрузка процессора и температура видеокарты. */

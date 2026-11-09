@@ -2359,6 +2359,29 @@ final class DevicePage extends Ui.Card {
 
                     var idle = activities.size() >= sessions.size() ? null
                             : ActivityBoard.idle(CaseScreens.STRIP_WIDTH, CaseScreens.STRIP_HEIGHT, now);
+
+                    // Приветствие Клода при запуске — на каждой полоске поверх её картинки
+                    if (stripIntroAt == 0) {
+                        stripIntroAt = now;
+                    }
+
+                    if (now - stripIntroAt < ClaudeMascot.INTRO_MS) {
+                        var greeted = new java.util.ArrayList<java.awt.image.BufferedImage>();
+
+                        for (var i = 0; i < sessions.size(); i++) {
+                            var base = i < activities.size() ? activities.get(i) : idle;
+                            var copy = new java.awt.image.BufferedImage(base.getWidth(), base.getHeight(),
+                                    java.awt.image.BufferedImage.TYPE_INT_RGB);
+                            var cg = copy.createGraphics();
+                            cg.drawImage(base, 0, 0, null);
+                            ClaudeMascot.intro(cg, copy.getWidth(), copy.getHeight(), now - stripIntroAt, now);
+                            cg.dispose();
+                            greeted.add(copy);
+                        }
+
+                        activities = greeted;
+                        idle = null;
+                    }
                     // Полоски — параллельно, ~20 кадров в секунду, как у JONSBO
                     var sends = new java.util.ArrayList<java.util.concurrent.Future<Boolean>>();
 
@@ -2422,6 +2445,9 @@ final class DevicePage extends Ui.Card {
 
     private final JLabel stripStatus = Ui.muted("", 12.5f);
     private int stripMisses;
+    /** Когда Клод начал здороваться на экранах (один раз за запуск V.I.R.U.S.). */
+    private long mainIntroAt;
+    private long stripIntroAt;
 
     /** Подставка сна на Arduino. */
     private final JLabel standStatus = Ui.muted("", 12.5f);
@@ -2628,6 +2654,13 @@ final class DevicePage extends Ui.Card {
                     var frame = MainScreen.render(settings.screenMode, turned ? height : width, turned ? width : height,
                             processes, track, glow.cpu(), now);
 
+                    // При запуске V.I.R.U.S. Клод появляется, машет и спрыгивает вниз — один раз
+                    if (mainIntroAt == 0) {
+                        mainIntroAt = now;
+                    }
+
+                    var introducing = MainScreen.intro(frame, settings.screenMode, now - mainIntroAt, now);
+
                     // Один пропущенный кадр — не повод переподключаться: экран иногда отвечает с опозданием
                     if (session.show(CaseScreens.rotate(frame, settings.screenRotation))) {
                         misses = 0;
@@ -2635,7 +2668,8 @@ final class DevicePage extends Ui.Card {
                         throw new IOException("экран перестал принимать кадры");
                     }
 
-                    Thread.sleep(Math.max(5, MainScreen.period(settings.screenMode, track) - (System.currentTimeMillis() - now)));
+                    var period = introducing ? 60 : MainScreen.period(settings.screenMode, track);
+                    Thread.sleep(Math.max(5, period - (System.currentTimeMillis() - now)));
                 }
             } catch (InterruptedException e) {
                 return;

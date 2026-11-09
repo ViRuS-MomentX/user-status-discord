@@ -1249,7 +1249,11 @@ class DeviceTest {
         }
 
         assertTrue(ClaudeMascot.greeting(10_500) && !ClaudeMascot.greeting(15_000), "машет первые 2,6 с каждых 10 с");
-        assertEquals(90, MainScreen.period("claude", null), "Клоду — плавно");
+        assertEquals(80, MainScreen.period("claude", null), "Клоду — плавно");
+        var frame = MainScreen.render("processes", 640, 480, java.util.Map.of(), null, 0, 0);
+        assertTrue(MainScreen.intro(frame, "processes", 1000, 1000), "при запуске Клод здоровается");
+        assertFalse(MainScreen.intro(frame, "processes", ClaudeMascot.INTRO_MS + 1, 1000), "и больше не появляется");
+        assertFalse(MainScreen.intro(frame, "claude", 1000, 1000), "в режиме «Клод» он и так на сцене");
         assertEquals("Фоновые процессы", MainScreen.title("нет такого"));
     }
 

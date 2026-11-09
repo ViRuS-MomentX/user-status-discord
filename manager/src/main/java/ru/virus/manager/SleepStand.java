@@ -202,8 +202,8 @@ final class SleepStand {
                     while (wanted && (line = in.readLine()) != null) {
                         line = line.strip();
 
-                        if (line.equals("none")) {
-                            status.accept("Подставка: плата не найдена — подключи Arduino с прошивкой V.I.R.U.S. по USB.");
+                        if (line.equals("none") || line.startsWith("none ")) {
+                            status.accept(notFound(line.substring(4).strip()));
                         } else if (line.equals("lost")) {
                             status.accept("Подставка: связь с платой пропала — переподключаюсь…");
                         } else if (line.startsWith("port ")) {
@@ -246,6 +246,19 @@ final class SleepStand {
         }
     }
 
+    /** Понятная причина, почему плату не нашли, по заметкам помощника о каждом порте. */
+    static String notFound(String notes) {
+        if (notes.isBlank()) {
+            return "Подставка: плата не найдена — подключи Arduino с прошивкой V.I.R.U.S. по USB.";
+        }
+
+        var hint = notes.contains("не открылся") ? " Порт занят: закрой Arduino IDE, монитор порта и другие программы."
+                : notes.contains("пишет не то") ? " На плате другая прошивка — нажми «Прошить плату»."
+                : notes.contains("молчит") ? " Плата молчит: нажми «Прошить плату» или переткни её в другой USB-порт."
+                : " Воткни плату по USB; если не видна — нужен драйвер CH340.";
+        return "Подставка: плата не найдена (" + notes + ")." + hint;
+    }
+
     String port() {
         return port;
     }
@@ -265,24 +278,44 @@ final class SleepStand {
                   Get-CimInstance Win32_PnPEntity -ErrorAction Stop | Where-Object { $_.Name -match '\\((COM\\d+)\\)' -and $_.Name -match 'CH34|CP210|FTDI|Arduino|USB.SERIAL|USB Serial' } |
                     ForEach-Object { if ($_.Name -match '\\((COM\\d+)\\)') { $likely += $Matches[1] } }
                 } catch { }
-                $order = @($likely) + @($names | Where-Object { $likely -notcontains $_ })
+                # Есть похожие на Arduino (CH340, CP210x, FTDI) — только их; нет — все порты
+                $order = if ($likely.Count -gt 0) { @($likely | Sort-Object -Unique) } else { @($names) }
                 $found = $null
+                $notes = @()
+                if ($order.Count -eq 0) { $notes += 'COM-портов нет' }
                 foreach ($name in $order) {
-                  try {
-                    $p = New-Object System.IO.Ports.SerialPort $name, 115200
-                    $p.ReadTimeout = 300
-                    $p.DtrEnable = $true
-                    $p.NewLine = "`n"
-                    $p.Open()
-                    $end = (Get-Date).AddSeconds(6)
-                    while ((Get-Date) -lt $end) {
-                      try { if ($p.ReadLine() -match 'VIRUS-STAND') { $found = $p; break } } catch { }
+                  # Сперва слушаем, не перезапуская плату (прошитая и так пишет 5 раз в секунду),
+                  # потом — с перезапуском (DTR), если молчит
+                  foreach ($reset in $false, $true) {
+                    $heard = ''
+                    try {
+                      $p = New-Object System.IO.Ports.SerialPort $name, 115200
+                      $p.ReadTimeout = 300
+                      $p.DtrEnable = $reset
+                      $p.NewLine = "`n"
+                      $p.Open()
+                      $end = (Get-Date).AddSeconds($(if ($reset) { 7 } else { 2 }))
+                      while ((Get-Date) -lt $end) {
+                        try {
+                          $line = $p.ReadLine()
+                          if ($line -match 'VIRUS-STAND') { $found = $p; break }
+                          if ($line.Trim()) { $heard = $line.Trim() }
+                        } catch { }
+                      }
+                      if ($found) { break }
+                      $p.Close()
+                      if ($reset) {
+                        if ($heard) { $notes += "$name — пишет не то: «" + $heard.Substring(0, [Math]::Min(30, $heard.Length)) + "» (не та прошивка?)" }
+                        else { $notes += "$name — молчит" }
+                      }
+                    } catch {
+                      $notes += "$name — не открылся: " + $_.Exception.Message
+                      break
                     }
-                    if ($found) { break }
-                    $p.Close()
-                  } catch { }
+                  }
+                  if ($found) { break }
                 }
-                if (-not $found) { [Console]::WriteLine('none'); exit }
+                if (-not $found) { [Console]::WriteLine('none ' + ($notes -join '; ')); exit }
                 [Console]::WriteLine('port ' + $found.PortName)
                 $reader = New-Object System.IO.StreamReader([Console]::OpenStandardInput())
                 $next = $reader.ReadLineAsync()

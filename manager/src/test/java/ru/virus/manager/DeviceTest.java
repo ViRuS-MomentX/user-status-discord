@@ -1218,6 +1218,15 @@ class DeviceTest {
     }
 
     @Test
+    void standNotFoundExplainsWhy() {
+        assertTrue(SleepStand.notFound("").contains("подключи Arduino"));
+        assertTrue(SleepStand.notFound("COM5 — молчит").contains("Прошить плату"));
+        assertTrue(SleepStand.notFound("COM5 — не открылся: Access denied").contains("занят"));
+        assertTrue(SleepStand.notFound("COM5 — пишет не то: «hello»").contains("другая прошивка"));
+        assertTrue(SleepStand.script().contains("$reset"), "сперва слушаем без перезапуска платы");
+    }
+
+    @Test
     void sleepStandFallsAsleepOnlyWhenFigurineStaysPut() {
         assertEquals(new SleepStand.Reading(412, false), SleepStand.parse("VIRUS-STAND 412 0"));
         assertEquals(new SleepStand.Reading(-1, true), SleepStand.parse("VIRUS-STAND -1 1\r"));

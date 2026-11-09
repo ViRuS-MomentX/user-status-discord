@@ -115,6 +115,8 @@ final class SleepStand {
     }
 
     private volatile Process helper;
+    /** Плата была на связи в этом заходе помощника. */
+    private volatile boolean connected;
 
     synchronized void start() {
         wanted = true;
@@ -202,8 +204,11 @@ final class SleepStand {
 
                         if (line.equals("none")) {
                             status.accept("Подставка: плата не найдена — подключи Arduino с прошивкой V.I.R.U.S. по USB.");
+                        } else if (line.equals("lost")) {
+                            status.accept("Подставка: связь с платой пропала — переподключаюсь…");
                         } else if (line.startsWith("port ")) {
                             port = line.substring(5);
+                            connected = true;
                             status.accept("Подставка: плата на " + port + ".");
                         } else if (line.startsWith("VIRUS-STAND-OK")) {
                             status.accept(line.contains("tare") ? "Подставка: «пусто» запомнено." : "Подставка: весы откалиброваны.");
@@ -232,7 +237,9 @@ final class SleepStand {
             }
 
             try {
-                Thread.sleep(30_000);
+                // Плату только что видели — ищем снова почти сразу; не было — раз в 10 секунд
+                Thread.sleep(connected ? 2_000 : 10_000);
+                connected = false;
             } catch (InterruptedException e) {
                 return;
             }

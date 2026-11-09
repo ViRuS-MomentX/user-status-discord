@@ -41,7 +41,7 @@ final class MainScreen {
     /** Как часто обновлять кадр: Клоду нужна плавность, часам — раз в секунду. */
     static long period(String mode, MediaNow.Track track) {
         return switch (mode) {
-            case "claude" -> 80;
+            case "claude" -> 100;
             case "music", "auto" -> track != null ? 400 : 1000;
             default -> 1000;
         };

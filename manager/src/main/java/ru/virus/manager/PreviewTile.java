@@ -31,7 +31,7 @@ final class PreviewTile extends JComponent {
     }
 
     private static final Set<PreviewTile> ALL = Collections.synchronizedSet(Collections.newSetFromMap(new WeakHashMap<>()));
-    private static final Timer TIMER = new Timer(120, e -> {
+    private static final Timer TIMER = new Timer(200, e -> {
         PreviewTile[] tiles;
 
         synchronized (ALL) {
@@ -52,6 +52,9 @@ final class PreviewTile extends JComponent {
     private boolean selected;
     private boolean hover;
     private Runnable onClick;
+    /** Последняя нарисованная миниатюра: чаще раза в 200 мс не перерисовываем — меню не грузит компьютер. */
+    private BufferedImage cached;
+    private long cachedAt;
 
     PreviewTile(Picture picture, String caption, int width, int height) {
         this.picture = picture;
@@ -108,10 +111,19 @@ final class PreviewTile extends JComponent {
         var y = 4;
         BufferedImage image;
 
-        try {
-            image = picture.render(pictureW, pictureH, System.currentTimeMillis());
-        } catch (RuntimeException e) {
-            image = null;
+        var now = System.currentTimeMillis();
+
+        if (cached != null && now - cachedAt < 180) {
+            image = cached;
+        } else {
+            try {
+                image = picture.render(pictureW, pictureH, now);
+            } catch (RuntimeException e) {
+                image = null;
+            }
+
+            cached = image;
+            cachedAt = now;
         }
 
         // Рамка «экрана»: тёмная, со скруглением, как у настоящего дисплея

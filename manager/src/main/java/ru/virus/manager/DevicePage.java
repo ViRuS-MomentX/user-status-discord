@@ -2107,7 +2107,9 @@ final class DevicePage extends Ui.Card {
             worker.submit(() -> detectScreens(true));
             new Timer(15_000, e -> worker.submit(() -> {
                 try {
-                    if (!CaseScreens.present().equals(screensPresent)) {
+                    // Сравниваем только какие экраны (без USB-адресов): переподключение полоски
+                    // меняет её адрес, и это не повод перезапускать все экраны
+                    if (!models(CaseScreens.present()).equals(models(screensPresent))) {
                         detectScreens(false);
                     }
                 } catch (Throwable ignored) {
@@ -2117,6 +2119,10 @@ final class DevicePage extends Ui.Card {
         }
 
         return inner("Экраны корпуса", body);
+    }
+
+    private static List<String> models(List<String> present) {
+        return present.stream().map(id -> id.split("@")[0]).sorted().toList();
     }
 
     /** Найти экраны, показать их в окне и (при запуске или если работало) запустить табло. */
@@ -2439,6 +2445,10 @@ final class DevicePage extends Ui.Card {
 
     private final JLabel stripStatus = Ui.muted("", 12.5f);
     private int stripMisses;
+    /** Сколько экран разбирает кадр (среднее), и счёт кадров для строки состояния. */
+    private long sendCost;
+    private int boardFrames;
+    private long boardCountedAt;
     /** Когда Клод начал здороваться на экранах (один раз за запуск V.I.R.U.S.). */
     private long mainIntroAt;
     private long stripIntroAt;
@@ -2657,13 +2667,33 @@ final class DevicePage extends Ui.Card {
                     mainLastFrame = frame;
 
                     // Один пропущенный кадр — не повод переподключаться: экран иногда отвечает с опозданием
+                    var sentAt = System.currentTimeMillis();
+
                     if (session.show(CaseScreens.rotate(frame, settings.screenRotation))) {
                         misses = 0;
                     } else if (++misses >= 3) {
                         throw new IOException("экран перестал принимать кадры");
                     }
 
-                    var period = introducing ? 60 : MainScreen.period(settings.screenMode, track);
+                    // Экран сам разбирает картинку: не шлём быстрее, чем он успевает, — иначе кадры
+                    // копятся в очереди, экран «долго грузит», а общий USB тормозит и полоски
+                    var cost = System.currentTimeMillis() - sentAt;
+                    sendCost = sendCost == 0 ? cost : (sendCost * 3 + cost) / 4;
+                    var period = Math.max(introducing ? 60 : MainScreen.period(settings.screenMode, track), sendCost * 3 / 2);
+                    boardFrames++;
+
+                    if (boardCountedAt == 0) {
+                        boardCountedAt = now;
+                    }
+
+                    if (now - boardCountedAt >= 3000) {
+                        var fps = boardFrames * 1000.0 / Math.max(1, now - boardCountedAt);
+                        var text = String.format("Табло: работает на экране %s, %.1f кадр/с.", settings.screenId, fps);
+                        SwingUtilities.invokeLater(() -> boardStatus.setText(text));
+                        boardFrames = 0;
+                        boardCountedAt = now;
+                    }
+
                     Thread.sleep(Math.max(5, period - (System.currentTimeMillis() - now)));
                 }
             } catch (InterruptedException e) {

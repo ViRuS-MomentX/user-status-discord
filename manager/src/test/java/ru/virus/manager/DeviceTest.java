@@ -1264,7 +1264,10 @@ class DeviceTest {
         }
 
         assertEquals("classic", ClaudeMascot.current("auto", 0));
-        assertEquals("floss", ClaudeMascot.current("auto", ClaudeMascot.DANCE_TURN_MS));
+        assertEquals("kwikflip", ClaudeMascot.current("auto", ClaudeMascot.DANCE_TURN_MS));
+        assertEquals(0, ClaudeMascot.kwikFrame(0), "Kwik Flip начинается с пинка");
+        assertEquals(1, ClaudeMascot.kwikFrame(3 * ClaudeMascot.KWIK_FRAME_MS), "главная поза держится три кадра");
+        assertEquals(0, ClaudeMascot.kwikFrame(20 * ClaudeMascot.KWIK_FRAME_MS), "цикл — 20 кадров при 12 к/с");
         assertEquals("dab", ClaudeMascot.current("dab", 123));
         assertEquals("stage", ClaudeScenes.current("auto", 0));
     }

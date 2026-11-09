@@ -36,6 +36,7 @@ final class ClaudeMascot {
     static final List<Dance> DANCES = List.of(
             new Dance("auto", "Все по очереди"),
             new Dance("classic", "Классика"),
+            new Dance("kwikflip", "Kwik Flip"),
             new Dance("floss", "Флосс"),
             new Dance("gangnam", "Гангнам стайл"),
             new Dance("dab", "Дэб"),
@@ -50,7 +51,11 @@ final class ClaudeMascot {
      * смотрит и видны ли глаза (спиной к нам — нет).
      */
     record Pose(double dx, double dy, double sx, double sy, List<double[]> parts, boolean blink, double look,
-                boolean eyes) {
+                boolean eyes, double tilt) {
+
+        Pose(double dx, double dy, double sx, double sy, List<double[]> parts, boolean blink, double look, boolean eyes) {
+            this(dx, dy, sx, sy, parts, blink, look, eyes, 0);
+        }
     }
 
     private ClaudeMascot() {
@@ -98,6 +103,9 @@ final class ClaudeMascot {
         var waving = greeting(now);
 
         switch (dance) {
+            case "kwikflip" -> {
+                return kwikFlip(now);
+            }
             case "floss" -> {
                 var s = Math.sin(t * Math.PI * 2 * 1.6);
                 var parts = torsoAndLegs(legs(0, 0));
@@ -229,6 +237,151 @@ final class ClaudeMascot {
         }
     }
 
+    /**
+     * Kwik Flip (AVGN Dance) — покадрово, как в оригинале: 12 кадров в
+     * секунду, 11 поз, главные (1, 4, 7, 10) держатся по три кадра. Пинок
+     * влево с руками влево, центр, пинок вправо, центр, рука прямо вверх,
+     * согнутая рука над головой, снова вверх.
+     */
+    static final int[] KWIK_HOLD = {3, 1, 1, 3, 1, 1, 3, 1, 2, 3, 1};
+    static final long KWIK_FRAME_MS = 1000 / 12;
+
+    /** Номер позы Kwik Flip (0…10) в момент now. */
+    static int kwikFrame(long now) {
+        var total = 0;
+
+        for (var hold : KWIK_HOLD) {
+            total += hold;
+        }
+
+        var frame = (int) Math.floorMod(now / KWIK_FRAME_MS, (long) total);
+
+        for (var i = 0; i < KWIK_HOLD.length; i++) {
+            if (frame < KWIK_HOLD[i]) {
+                return i;
+            }
+
+            frame -= KWIK_HOLD[i];
+        }
+
+        return 0;
+    }
+
+    /** Зеркально по тельцу (18 клеток): левое становится правым. */
+    private static double[] mirror(double[] part) {
+        var copy = part.clone();
+        copy[0] = 18 - part[0] - part[2];
+        return copy;
+    }
+
+    private static Pose mirror(Pose pose) {
+        var parts = new ArrayList<double[]>();
+        pose.parts().forEach(part -> parts.add(mirror(part)));
+        return new Pose(-pose.dx(), pose.dy(), pose.sx(), pose.sy(), parts, pose.blink(), -pose.look(), pose.eyes(),
+                -pose.tilt());
+    }
+
+    static Pose kwikFlip(long now) {
+        var blink = Math.floorMod(now, 4300L) < 140;
+        var parts = new ArrayList<double[]>();
+        parts.add(new double[] {0, 0, 18, 12});
+
+        switch (kwikFrame(now)) {
+            case 0, 3 -> {
+                // Пинок в сторону: ножка вытянута по диагонали, обе руки выброшены туда же вниз,
+                // корпус откинут назад — от пинка
+                parts.add(new double[] {12, 12, 2, 3});
+                parts.add(new double[] {15, 12, 2, 3});
+                parts.add(new double[] {4, 12, 2, 3});
+                parts.add(new double[] {0.5, 12, 2.5, 2});
+                parts.add(new double[] {-1.5, 13, 2.5, 2});
+                parts.add(new double[] {-3.5, 14, 2.5, 1.5});
+                parts.add(new double[] {-5.5, 14.5, 2.5, 1.5});
+                // Задняя рука (цветом тела) и передняя (темнее) — параллельно, к ножке
+                parts.add(new double[] {-2, 6, 3, 2});
+                parts.add(new double[] {-4.5, 7.5, 3, 2});
+                parts.add(new double[] {-7, 9, 3, 2});
+                parts.add(new double[] {-1, 9, 3, 2, 1});
+                parts.add(new double[] {-3.5, 10.5, 3, 2, 1});
+                parts.add(new double[] {-6, 12, 3, 2, 1});
+                var pose = new Pose(1.0, -0.4, 1, 1, parts, blink, -1, true, 4);
+                return kwikFrame(now) == 3 ? mirror(pose) : pose;
+            }
+            case 1, 4 -> {
+                // Ножка возвращается, руки подтянуты к бедру
+                parts.add(new double[] {4, 12, 2, 3});
+                parts.add(new double[] {12, 12, 2, 3});
+                parts.add(new double[] {15, 12, 2, 3});
+                parts.add(new double[] {0, 12, 2, 1.5});
+                parts.add(new double[] {-1, 13, 2, 2});
+                parts.add(new double[] {-3, 7, 3, 3});
+                parts.add(new double[] {-1, 9.5, 3, 2});
+                parts.add(new double[] {1, 8, 6, 2, 1});
+                var pose = new Pose(0.6, 0, 1, 1, parts, blink, -1, true, 2);
+                return kwikFrame(now) == 4 ? mirror(pose) : pose;
+            }
+            case 2, 5 -> {
+                // Лицом к нам, ножки чуть врозь, одна рука в сторону горизонтально, другая опущена
+                parts.add(new double[] {0, 12, 2, 3});
+                parts.add(new double[] {4, 12, 2, 3});
+                parts.add(new double[] {12, 12, 2, 3});
+                parts.add(new double[] {16, 12, 2, 3});
+                parts.add(new double[] {-3, 6, 3, 2});
+                parts.add(new double[] {-7, 6, 4, 2});
+                parts.add(new double[] {18, 7, 2, 5});
+                var pose = new Pose(0, 0, 1, 1, parts, blink, 0, true);
+                return kwikFrame(now) == 5 ? mirror(pose) : pose;
+            }
+            case 6, 9 -> {
+                // Рука прямо вверх, указательный «в небо», вторая — кулачок у бедра; стоит ровно
+                legsStraight(parts);
+                parts.add(new double[] {18, -8, 2, 13});
+                parts.add(new double[] {18.5, -10, 1, 2});
+                parts.add(new double[] {-2, 7, 2, 4});
+                parts.add(new double[] {1, 9.5, 3, 2, 1});
+                return new Pose(0, -0.5, 1, 1, parts, blink, 0, true);
+            }
+            case 7 -> {
+                // Рука чуть согнута
+                legsStraight(parts);
+                parts.add(new double[] {18, -4, 2, 9});
+                parts.add(new double[] {19, -7, 2, 3});
+                parts.add(new double[] {-2, 7, 2, 4});
+                parts.add(new double[] {1, 9.5, 3, 2, 1});
+                return new Pose(0, -0.3, 1, 1, parts, blink, 0, true);
+            }
+            case 8 -> {
+                // Рука согнута над головой кулачком, вторая — кулачок у груди; коленки чуть согнуты
+                parts.add(new double[] {1, 12, 2, 3});
+                parts.add(new double[] {4, 12, 2, 3});
+                parts.add(new double[] {12, 12, 2, 3});
+                parts.add(new double[] {15, 12, 2, 3});
+                // плечо → вверх, предплечье над головой (с зазором — чтобы не казалось шапкой), кулачок
+                parts.add(new double[] {18, -2, 2, 7});
+                parts.add(new double[] {14, -4, 6, 2});
+                parts.add(new double[] {11.5, -5.5, 3, 3});
+                parts.add(new double[] {-3, 6, 3, 2});
+                parts.add(new double[] {2, 6.5, 7, 2, 1});
+                return new Pose(0, 0.3, 1.02, 0.96, parts, blink, -0.5, true, -3);
+            }
+            default -> {
+                // Рука опускается
+                legsStraight(parts);
+                parts.add(new double[] {18, -2, 2, 7});
+                parts.add(new double[] {-2, 7, 2, 4});
+                parts.add(new double[] {1, 9.5, 3, 2, 1});
+                return new Pose(0, 0, 1, 1, parts, blink, 0, true);
+            }
+        }
+    }
+
+    private static void legsStraight(List<double[]> parts) {
+        parts.add(new double[] {4, 12, 2, 3});
+        parts.add(new double[] {6.5, 12, 2, 3});
+        parts.add(new double[] {9.5, 12, 2, 3});
+        parts.add(new double[] {12, 12, 2, 3});
+    }
+
     /** Нарисовать позу: (cx, floor) — где стоят ступни посередине, u — размер клетки в точках. */
     static void draw(Graphics2D g, double cx, double floor, double u, Pose pose) {
         var lift = Math.max(0, -pose.dy());
@@ -241,6 +394,7 @@ final class ClaudeMascot {
         var c = (Graphics2D) g.create();
         c.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
         c.translate(footX, floor + pose.dy() * u);
+        c.rotate(Math.toRadians(pose.tilt()));
         c.scale(u * pose.sx(), u * pose.sy());
         c.translate(-9, -15);
         c.setColor(BODY);

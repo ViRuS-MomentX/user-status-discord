@@ -114,6 +114,8 @@ final class SleepStand {
         return placed;
     }
 
+    private volatile Process helper;
+
     synchronized void start() {
         wanted = true;
 
@@ -138,6 +140,19 @@ final class SleepStand {
         synchronized (this) {
             stop();
             running = thread;
+        }
+
+        // Помощник мог как раз перебирать порты и держать порт платы открытым — закрываем его сразу
+        var process = helper;
+
+        if (process != null) {
+            process.destroyForcibly();
+
+            try {
+                process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
 
         if (running != null) {
@@ -176,6 +191,7 @@ final class SleepStand {
                 var encoded = java.util.Base64.getEncoder().encodeToString(script().getBytes(StandardCharsets.UTF_16LE));
                 process = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
                         "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded).redirectErrorStream(true).start();
+                helper = process;
                 input = new OutputStreamWriter(process.getOutputStream(), StandardCharsets.US_ASCII);
 
                 try (var in = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {

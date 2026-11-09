@@ -157,6 +157,17 @@ final class StandFlasher {
                     + "(в поиске: «CH340 driver»), установи его и переткни плату.";
         }
 
+        if (line.startsWith("busy ")) {
+            var parts = line.substring(5).split(" ", 2);
+            return "Подставка: порт " + parts[0] + " занят другой программой (Arduino IDE, монитор порта, Cura и т. п.) — "
+                    + "закрой её и нажми ещё раз." + (parts.length > 1 ? " (" + parts[1] + ")" : "");
+        }
+
+        if (line.equals("pressreset")) {
+            return "Подставка: плата не перезапустилась сама. Нажимай маленькую кнопку RESET на плате раз в 2–3 секунды, "
+                    + "пока не начнётся запись (до 30 секунд).";
+        }
+
         if (line.startsWith("try ")) {
             return "Подставка: пробую плату на " + line.substring(4) + "…";
         }
@@ -183,8 +194,8 @@ final class StandFlasher {
         }
 
         if (line.equals("nosync")) {
-            return "Подставка: плата не ответила загрузчиком. Закрой Arduino IDE и другие программы, которые могут "
-                    + "держать порт, переткни плату и нажми ещё раз.";
+            return "Подставка: плата не ответила загрузчиком. Переткни её в другой USB-порт (лучше сзади, без "
+                    + "удлинителя и хаба), проверь, что кабель не только для зарядки, и нажми ещё раз.";
         }
 
         if (line.startsWith("fail ")) {
@@ -219,33 +230,58 @@ final class StandFlasher {
                   if ((Rd $p) -ne 0x10) { return $null }
                   return ,$d
                 }
-                function Sync($name, $baud) {
-                  $p = New-Object System.IO.Ports.SerialPort $name, $baud
-                  $p.ReadTimeout = 150
-                  $p.DtrEnable = $false
-                  $p.RtsEnable = $false
-                  $p.Open()
-                  Start-Sleep -Milliseconds 250
-                  $p.DtrEnable = $true
-                  $p.RtsEnable = $true
-                  Start-Sleep -Milliseconds 50
-                  $p.DiscardInBuffer()
-                  for ($i = 0; $i -lt 12; $i++) {
-                    $r = Cmd $p ([byte[]](0x30, 0x20)) 0
-                    if ($null -ne $r) { $p.DiscardInBuffer(); $r = Cmd $p ([byte[]](0x30, 0x20)) 0; if ($null -ne $r) { return $p } }
-                    $p.DiscardInBuffer()
+                function OpenPort($name, $baud, $reset) {
+                  $q = New-Object System.IO.Ports.SerialPort $name, $baud
+                  $q.ReadTimeout = 100
+                  $q.DtrEnable = $false
+                  $q.RtsEnable = $false
+                  $q.Open()
+                  if ($reset) {
+                    # Перезапуск платы, как у Arduino IDE: DTR/RTS выкл → 250 мс → вкл
+                    Start-Sleep -Milliseconds 250
+                    $q.DtrEnable = $true
+                    $q.RtsEnable = $true
+                    Start-Sleep -Milliseconds 50
                   }
-                  $p.Close()
-                  return $null
+                  $q.DiscardInBuffer()
+                  return $q
                 }
+                function TrySync($q, $ms) {
+                  $end = (Get-Date).AddMilliseconds($ms)
+                  while ((Get-Date) -lt $end) {
+                    $r = Cmd $q ([byte[]](0x30, 0x20)) 0
+                    if ($null -ne $r) {
+                      $q.DiscardInBuffer()
+                      if ($null -ne (Cmd $q ([byte[]](0x30, 0x20)) 0)) { return $true }
+                    }
+                    $q.DiscardInBuffer()
+                  }
+                  return $false
+                }
+                $ports = @($likely | Sort-Object -Unique)
                 $p = $null
-                foreach ($name in ($likely | Sort-Object -Unique)) {
+                # 1) Сами перезапускаем плату (новый загрузчик 115200, старый у китайских Nano — 57600)
+                foreach ($name in $ports) {
                   foreach ($baud in 115200, 57600) {
                     [Console]::WriteLine("try $name")
-                    try { $p = Sync $name $baud } catch { $p = $null }
-                    if ($p) { break }
+                    try { $q = OpenPort $name $baud $true } catch { [Console]::WriteLine("busy $name " + $_.Exception.Message); continue }
+                    if (TrySync $q 2000) { $p = $q; break }
+                    $q.Close()
                   }
                   if ($p) { break }
+                }
+                # 2) Не вышло — просим нажимать кнопку RESET на плате, сами слушаем по очереди обе скорости
+                if (-not $p) {
+                  [Console]::WriteLine('pressreset')
+                  :wait for ($round = 0; $round -lt 3; $round++) {
+                    foreach ($name in $ports) {
+                      foreach ($baud in 57600, 115200) {
+                        try { $q = OpenPort $name $baud $false } catch { continue }
+                        if (TrySync $q 5000) { $p = $q; break wait }
+                        $q.Close()
+                      }
+                    }
+                  }
                 }
                 if (-not $p) { [Console]::WriteLine('nosync'); exit }
                 try {

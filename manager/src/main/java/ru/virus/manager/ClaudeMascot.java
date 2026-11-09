@@ -282,105 +282,68 @@ final class ClaudeMascot {
     }
 
     /**
-     * Поднимает руку в небо правая рука Клода (на экране — слева от зрителя),
-     * левая в это время — кулачком у груди.
+     * Руки по очереди: сперва правая Клода (на экране слева) — вверх у лица
+     * и к груди, потом то же левая. Ножки почти не двигаются: в пинке
+     * работает одна крайняя, остальные стоят.
      */
     static Pose kwikFlip(long now) {
-        var pose = kwikRaw(now);
-        return kwikFrame(now) >= 6 ? mirror(pose) : pose;
+        var frame = kwikFrame(now);
+        var pose = kwikRaw(frame, Math.floorMod(now, 4300L) < 140);
+        return frame == 6 || frame == 7 ? mirror(pose) : pose;
     }
 
-    private static Pose kwikRaw(long now) {
-        var blink = Math.floorMod(now, 4300L) < 140;
+    private static Pose kwikRaw(int frame, boolean blink) {
         var parts = new ArrayList<double[]>();
         parts.add(new double[] {0, 0, 18, 12});
 
-        switch (kwikFrame(now)) {
+        switch (frame) {
             case 0, 3 -> {
-                // Пинок в сторону: ножка вытянута по диагонали, обе руки выброшены туда же вниз,
-                // корпус откинут назад — от пинка
+                // Пинок в сторону: одна крайняя ножка выброшена по диагонали, ручка — чуть вперёд-вниз
+                parts.add(new double[] {4, 12, 2, 3});
                 parts.add(new double[] {12, 12, 2, 3});
                 parts.add(new double[] {15, 12, 2, 3});
-                parts.add(new double[] {4, 12, 2, 3});
-                parts.add(new double[] {0.5, 12, 2.5, 2});
-                parts.add(new double[] {-1.5, 13, 2.5, 2});
-                parts.add(new double[] {-3.5, 14, 2.5, 1.5});
-                parts.add(new double[] {-5.5, 14.5, 2.5, 1.5});
-                // Задняя рука (цветом тела) и передняя (темнее) — параллельно, к ножке
-                parts.add(new double[] {-2, 6.5, 2.5, 2});
-                parts.add(new double[] {-4, 8, 2.5, 2});
-                parts.add(new double[] {-1, 9, 2.5, 2, 1});
-                parts.add(new double[] {-3, 10.5, 2.5, 2, 1});
-                var pose = new Pose(1.0, -0.4, 1, 1, parts, blink, -1, true, 4);
-                return kwikFrame(now) == 3 ? mirror(pose) : pose;
+                parts.add(new double[] {-0.5, 11.5, 2.5, 2});
+                parts.add(new double[] {-2.5, 13, 2.5, 1.5});
+                parts.add(new double[] {18, 6, 3, 3});
+                parts.add(new double[] {-2, 8, 3, 2, 1});
+                var pose = new Pose(0.6, -0.3, 1, 1, parts, blink, -1, true, 3);
+                return frame == 3 ? mirror(pose) : pose;
             }
             case 1, 4 -> {
-                // Ножка возвращается, руки подтянуты к бедру
+                // Ножка возвращается
+                parts.add(new double[] {1, 12, 2, 2});
                 parts.add(new double[] {4, 12, 2, 3});
                 parts.add(new double[] {12, 12, 2, 3});
                 parts.add(new double[] {15, 12, 2, 3});
-                parts.add(new double[] {0, 12, 2, 1.5});
-                parts.add(new double[] {-1, 13, 2, 2});
-                parts.add(new double[] {-2.5, 7, 2.5, 3});
-                parts.add(new double[] {1, 8, 4, 2, 1});
-                var pose = new Pose(0.6, 0, 1, 1, parts, blink, -1, true, 2);
-                return kwikFrame(now) == 4 ? mirror(pose) : pose;
+                parts.add(new double[] {-3, 6, 3, 3});
+                parts.add(new double[] {18, 6, 3, 3});
+                var pose = new Pose(0.3, 0, 1, 1, parts, blink, -1, true, 1);
+                return frame == 4 ? mirror(pose) : pose;
             }
-            case 2, 5 -> {
-                // Лицом к нам, ножки чуть врозь, одна рука в сторону горизонтально, другая опущена
-                parts.add(new double[] {0, 12, 2, 3});
-                parts.add(new double[] {4, 12, 2, 3});
-                parts.add(new double[] {12, 12, 2, 3});
-                parts.add(new double[] {16, 12, 2, 3});
-                parts.add(new double[] {-4.5, 6, 4.5, 2});
-                parts.add(new double[] {18, 7, 2, 4});
-                var pose = new Pose(0, 0, 1, 1, parts, blink, 0, true);
-                return kwikFrame(now) == 5 ? mirror(pose) : pose;
+            case 2, 5, 8 -> {
+                // Лицом к нам, ручки по бокам; на восьмом кадре — короткое пружинистое приседание
+                parts.addAll(List.of(legs(0, 0)));
+                parts.add(new double[] {-3, 6, 3, 3});
+                parts.add(new double[] {18, 6, 3, 3});
+                return frame == 8 ? new Pose(0, 0.3, 1.03, 0.95, parts, blink, 0, true)
+                        : new Pose(0, 0, 1, 1, parts, blink, 0, true);
             }
             case 6, 9 -> {
-                // Рука прямо вверх, указательный «в небо», вторая — кулачок у бедра; стоит ровно
-                legsStraight(parts);
-                parts.add(new double[] {18, -3, 2, 9});
-                parts.add(new double[] {18.5, -5, 1, 2});
-                parts.add(new double[] {1, 8, 3, 2, 1});
-                return new Pose(0, -0.5, 1, 1, parts, blink, 0, true);
-            }
-            case 7 -> {
-                // Рука чуть согнута
-                legsStraight(parts);
-                parts.add(new double[] {18, -1, 2, 7});
-                parts.add(new double[] {19, -3, 2, 2});
-                parts.add(new double[] {1, 8, 3, 2, 1});
-                return new Pose(0, -0.3, 1, 1, parts, blink, 0, true);
-            }
-            case 8 -> {
-                // Рука согнута над головой кулачком, вторая — кулачок у груди; коленки чуть согнуты
-                parts.add(new double[] {1, 12, 2, 3});
-                parts.add(new double[] {4, 12, 2, 3});
-                parts.add(new double[] {12, 12, 2, 3});
-                parts.add(new double[] {15, 12, 2, 3});
-                // плечо → вверх, предплечье над головой (с зазором — чтобы не казалось шапкой), кулачок
-                parts.add(new double[] {18, 0, 2, 6});
-                parts.add(new double[] {14.5, -2, 5.5, 2});
-                parts.add(new double[] {12.5, -3, 2.5, 2.5});
-                parts.add(new double[] {1, 6.5, 4, 2, 1});
-                return new Pose(0, 0.3, 1.02, 0.96, parts, blink, -0.5, true, -3);
+                // Ручка поднята у лица, ладошкой вверх; вторая — по боку
+                parts.addAll(List.of(legs(0, 0)));
+                parts.add(new double[] {-3, 6, 3, 3});
+                parts.add(new double[] {18, 3, 2, 4});
+                parts.add(new double[] {19, -1, 2, 4});
+                return new Pose(0, -0.3, 1, 1, parts, blink, 0.5, true);
             }
             default -> {
-                // Рука опускается
-                legsStraight(parts);
-                parts.add(new double[] {18, 2, 2, 5});
-                parts.add(new double[] {1, 8, 3, 2, 1});
+                // Та же ручка — кулачком к груди
+                parts.addAll(List.of(legs(0, 0)));
+                parts.add(new double[] {-3, 6, 3, 3});
+                parts.add(new double[] {13, 7, 4, 2, 1});
                 return new Pose(0, 0, 1, 1, parts, blink, 0, true);
             }
         }
-    }
-
-    private static void legsStraight(List<double[]> parts) {
-        parts.add(new double[] {4, 12, 2, 3});
-        parts.add(new double[] {6.5, 12, 2, 3});
-        parts.add(new double[] {9.5, 12, 2, 3});
-        parts.add(new double[] {12, 12, 2, 3});
     }
 
     /** Нарисовать позу: (cx, floor) — где стоят ступни посередине, u — размер клетки в точках. */

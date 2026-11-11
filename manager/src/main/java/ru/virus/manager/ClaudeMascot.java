@@ -43,7 +43,16 @@ final class ClaudeMascot {
             new Dance("caramell", "Карамельдансен"),
             new Dance("moonwalk", "Лунная походка"),
             new Dance("spin", "Вертушка"),
-            new Dance("squat", "Корточки"));
+            new Dance("squat", "Корточки"),
+            new Dance("macarena", "Макарена"),
+            new Dance("ymca", "Y.M.C.A."),
+            new Dance("robot", "Робот"),
+            new Dance("twist", "Твист"),
+            new Dance("disco", "Диско"),
+            new Dance("jack", "Прыжки «звёздочкой»"),
+            new Dance("headbang", "Рок"),
+            new Dance("armwave", "Волна руками"),
+            new Dance("runningman", "Бегущий человек"));
 
     /**
      * Поза: сдвиг (в клетках, минус — вверх), растяжение вокруг ступней,
@@ -140,6 +149,204 @@ final class ClaudeMascot {
                 }
 
                 return new Pose(Math.sin(t * Math.PI * 2) * 0.8, -hop, 1, 1, parts, blink, 0, true);
+            }
+            case "macarena" -> {
+                // Восемь счётов, как в оригинале: руки вперёд по одной, к груди, к голове, на бёдра — и качнуть бёдрами
+                var step = (int) Math.floorMod(now / 450, 8L);
+                var parts = torsoAndLegs(legs(0, 0));
+                double[] rightOut = {18, 5, 6, 2};
+                double[] rightChest = {8, 6, 8, 2, 1};
+                double[] leftOut = {-6, 5, 6, 2};
+                double[] leftChest = {2, 7.6, 8, 2, 1};
+
+                switch (step) {
+                    case 0 -> {
+                        parts.add(rightOut);
+                        parts.add(new double[] {-3, 6, 3, 3});
+                    }
+                    case 1 -> {
+                        parts.add(rightOut);
+                        parts.add(leftOut);
+                    }
+                    case 2 -> {
+                        parts.add(rightChest);
+                        parts.add(leftOut);
+                    }
+                    case 3 -> {
+                        parts.add(rightChest);
+                        parts.add(leftChest);
+                    }
+                    case 4 -> {
+                        parts.add(new double[] {18, 1, 2, 6});
+                        parts.add(new double[] {15, -1, 4, 2});
+                        parts.add(leftChest);
+                    }
+                    case 5 -> {
+                        parts.add(new double[] {18, 1, 2, 6});
+                        parts.add(new double[] {15, -1, 4, 2});
+                        parts.add(new double[] {-2, 1, 2, 6});
+                        parts.add(new double[] {-1, -1, 4, 2});
+                    }
+                    default -> {
+                        parts.add(new double[] {-2, 8, 2, 3});
+                        parts.add(new double[] {18, 8, 2, 3});
+                    }
+                }
+
+                var hips = step == 6 ? 1.2 : step == 7 ? -1.2 : 0;
+                return new Pose(hips, step == 7 ? -0.8 : 0, 1, 1, parts, blink, hips == 0 ? 0 : Math.signum(hips), true,
+                        hips * 2.5);
+            }
+            case "ymca" -> {
+                // Буквы руками: Y, M, C, A — по 0,6 секунды на каждую, с подскоком на смене
+                var phase = Math.floorMod(now, 2400L);
+                var letter = (int) (phase / 600);
+                var parts = torsoAndLegs(legs(0, 0));
+
+                switch (letter) {
+                    case 0 -> {
+                        for (var part : new double[][] {{-3, 3, 3, 2}, {-5, 0, 3, 3}, {-7, -3, 3, 3}}) {
+                            parts.add(part);
+                            parts.add(mirror(part));
+                        }
+                    }
+                    case 1 -> {
+                        // M: локти вверх, кисти опущены на макушку
+                        for (var part : new double[][] {{-3, -4, 2, 10}, {-3, -6, 7, 2}, {3, -6, 2, 5}}) {
+                            parts.add(part);
+                            parts.add(mirror(part));
+                        }
+                    }
+                    case 2 -> {
+                        // C: обе ручки вбок скобкой
+                        parts.add(new double[] {-5, 2, 5, 2});
+                        parts.add(new double[] {-7, -2, 2, 6});
+                        parts.add(new double[] {-7, -4, 5, 2});
+                        parts.add(new double[] {-5, 9, 5, 2});
+                        parts.add(new double[] {-7, 9, 2, 5});
+                        parts.add(new double[] {-7, 13, 4, 2});
+                        parts.add(new double[] {18, 6, 3, 3});
+                    }
+                    default -> {
+                        // A: ручки домиком над головой
+                        for (var part : new double[][] {{0, -3, 3, 3}, {3, -6, 3, 4}, {6, -9, 3, 4}}) {
+                            parts.add(part);
+                            parts.add(mirror(part));
+                        }
+                    }
+                }
+
+                var hop = Math.sin(Math.min(1, (phase % 600) / 300.0) * Math.PI) * 1.2;
+                return new Pose(letter == 2 ? 1.5 : 0, -hop, 1, 1, parts, blink, letter == 2 ? -1 : 0, true, letter == 2 ? 4 : 0);
+            }
+            case "robot" -> {
+                // Рывками: руки под прямым углом, корпус дёргается из стороны в сторону
+                var step = (int) Math.floorMod(now / 400, 4L);
+                var parts = torsoAndLegs(legs(step % 2 == 0 ? 0.6 : 0, step % 2 == 0 ? 0 : 0.6));
+                double[][] up = {{18, 6, 4, 2}, {20, 2, 2, 4}};
+                double[][] down = {{18, 6, 4, 2}, {20, 8, 2, 4}};
+
+                switch (step) {
+                    case 0 -> {
+                        parts.addAll(List.of(up));
+                        parts.add(mirror(down[0]));
+                        parts.add(mirror(down[1]));
+                    }
+                    case 1 -> {
+                        parts.addAll(List.of(down));
+                        parts.add(mirror(up[0]));
+                        parts.add(mirror(up[1]));
+                    }
+                    case 2 -> {
+                        parts.add(new double[] {18, 6, 6, 2});
+                        parts.add(new double[] {-6, 6, 6, 2});
+                    }
+                    default -> {
+                        parts.add(new double[] {19, 6, 2, 6});
+                        parts.add(new double[] {-3, 6, 2, 6});
+                    }
+                }
+
+                var jerk = step == 0 ? 1 : step == 1 ? -1 : 0;
+                return new Pose(jerk * 0.8, 0, 1, 1, parts, false, jerk, true, jerk * 3);
+            }
+            case "twist" -> {
+                // Твист: корпус ходит туда-сюда, ножки по очереди, согнутые ручки — в противоход
+                var s = Math.sin(t * Math.PI * 2 * 1.5);
+                var parts = torsoAndLegs(legs(s > 0 ? 1 : 0, s > 0 ? 0 : 1));
+                parts.add(new double[] {-4, 7 + s * 1.5, 4, 2});
+                parts.add(new double[] {18, 7 - s * 1.5, 4, 2});
+                return new Pose(s * 0.9, Math.abs(s) * 0.5, 1 - Math.abs(s) * 0.06, 1, parts, blink, s, true, s * 7);
+            }
+            case "disco" -> {
+                // «Лихорадка субботнего вечера»: палец в небо — и вниз через себя, рука на бедре
+                var up = Math.floorMod(now / 500, 2L) == 0;
+                var parts = torsoAndLegs(legs(up ? 0 : 0.8, up ? 0.8 : 0));
+                parts.add(new double[] {-2, 8, 2, 3});
+
+                if (up) {
+                    parts.add(new double[] {18, 3, 3, 2});
+                    parts.add(new double[] {20, 0, 3, 3});
+                    parts.add(new double[] {22, -3, 3, 3});
+                    parts.add(new double[] {24, -5, 1.5, 2});
+                } else {
+                    parts.add(new double[] {18, 7, 2, 3});
+                    parts.add(new double[] {6, 9, 12, 2, 1});
+                    parts.add(new double[] {3, 10.5, 4, 2, 1});
+                }
+
+                return new Pose(up ? 0.8 : -0.8, up ? -0.5 : 0, 1, 1, parts, blink, up ? 1 : -1, true, up ? -3 : 3);
+            }
+            case "jack" -> {
+                // Прыжки «звёздочкой»: в прыжке ручки вверх и ножки врозь, на земле — всё вместе
+                var open = Math.floorMod(now / 350, 2L) == 0;
+                var parts = new ArrayList<double[]>();
+                parts.add(new double[] {0, 0, 18, 12});
+
+                if (open) {
+                    for (var part : new double[][] {{-1.5, 12, 2, 3}, {3, 12, 2, 3}, {-3, 3, 3, 3}, {-6, 0, 3, 3}}) {
+                        parts.add(part);
+                        parts.add(mirror(part));
+                    }
+                } else {
+                    parts.addAll(List.of(legs(0, 0)));
+                    parts.add(new double[] {-2, 7, 2, 5});
+                    parts.add(new double[] {18, 7, 2, 5});
+                }
+
+                return new Pose(0, open ? -1.6 : 0, 1, open ? 1 : 0.96, parts, blink, 0, true);
+            }
+            case "headbang" -> {
+                // Рок: «коза» вверх и кивки всем тельцем в такт
+                var s = Math.sin(t * Math.PI * 2 * 2);
+                var nod = Math.max(0, s);
+                var parts = torsoAndLegs(legs(0, 0));
+                parts.add(new double[] {-3, 6, 3, 3});
+                parts.add(new double[] {18, 1, 2, 6});
+                parts.add(new double[] {17.4, -2, 1.2, 3});
+                parts.add(new double[] {19.6, -2, 1.2, 3});
+                return new Pose(0, 0, 1 + nod * 0.05, 1 - nod * 0.14, parts, blink || nod > 0.6, 0, true, nod * 5);
+            }
+            case "armwave" -> {
+                // Волна: бежит по одной ручке, через тельце — и по другой
+                var p = t * Math.PI * 2 * 0.9;
+                var parts = torsoAndLegs(legs(0, 0));
+
+                for (var i = 0; i < 3; i++) {
+                    parts.add(new double[] {-3 - i * 3, 6 + Math.sin(p + (i + 1) * 0.9) * 3, 3, 2.5});
+                    parts.add(new double[] {18 + i * 3, 6 + Math.sin(p - (i + 1) * 0.9 - 1.2) * 3, 3, 2.5});
+                }
+
+                return new Pose(0, Math.sin(p - 0.6) * 0.6, 1, 1, parts, blink, Math.sin(p) > 0 ? -1 : 1, true);
+            }
+            case "runningman" -> {
+                // Бег на месте: ножки высоко по очереди, ручки работают как при беге
+                var step = (int) Math.floorMod(now / 250, 2L);
+                var parts = torsoAndLegs(legs(step == 0 ? 2 : 0, step == 0 ? 0 : 2));
+                parts.add(new double[] {-3, step == 0 ? 4 : 8, 3, 3});
+                parts.add(new double[] {18, step == 0 ? 8 : 4, 3, 3});
+                var hop = Math.abs(Math.sin(t * Math.PI * 4)) * 0.9;
+                return new Pose(Math.sin(t * Math.PI) * 0.6, -hop, 1, 1, parts, blink, 1, true, 3);
             }
             case "dab" -> {
                 var phase = Math.floorMod(now, 1400L);

@@ -51,6 +51,14 @@ final class ModeTile extends JToggleButton {
     private final int mode;
     private final SignalRgb.Live live;
     private boolean hover;
+    /** Название режима под «лентой» — чтобы не гадать по узору. */
+    private String caption = "";
+
+    void setCaption(String text) {
+        caption = text == null ? "" : text;
+        setPreferredSize(new Dimension(150, caption.isEmpty() ? 62 : 80));
+        repaint();
+    }
 
     ModeTile(int mode, SignalRgb.Live live) {
         this.mode = mode;
@@ -104,11 +112,12 @@ final class ModeTile extends JToggleButton {
         var g = (Graphics2D) graphics.create();
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         var w = getWidth();
-        var h = getHeight();
+        var full = getHeight();
+        var h = caption.isEmpty() ? full : full - 18;
         var selected = isSelected();
 
         g.setColor(selected ? Theme.RAISED : Theme.CARD_SOLID);
-        g.fillRoundRect(0, 0, w - 1, h - 1, 12, 12);
+        g.fillRoundRect(0, 0, w - 1, full - 1, 12, 12);
 
         // Режим идёт в своём темпе, как на устройствах: скорость из настроек
         var t = (System.nanoTime() - START) / 1e9 * Math.max(1, Math.min(100, live.speed)) / 50.0;
@@ -132,10 +141,24 @@ final class ModeTile extends JToggleButton {
             }
         }
 
+        if (!caption.isEmpty()) {
+            g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            g.setFont(Theme.ui.deriveFont(selected ? java.awt.Font.BOLD : java.awt.Font.PLAIN, 11.5f));
+            g.setColor(selected ? Theme.ACCENT : hover ? Theme.TEXT : Theme.MUTED);
+            var metrics = g.getFontMetrics();
+            var text = caption;
+
+            while (metrics.stringWidth(text) > w - 12 && text.length() > 4) {
+                text = text.substring(0, text.length() - 2) + "…";
+            }
+
+            g.drawString(text, (w - metrics.stringWidth(text)) / 2f, full - 9);
+        }
+
         if (selected || hover) {
             g.setStroke(new BasicStroke(selected ? 2f : 1f));
             g.setColor(selected ? Theme.ACCENT : Theme.LINE_2);
-            g.drawRoundRect(1, 1, w - 3, h - 3, 12, 12);
+            g.drawRoundRect(1, 1, w - 3, full - 3, 12, 12);
         }
 
         g.dispose();

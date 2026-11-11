@@ -63,6 +63,8 @@ final class DevicePage extends Ui.Card {
     private final CardLayout tabs = new CardLayout();
     private final JPanel body = Ui.transparent(tabs);
 
+    private final java.util.prefs.Preferences prefs = java.util.prefs.Preferences.userNodeForPackage(MainWindow.class);
+
     // Обзор
     private final JPanel facts = new Ui.FitWidth();
     private final Meter cpu = new Meter();
@@ -245,12 +247,13 @@ final class DevicePage extends Ui.Card {
         setBorder(BorderFactory.createEmptyBorder(20, 22, 20, 22));
         Ui.rippleThrough(this, background);
 
-        add(header(), BorderLayout.NORTH);
         body.add(overview(), "overview");
 
         if (LIGHTING) {
-            body.add(customization(), "custom");
+            customization();
         }
+
+        add(header(), BorderLayout.NORTH);
 
         add(body, BorderLayout.CENTER);
 
@@ -308,19 +311,29 @@ final class DevicePage extends Ui.Card {
     private JComponent header() {
         var titles = Ui.transparent(new BorderLayout(0, 4));
         titles.add(Ui.label("Устройство", Theme.ui.deriveFont(Font.BOLD, 22f), Theme.TEXT), BorderLayout.NORTH);
-        titles.add(Ui.muted(LIGHTING ? "Компьютер, интернет, связь с Discord и Telegram — и подсветка."
+        titles.add(Ui.muted(LIGHTING ? "Компьютер, подсветка, экраны и подставка."
                         : "Компьютер, интернет и связь с Discord и Telegram.", 13f),
                 BorderLayout.CENTER);
 
         var group = new ButtonGroup();
         var chips = Ui.transparent(new FlowLayout(FlowLayout.RIGHT, 6, 0));
 
-        for (var tab : List.of(Map.entry("overview", "Обзор"), Map.entry("custom", "Кастомизация"))) {
+        // Каждому делу — своя вкладка: не надо листать длинную страницу в поисках экранов или подставки
+        var remembered = prefs.get("device-tab", "overview");
+        var known = List.of("overview", "light", "screens", "stand", "extras");
+        var first = LIGHTING && known.contains(remembered) ? remembered : "overview";
+        tabs.show(body, first);
+
+        for (var tab : List.of(Map.entry("overview", "Обзор"), Map.entry("light", "Подсветка"),
+                Map.entry("screens", "Экраны"), Map.entry("stand", "Подставка сна"), Map.entry("extras", "Лампы и микрофон"))) {
             var chip = new JToggleButton(tab.getValue());
             chip.putClientProperty("JButton.buttonType", "roundRect");
             chip.setFocusable(false);
-            chip.setSelected(tab.getKey().equals("overview"));
-            chip.addActionListener(e -> tabs.show(body, tab.getKey()));
+            chip.setSelected(tab.getKey().equals(first));
+            chip.addActionListener(e -> {
+                tabs.show(body, tab.getKey());
+                prefs.put("device-tab", tab.getKey());
+            });
             Ui.hand(chip);
             group.add(chip);
             chips.add(chip);
@@ -410,7 +423,7 @@ final class DevicePage extends Ui.Card {
         return grid;
     }
 
-    private JComponent customization() {
+    private void customization() {
         // OpenRGB: цвет для всех и по устройствам
         var connect = Ui.button("Подключиться");
         connect.setIcon(Icons.of(Icons.Kind.RESTART, Theme.TEXT));
@@ -523,14 +536,19 @@ final class DevicePage extends Ui.Card {
                 + "из OpenRGB — закрой её, если красишь отсюда.", 12.5f), BorderLayout.SOUTH);
         var vendors = inner("Программы производителей", vendorBody);
 
-        // Карточек стало много — страница прокручивается, а не сплющивает их
-        devicesScroll.setPreferredSize(new Dimension(10, 200));
+        devicesScroll.setPreferredSize(new Dimension(10, 260));
+        body.add(tabPage(signalCard(), rgb), "light");
+        body.add(tabPage(screensCard()), "screens");
+        body.add(tabPage(standCard()), "stand");
+        body.add(tabPage(inner("Лампы и микрофон", extras)), "extras");
+    }
+
+    /** Страница вкладки: карточки столбиком, прокручивается, если не влезли. */
+    private static JComponent tabPage(JComponent... cards) {
         var page = new Ui.FitWidth();
         page.setLayout(new BoxLayout(page, BoxLayout.Y_AXIS));
 
-        var lighting = signalCard();
-
-        for (var card : List.of(lighting, inner("Лампы и микрофон", extras), standCard(), rgb, screensCard())) {
+        for (var card : cards) {
             card.setAlignmentX(LEFT_ALIGNMENT);
             page.add(card);
             page.add(Box.createVerticalStrut(14));
@@ -686,12 +704,13 @@ final class DevicePage extends Ui.Card {
         // Режимы V.I.R.U.S.
         preview = new GlowPreview(glow);
         var group = new ButtonGroup();
-        // Режимы — живые кнопки без подписей: каждая играет свой режим на маленькой «ленте»
+        // Режимы — живые кнопки: каждая играет свой режим на маленькой «ленте», под ней — название
         modeTiles.setLayout(new GridLayout(0, 6, 8, 8));
 
         for (var id : MODE_GROUPS.values().stream().flatMap(List::stream).toList()) {
             var mode = SignalRgb.mode(id);
             var tile = new ModeTile(id, glow);
+            tile.setCaption(mode.name());
             tile.setToolTipText("<html><body style='width:240px'><b>" + mode.name() + "</b><br>"
                     + SignalRgb.describe(id) + "</body></html>");
             tile.setSelected(mode.id() == glow.mode);
@@ -2456,6 +2475,7 @@ final class DevicePage extends Ui.Card {
     /** Подставка сна на Arduino. */
     private final JLabel standStatus = Ui.muted("", 12.5f);
     private final JLabel standReading = Ui.muted("", 12.5f);
+    private final StandGauge standGauge = new StandGauge();
     private final SleepStand stand = new SleepStand(text -> SwingUtilities.invokeLater(() -> standStatus.setText(text)));
 
     SleepStand stand() {
@@ -2499,6 +2519,8 @@ final class DevicePage extends Ui.Card {
         var row = Ui.transparent(new FlowLayout(FlowLayout.LEFT, 8, 0));
         row.add(on);
         row.add(Ui.muted("фигурка на подставке — процессы, подсветка, экраны и мониторы гаснут; убрал — всё возвращается", 12.5f));
+        stack.add(left(standGauge));
+        stack.add(Box.createVerticalStrut(10));
         stack.add(left(row));
         stack.add(Box.createVerticalStrut(8));
 
@@ -2572,6 +2594,8 @@ final class DevicePage extends Ui.Card {
 
         new Timer(1000, e -> {
             var reading = stand.last();
+            standGauge.set(settings.standOn, !stand.port().isBlank(), reading, stand.asleep(), settings.standMagnet,
+                    settings.standThreshold);
 
             if (reading != null && !stand.port().isBlank()) {
                 standReading.setText((reading.magnet() >= 0 ? "магнит: " + reading.magnet() + " · " : "")
@@ -3523,7 +3547,41 @@ final class DevicePage extends Ui.Card {
         toast.accept("Список скопирован — пришли его, и я добавлю твои устройства.");
     }
 
-    private static JComponent inner(String title, JComponent content) {
+    /** Строка сводки для «Главной»: что это, что с ним сейчас и всё ли хорошо (null — выключено). */
+    record Glance(String title, String text, Boolean good) {
+    }
+
+    /** Коротко: подсветка, экраны, подставка, музыка — для «Главной». */
+    List<Glance> glance() {
+        var list = new ArrayList<Glance>();
+
+        if (!LIGHTING) {
+            return list;
+        }
+
+        list.add(settings.allDark ? new Glance("Подсветка", "всё погашено", null)
+                : new Glance("Подсветка", signalOn.isOn() ? "включена" : "выключена", signalOn.isOn() ? Boolean.TRUE : null));
+        list.add(settings.screenBoard && !settings.allDark
+                ? new Glance("Большой экран", MainScreen.title(settings.screenMode), board != null && board.isAlive())
+                : new Glance("Большой экран", "выключен", null));
+        list.add(settings.stripBoard && !settings.allDark
+                ? new Glance("Полоски", strips != null && strips.isAlive() ? "музыка, игра и фон" : "не запущены",
+                        strips != null && strips.isAlive())
+                : new Glance("Полоски", "выключены", null));
+        list.add(!settings.standOn ? new Glance("Подставка сна", "выключена", null)
+                : stand.port().isBlank() ? new Glance("Подставка сна", "плата не найдена", Boolean.FALSE)
+                : new Glance("Подставка сна", stand.asleep() ? "фигурка стоит — компьютер спит" : "на связи (" + stand.port() + ")",
+                        Boolean.TRUE));
+        var track = media.now();
+
+        if (track != null) {
+            list.add(new Glance("Играет", (track.artist().isBlank() ? "" : track.artist() + " — ") + track.title(), Boolean.TRUE));
+        }
+
+        return list;
+    }
+
+    static JComponent inner(String title, JComponent content) {
         var card = new Ui.Card(new BorderLayout(0, 12), INNER);
         card.setBorder(BorderFactory.createEmptyBorder(14, 16, 14, 16));
         card.add(Ui.caption(title), BorderLayout.NORTH);

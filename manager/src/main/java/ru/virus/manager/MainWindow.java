@@ -56,7 +56,10 @@ final class MainWindow extends JFrame {
     private final MatrixBackground background = new MatrixBackground();
     private final JPanel processList = Ui.transparent(null);
     private final Map<String, ProcessRow> rows = new LinkedHashMap<>();
+    private final TaskStore tasksStore;
     private final ProcessPage processPage;
+    private final HomePage homePage;
+    private final NavRow homeRow;
     private final ConfigPage configPage;
     private final TasksPage tasksPage;
     private final NavRow tasksRow;
@@ -89,6 +92,7 @@ final class MainWindow extends JFrame {
                Runnable quit, boolean tray) {
         super(Virus.NAME);
         this.supervisor = supervisor;
+        this.tasksStore = tasks;
         this.config = config;
         this.autostart = autostart;
         this.quit = quit;
@@ -213,6 +217,10 @@ final class MainWindow extends JFrame {
         deviceRow = new NavRow(Icons.of(Icons.Kind.DEVICE, Theme.ACCENT), "Устройство", () -> show("device"));
         repliesRow = new NavRow(Icons.of(Icons.Kind.REPORT, Theme.ACCENT), "Реплики бота", () -> show("replies"));
 
+        homeRow = new NavRow(Icons.of(Icons.Kind.HOME, Theme.ACCENT), "Главная", () -> show(""));
+        homeRow.setSelected(true);
+        side.add(homeRow);
+        side.add(Box.createVerticalStrut(14));
         side.add(indent(Ui.caption("Процессы")));
         side.add(Box.createVerticalStrut(8));
         side.add(processList);
@@ -232,25 +240,21 @@ final class MainWindow extends JFrame {
         side.add(Box.createVerticalStrut(8));
         side.add(configRow);
         side.add(Box.createVerticalGlue());
-        side.add(indent(Ui.label("Кликни по фону — пойдёт волна", Theme.ui.deriveFont(11.5f), Theme.DIM)));
+        side.add(indent(Ui.label("Ctrl+1…5 — разделы", Theme.ui.deriveFont(11.5f), Theme.DIM)));
         side.add(Box.createVerticalStrut(4));
         var version = Ui.label(versionText(AutoUpdate.current()), Theme.mono.deriveFont(11.5f), Theme.DIM);
         version.setToolTipText("Номер сборки на GitHub — по нему видно, обновился ли V.I.R.U.S.");
         side.add(indent(version));
 
-        // Пустая страница — пока ничего не выбрано
-        var empty = new Ui.Card(new BorderLayout());
-        Ui.rippleThrough(empty, background);
-        var mark = Ui.label("V", Theme.mono.deriveFont(Font.BOLD, 110f), Theme.alpha(Theme.ACCENT, 60));
-        mark.setHorizontalAlignment(JLabel.CENTER);
-        var hint = Ui.muted("Выбери процесс слева или открой конфиг ботов.", 15f);
-        hint.setHorizontalAlignment(JLabel.CENTER);
-        var emptyBody = Ui.transparent(new BorderLayout(0, 8));
-        emptyBody.add(mark, BorderLayout.CENTER);
-        emptyBody.add(hint, BorderLayout.SOUTH);
-        empty.add(emptyBody, BorderLayout.CENTER);
+        // Главная — сводка: что работает, что с компьютером, экранами и задачами
+        homePage = new HomePage(background, supervisor, tasks, devicePage, Executors.newCachedThreadPool(runnable -> {
+            var thread = new Thread(runnable, "virus-home");
+            thread.setDaemon(true);
+            return thread;
+        }), this::show,
+                process -> doctor(process).active(System.currentTimeMillis()));
 
-        center.add(empty, "");
+        center.add(homePage, "");
         center.add(processPage, "process");
         center.add(configPage, "config");
         center.add(tasksPage, "tasks");
@@ -294,6 +298,27 @@ final class MainWindow extends JFrame {
                 background.start();
             }
         });
+
+        // Разделы с клавиатуры: Ctrl+1 — главная, Ctrl+2…5 — задачи, реплики, устройство, конфиг
+        var keys = List.of("", "tasks", "replies", "device", "config");
+
+        for (var i = 0; i < keys.size(); i++) {
+            var target = keys.get(i);
+            var stroke = javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_1 + i, java.awt.event.InputEvent.CTRL_DOWN_MASK);
+            getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(stroke, "virus-go-" + i);
+            getRootPane().getActionMap().put("virus-go-" + i, new javax.swing.AbstractAction() {
+                @Override
+                public void actionPerformed(java.awt.event.ActionEvent e) {
+                    show(target);
+                }
+            });
+        }
+
+        homeRow.setToolTipText("Сводка: процессы, компьютер, экраны, задачи (Ctrl+1)");
+        tasksRow.setToolTipText("Задачи и идеи (Ctrl+2)");
+        repliesRow.setToolTipText("Что говорил бот и как это оценить (Ctrl+3)");
+        deviceRow.setToolTipText("Компьютер, подсветка, экраны корпуса, подставка сна (Ctrl+4)");
+        configRow.setToolTipText("Настройки ботов: токены, каналы, участники (Ctrl+5)");
 
         new Timer(1000, e -> refresh()).start();
         new Timer(300, e -> {
@@ -766,6 +791,7 @@ final class MainWindow extends JFrame {
         }
 
         rows.forEach((id, row) -> row.setSelected(view.equals("process:" + id)));
+        homeRow.setSelected(view.isEmpty());
         configRow.setSelected(view.equals("config"));
         tasksRow.setSelected(view.equals("tasks"));
         repliesRow.setSelected(view.equals("replies"));
@@ -836,9 +862,13 @@ final class MainWindow extends JFrame {
 
         if (view.startsWith("process:")) {
             processPage.refresh();
+        } else if (view.isEmpty()) {
+            homePage.refresh();
         }
 
         autostartSwitch.setOn(autostart.isEnabled());
+        var doing = tasksStore.all().stream().filter(task -> task.status == TaskStore.Status.DOING).count();
+        tasksRow.setPill(doing > 0 ? String.valueOf(doing) : "", "Столько задач сейчас в работе");
     }
 
     /** Меню «Подсветка» для трея. */
@@ -1108,7 +1138,8 @@ final class MainWindow extends JFrame {
     void refreshMissing() {
         worker.submit(() -> {
             var missing = configPage.missing();
-            SwingUtilities.invokeLater(() -> configRow.setPill(missing > 0 ? String.valueOf(missing) : ""));
+            SwingUtilities.invokeLater(() -> configRow.setPill(missing > 0 ? String.valueOf(missing) : "",
+                    "Столько настроек из новой версии нет в твоём файле"));
         });
     }
 
@@ -1340,7 +1371,6 @@ final class MainWindow extends JFrame {
             add(new JLabel(icon), BorderLayout.WEST);
             add(Ui.text(text), BorderLayout.CENTER);
             add(pill, BorderLayout.EAST);
-            pill.setToolTipText("Столько настроек из новой версии нет в твоём файле");
 
             addMouseListener(new MouseAdapter() {
                 @Override
@@ -1364,6 +1394,11 @@ final class MainWindow extends JFrame {
 
         void setPill(String text) {
             pill.setText(text);
+        }
+
+        void setPill(String text, String tip) {
+            pill.setText(text);
+            pill.setToolTipText(tip);
         }
 
         void setSelected(boolean selected) {

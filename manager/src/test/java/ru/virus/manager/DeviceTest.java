@@ -1218,6 +1218,15 @@ class DeviceTest {
     }
 
     @Test
+    void standGaugeSaysWhatIsGoingOn() {
+        assertEquals("Подставка выключена", StandGauge.title(false, true, true, false));
+        assertEquals("Плата не на связи", StandGauge.title(true, false, false, false));
+        assertEquals("Подставка свободна", StandGauge.title(true, true, false, false));
+        assertEquals("Фигурка на подставке", StandGauge.title(true, true, true, false));
+        assertTrue(StandGauge.title(true, true, true, true).contains("спит"));
+    }
+
+    @Test
     void standNotFoundExplainsWhy() {
         assertTrue(SleepStand.notFound("").contains("подключи Arduino"));
         assertTrue(SleepStand.notFound("COM5 — молчит").contains("Прошить плату"));

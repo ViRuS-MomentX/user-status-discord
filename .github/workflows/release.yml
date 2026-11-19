@@ -28,9 +28,14 @@ jobs:
           java-version: '25'
           cache: maven
 
-      # Номер сборки едет внутри virus.jar — по нему V.I.R.U.S. понимает, что релиз новее
+      # Номер сборки едет внутри virus.jar — по нему V.I.R.U.S. понимает, что релиз новее.
+      # В virus-app счёт запусков начался с нуля, а у хозяина уже стоит сборка ~120 — прибавляем 200, чтобы номера шли дальше.
       - name: Номер сборки
-        run: echo "${{ github.run_number }}" > manager/src/main/resources/ru/virus/manager/build.txt
+        run: |
+          build=${{ github.run_number }}
+          if [ "${{ github.repository }}" = "ViRuS-MomentX/virus-app" ]; then build=$((build + 200)); fi
+          echo "BUILD=$build" >> "$GITHUB_ENV"
+          echo "$build" > manager/src/main/resources/ru/virus/manager/build.txt
 
       - name: Бот
         working-directory: bot
@@ -52,9 +57,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           git log -1 --format=%B > notes.txt
-          gh release create "build-${{ github.run_number }}" out/V.I.R.U.S.zip \
+          gh release create "build-$BUILD" out/V.I.R.U.S.zip \
             --target "${{ github.sha }}" \
-            --title "V.I.R.U.S. — сборка ${{ github.run_number }}" \
+            --title "V.I.R.U.S. — сборка $BUILD" \
             --notes-file notes.txt --latest
           # Старые сборки не копим: хватит десяти последних
           gh release list --limit 100 --json tagName --jq '.[].tagName' | grep '^build-' | tail -n +11 | \

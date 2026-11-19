@@ -92,6 +92,7 @@ final class MainWindow extends JFrame {
                Runnable quit, boolean tray) {
         super(Virus.NAME);
         this.supervisor = supervisor;
+        this.autoUpdate = new AutoUpdate(AutoUpdate.LATEST, () -> AutoUpdate.readToken(supervisor.home()));
         this.tasksStore = tasks;
         this.config = config;
         this.autostart = autostart;
@@ -408,7 +409,9 @@ final class MainWindow extends JFrame {
         repaint();
     }
 
-    private final AutoUpdate autoUpdate = new AutoUpdate();
+    private final AutoUpdate autoUpdate;
+    /** Про токен обновлений сказали — не повторять каждые 5 минут. */
+    private boolean tokenHinted;
     /** Обновление уже скачано и ждёт, пока можно будет перезапуститься. */
     private volatile int pendingBuild = -1;
     /** О какой отложенной сборке уже сказали — чтобы не повторять каждые 5 минут. */
@@ -448,6 +451,13 @@ final class MainWindow extends JFrame {
             }
 
             SwingUtilities.invokeLater(this::applyUpdate);
+        } catch (AutoUpdate.TokenException e) {
+            System.out.println("[" + Virus.NAME + "] Обновление с GitHub не проверилось: " + e.getMessage());
+
+            if (!tokenHinted) {
+                tokenHinted = true;
+                SwingUtilities.invokeLater(() -> toast("Обновления: " + e.getMessage() + "."));
+            }
         } catch (Exception e) {
             // Нет сети до GitHub — попробуем в следующий раз, без шума
             System.out.println("[" + Virus.NAME + "] Обновление с GitHub не проверилось: " + e.getMessage());
@@ -535,8 +545,10 @@ final class MainWindow extends JFrame {
                     chooseUpdate();
                 });
             } catch (Exception e) {
+                var why = e instanceof AutoUpdate.TokenException ? "Обновления: " + e.getMessage() + ". Пока выбери архив вручную."
+                        : "GitHub не ответил — выбери архив вручную.";
                 SwingUtilities.invokeLater(() -> {
-                    toast("GitHub не ответил — выбери архив вручную.");
+                    toast(why);
                     chooseUpdate();
                 });
             }

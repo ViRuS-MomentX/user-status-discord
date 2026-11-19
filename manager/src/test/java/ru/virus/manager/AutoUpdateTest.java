@@ -13,6 +13,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AutoUpdateTest {
@@ -24,7 +25,7 @@ class AutoUpdateTest {
         server.createContext("/latest", exchange -> {
             var body = ("{\"tag_name\":\"build-42\",\"draft\":false,\"body\":\"Доктор консоли\",\"assets\":["
                     + "{\"name\":\"other.zip\",\"browser_download_url\":\"" + base + "/other\"},"
-                    + "{\"name\":\"V.I.R.U.S.zip\",\"browser_download_url\":\"" + base + "/zip\"}]}")
+                    + "{\"name\":\"V.I.R.U.S.zip\",\"url\":\"" + base + "/zip\",\"browser_download_url\":\"" + base + "/nope\"}]}")
                     .getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
@@ -54,6 +55,64 @@ class AutoUpdateTest {
         } finally {
             server.stop(0);
         }
+    }
+
+    @Test
+    void privateRepositoryNeedsTokenAndKeepsItFromTheFileStorage(@TempDir Path home) throws Exception {
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        var base = "http://127.0.0.1:" + server.getAddress().getPort();
+        var seen = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        server.createContext("/repos/ViRuS-MomentX/virus-app/releases/latest", exchange -> {
+            var auth = exchange.getRequestHeaders().getFirst("Authorization");
+            var body = ("{\"tag_name\":\"build-205\",\"assets\":[{\"name\":\"V.I.R.U.S.zip\",\"url\":\"" + base + "/asset\"}]}")
+                    .getBytes(StandardCharsets.UTF_8);
+
+            if (auth == null) {
+                exchange.sendResponseHeaders(404, -1);
+            } else if (!auth.equals("Bearer good")) {
+                exchange.sendResponseHeaders(401, -1);
+            } else {
+                exchange.sendResponseHeaders(200, body.length);
+                exchange.getResponseBody().write(body);
+            }
+
+            exchange.close();
+        });
+        server.createContext("/asset", exchange -> {
+            seen.add("asset:" + exchange.getRequestHeaders().getFirst("Authorization"));
+            exchange.getResponseHeaders().add("Location", base + "/storage");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        server.createContext("/storage", exchange -> {
+            seen.add("storage:" + exchange.getRequestHeaders().getFirst("Authorization"));
+            var body = "PK-приватный".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            var url = base + "/repos/" + AutoUpdate.REPO + "/releases/latest";
+            assertThrows(AutoUpdate.TokenException.class, () -> new AutoUpdate(url).latest(), "без токена — просим токен");
+            assertThrows(AutoUpdate.TokenException.class, () -> new AutoUpdate(url, () -> "bad").latest(), "чужой токен — тоже");
+
+            var update = new AutoUpdate(url, () -> "good");
+            var release = update.latest();
+            assertEquals(205, release.build());
+            assertEquals("PK-приватный", Files.readString(update.download(release, home)));
+            assertEquals(List.of("asset:Bearer good", "storage:null"), seen, "токен — GitHub, но не хранилищу файлов");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void tokenIsReadFromFileNextToTheJar(@TempDir Path home) throws Exception {
+        assertTrue(AutoUpdate.readToken(home).isEmpty() || System.getenv("VIRUS_UPDATE_TOKEN") != null);
+        Files.writeString(home.resolve(AutoUpdate.TOKEN_FILE), "  github_pat_abc  \n");
+        assertEquals("github_pat_abc", AutoUpdate.readToken(home));
     }
 
     @Test
